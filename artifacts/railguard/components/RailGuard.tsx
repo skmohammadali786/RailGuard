@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
+import { useTheme } from '@/providers/ThemeProvider';
 
 type IconName = React.ComponentProps<typeof Feather>['name'];
 type Tone = 'critical' | 'warning' | 'healthy' | 'info' | 'neutral';
@@ -31,6 +32,9 @@ const iconFor = (name: string): IconName => {
     back: 'arrow-left', chevron: 'chevron-right', close: 'x', check: 'check',
     search: 'search', download: 'download', share: 'share-2', refresh: 'refresh-cw',
     clock: 'clock', trend: 'trending-up', user: 'user', more: 'more-horizontal',
+    play: 'play', plus: 'plus', list: 'list', crosshair: 'crosshair', package: 'package',
+    copy: 'copy', 'check-circle': 'check-circle', maximize: 'maximize', filter: 'filter',
+    sun: 'sun', moon: 'moon', layers: 'layers', clipboard: 'clipboard', upload: 'upload',
   };
   return icons[name] ?? 'circle';
 };
@@ -331,18 +335,59 @@ function DetailScreen({ kind }: { kind: string }) {
     profile: { title: 'E. Chen', subtitle: 'Rail safety lead · Unit 04', icon: 'user', body: 'North corridor access · Last sync 2 minutes ago. Your verification signature is enabled for critical findings.', action: 'Open account settings', next: '/account' },
   };
   const item = config[kind] ?? { title: 'RailGuard', subtitle: 'Field engineering control', icon: 'info', body: 'This module is connected to the RailGuard evidence trail and local field workspace.', action: 'Return to overview', next: '/' };
-  return <><Header title={item.title} subtitle={item.subtitle} icon={item.icon} back /><View style={[styles.featureIcon, { backgroundColor: colors.secondary }]}><Feather name={iconFor(item.icon)} size={26} color={colors.primary} /></View><Text style={[styles.featureBody, { color: colors.foreground }]}>{item.body}</Text><RailCard><View style={[styles.infoRow, { borderBottomColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>SOURCE</Text><Text style={[styles.rowTitle, { color: colors.foreground }]}>Local field record</Text></View><View style={[styles.infoRow, { borderBottomColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>UPDATED</Text><Text style={[styles.rowTitle, { color: colors.foreground }]}>Just now · Unit 04</Text></View></RailCard>{item.action ? <PrimaryButton title={item.action} icon="arrow-right" onPress={() => router.push((item.next ?? '/') as never)} /> : null}</>;
+  const signals: Array<{ label: string; value: string; tone: Tone }> = ({
+    'crack-measurement': [{ label: 'AI ESTIMATE', value: '46 mm', tone: 'warning' }, { label: 'CALIBRATION', value: 'Ready', tone: 'healthy' }, { label: 'SOURCE FRAME', value: '00482', tone: 'info' }],
+    camera: [{ label: 'CAPTURE MODE', value: 'Front camera', tone: 'info' }, { label: 'RESOLUTION', value: '4K / 30 fps', tone: 'healthy' }, { label: 'GPS LINK', value: 'Active', tone: 'healthy' }],
+    'object-detection': [{ label: 'FASTENERS', value: '18 found', tone: 'healthy' }, { label: 'SLEEPERS', value: '2 found', tone: 'info' }, { label: 'ANOMALIES', value: '1 review', tone: 'critical' }],
+    'crack-history': [{ label: 'FIRST OBSERVED', value: '31 mm', tone: 'info' }, { label: 'CURRENT', value: '46 mm', tone: 'critical' }, { label: 'CHANGE', value: '+48%', tone: 'warning' }],
+    'alignment-analysis': [{ label: 'HORIZONTAL', value: 'Within limit', tone: 'healthy' }, { label: 'TRANSITION', value: 'Follow-up', tone: 'warning' }, { label: 'CONFIDENCE', value: '88%', tone: 'info' }],
+    'vibration-analysis': [{ label: 'PEAK ACCEL.', value: '0.34 g', tone: 'healthy' }, { label: 'SAMPLE RATE', value: '100 Hz', tone: 'info' }, { label: 'ANOMALY', value: 'Not found', tone: 'healthy' }],
+    gps: [{ label: 'CHAINAGE', value: '14+320', tone: 'info' }, { label: 'ACCURACY', value: '±3 m', tone: 'healthy' }, { label: 'TRACK SIDE', value: 'Up line', tone: 'info' }],
+    'inspection-summary': [{ label: 'DISTANCE', value: '1.25 km', tone: 'healthy' }, { label: 'FRAMES', value: '42', tone: 'info' }, { label: 'CRITICAL', value: '1 finding', tone: 'critical' }],
+    'save-inspection': [{ label: 'PACKAGE', value: 'Ready', tone: 'healthy' }, { label: 'SYNC', value: 'Offline safe', tone: 'info' }, { label: 'ITEMS', value: '48 attached', tone: 'info' }],
+    'image-comparison': [{ label: 'PREVIOUS', value: '31 mm', tone: 'info' }, { label: 'CURRENT', value: '46 mm', tone: 'critical' }, { label: 'INTERVAL', value: '6 days', tone: 'warning' }],
+    'growth-analysis': [{ label: 'GROWTH RATE', value: '3.7 mm/cycle', tone: 'critical' }, { label: 'WATCH LIMIT', value: '2 mm', tone: 'warning' }, { label: 'OBSERVATIONS', value: '4 points', tone: 'info' }],
+    evidence: [{ label: 'FRAMES', value: '42', tone: 'info' }, { label: 'GPS POINTS', value: '128', tone: 'healthy' }, { label: 'HASH', value: 'Verified', tone: 'healthy' }],
+    comments: [{ label: 'OPEN NOTES', value: '2', tone: 'warning' }, { label: 'ENGINEERS', value: '2', tone: 'info' }, { label: 'AUDIT TRAIL', value: 'Active', tone: 'healthy' }],
+    'engineer-verification': [{ label: 'FINDING', value: 'CRK-2048', tone: 'critical' }, { label: 'REVIEWER', value: 'E. Chen', tone: 'info' }, { label: 'SIGN-OFF', value: 'Required', tone: 'warning' }],
+    'location-details': [{ label: 'RAIL', value: '60E1', tone: 'info' }, { label: 'WITHIN 250 M', value: '3 defects', tone: 'critical' }, { label: 'LAST TAMP', value: '04 Jun', tone: 'healthy' }],
+    'risk-heatmap': [{ label: 'RISK BAND', value: 'Intervention', tone: 'critical' }, { label: 'RESTRICTION', value: '25 km/h', tone: 'warning' }, { label: 'OWNER', value: 'North corridor', tone: 'info' }],
+    'maintenance-task': [{ label: 'TASK', value: 'MT-881', tone: 'warning' }, { label: 'DUE', value: 'Today · 14:00', tone: 'critical' }, { label: 'ASSIGNEE', value: 'M. Alvarez', tone: 'info' }],
+    'task-details': [{ label: 'STATUS', value: 'Open', tone: 'warning' }, { label: 'WINDOW', value: '14:00—15:00', tone: 'info' }, { label: 'RESTRICTION', value: 'Active', tone: 'critical' }],
+    'before-after': [{ label: 'BEFORE', value: 'Loose clip', tone: 'critical' }, { label: 'AFTER', value: 'Seated', tone: 'healthy' }, { label: 'TORQUE', value: '220 Nm', tone: 'info' }],
+    'maintenance-verification': [{ label: 'EVIDENCE', value: '2 frames', tone: 'info' }, { label: 'TORQUE', value: 'Verified', tone: 'healthy' }, { label: 'RELEASE', value: 'Pending', tone: 'warning' }],
+    'report-details': [{ label: 'PAGES', value: '18', tone: 'info' }, { label: 'FINDINGS', value: '12', tone: 'warning' }, { label: 'ISSUED', value: '17 Jun', tone: 'healthy' }],
+    'evidence-package': [{ label: 'FRAMES', value: '42', tone: 'info' }, { label: 'SENSOR TRACE', value: 'Included', tone: 'healthy' }, { label: 'PACKAGE', value: 'Local', tone: 'info' }],
+    'pdf-preview': [{ label: 'PAGES', value: '18', tone: 'info' }, { label: 'HASH', value: 'Verified', tone: 'healthy' }, { label: 'SIGNATURE', value: 'Attached', tone: 'healthy' }],
+    'share-report': [{ label: 'ACCESS', value: 'Secure link', tone: 'info' }, { label: 'EXPIRY', value: '24 hours', tone: 'warning' }, { label: 'HASH', value: 'Retained', tone: 'healthy' }],
+  } as Record<string, Array<{ label: string; value: string; tone: Tone }>>)[kind] ?? [{ label: 'SOURCE', value: 'Field record', tone: 'info' }, { label: 'UPDATED', value: 'Just now', tone: 'healthy' }, { label: 'OWNER', value: 'Unit 04', tone: 'info' }];
+  const [completed, setCompleted] = useState(false);
+  const handleAction = () => {
+    if (kind === 'save-inspection') {
+      void AsyncStorage.setItem('railguard:last-saved-inspection', 'INSP-240618-04');
+      setCompleted(true);
+      return;
+    }
+    router.push((item.next ?? '/') as never);
+  };
+  return <><Header title={item.title} subtitle={item.subtitle} icon={item.icon} back /><View style={[styles.featureIcon, { backgroundColor: colors.secondary }]}><Feather name={iconFor(item.icon)} size={26} color={colors.primary} /></View><Text style={[styles.featureBody, { color: colors.foreground }]}>{item.body}</Text><View style={styles.detailSignalGrid}>{signals.map((signal) => <View key={signal.label} style={[styles.detailSignal, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>{signal.label}</Text><Text style={[styles.detailSignalValue, { color: toneColor(colors, signal.tone) }]}>{signal.value}</Text></View>)}</View><SectionLabel>RECORD</SectionLabel><RailCard><View style={[styles.infoRow, { borderBottomColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>SOURCE</Text><Text style={[styles.rowTitle, { color: colors.foreground }]}>Local field record</Text></View><View style={[styles.infoRow, { borderBottomColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>UPDATED</Text><Text style={[styles.rowTitle, { color: colors.foreground }]}>Just now · Unit 04</Text></View><View style={styles.infoRow}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>STATUS</Text><StatusPill label={completed ? 'Saved' : 'Ready for action'} tone={completed ? 'healthy' : 'info'} /></View></RailCard><SectionLabel>WORKFLOW</SectionLabel>{item.action ? <PrimaryButton title={completed ? 'Saved to device' : item.action} icon={completed ? 'check' : 'arrow-right'} onPress={handleAction} disabled={completed} /> : null}<PrimaryButton title="Return to screen directory" icon="list" secondary onPress={() => router.push('/screen-directory')} /></>;
 }
 
 function SettingsDetail({ kind }: { kind: string }) {
   const colors = useColors();
+  const { mode, setMode } = useTheme();
   const [enabled, setEnabled] = useState(kind !== 'notification-settings');
   const [stored, setStored] = useState(false);
   useEffect(() => { AsyncStorage.getItem(`railguard:${kind}`).then((value) => { if (value) setEnabled(value === 'true'); }); }, [kind]);
   const toggle = (value: boolean) => { setEnabled(value); AsyncStorage.setItem(`railguard:${kind}`, String(value)); };
   const titles: Record<string, string> = { account: 'Account', 'app-settings': 'App settings', 'notification-settings': 'Notification settings', security: 'Security', language: 'Language', 'help-center': 'Help center', about: 'About RailGuard' };
   if (kind === 'help-center') return <><Header title="Help center" subtitle="Guides for field teams" back /><ListRow icon="camera" title="Capturing a clean rail frame" subtitle="Position, focus, and lighting" tone="info" onPress={() => setStored(!stored)} /><ListRow icon="alert-triangle" title="Understanding risk scores" subtitle="Confidence versus operational risk" tone="warning" onPress={() => setStored(!stored)} /><ListRow icon="shield" title="Signing an engineer verification" subtitle="Audit trail and restrictions" tone="healthy" onPress={() => setStored(!stored)} />{stored ? <EmptyState icon="check" title="Guide marked for later" body="Your field guide bookmark is stored on this device." /> : null}</>;
-  return <><Header title={titles[kind] ?? 'Settings'} subtitle="RailGuard workspace" back /><RailCard style={styles.settingCard}><View style={styles.settingRow}><View style={styles.rowMain}><Text style={[styles.rowTitle, { color: colors.foreground }]}>{kind === 'language' ? 'English (United States)' : kind === 'account' ? 'E. Chen' : kind === 'security' ? 'Require passcode on launch' : kind === 'about' ? 'RailGuard 1.0.0' : 'Field mode'}</Text><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>{kind === 'about' ? 'Built for inspectors and safety leads' : 'Saved locally for this device'}</Text></View>{kind === 'language' || kind === 'about' || kind === 'account' ? <Feather name="chevron-right" size={17} color={colors.mutedForeground} /> : <Switch value={enabled} onValueChange={toggle} trackColor={{ false: colors.secondary, true: colors.primary }} thumbColor={colors.foreground} />}</View></RailCard><SectionLabel>LOCAL PERSISTENCE</SectionLabel><Text style={[styles.featureBody, { color: colors.mutedForeground }]}>Settings are available offline and stored securely on this device. {stored ? 'Saved.' : ''}</Text><PrimaryButton title="Save setting" icon="check" onPress={() => { setStored(true); AsyncStorage.setItem(`railguard:${kind}`, String(enabled)); }} /></>;
+  const isAppearance = kind === 'app-settings';
+  const settingTitle = kind === 'language' ? 'English (United States)' : kind === 'account' ? 'E. Chen' : kind === 'security' ? 'Require passcode on launch' : kind === 'about' ? 'RailGuard 1.0.0' : isAppearance ? `${mode === 'light' ? 'Light' : 'Dark'} appearance` : 'Field mode';
+  const settingSubtitle = kind === 'about' ? 'Built for inspectors and safety leads' : isAppearance ? 'Light mode is the default. Switch when field conditions require it.' : 'Saved locally for this device';
+  const switchValue = isAppearance ? mode === 'dark' : enabled;
+  const onSwitch = isAppearance ? (value: boolean) => setMode(value ? 'dark' : 'light') : toggle;
+  return <><Header title={titles[kind] ?? 'Settings'} subtitle="RailGuard workspace" back /><RailCard style={styles.settingCard}><View style={styles.settingRow}><View style={styles.rowMain}><Text style={[styles.rowTitle, { color: colors.foreground }]}>{settingTitle}</Text><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>{settingSubtitle}</Text></View>{kind === 'language' || kind === 'about' || kind === 'account' ? <Feather name="chevron-right" size={17} color={colors.mutedForeground} /> : <Switch value={switchValue} onValueChange={onSwitch} trackColor={{ false: colors.secondary, true: colors.primary }} thumbColor={colors.foreground} />}</View></RailCard><SectionLabel>{isAppearance ? 'APPEARANCE' : 'LOCAL PERSISTENCE'}</SectionLabel><Text style={[styles.featureBody, { color: colors.mutedForeground }]}>{isAppearance ? 'RailGuard keeps the selected appearance across sessions. Use the switch above to preview both supported modes.' : `Settings are available offline and stored securely on this device. ${stored ? 'Saved.' : ''}`}</Text><PrimaryButton title={isAppearance ? 'Keep appearance' : 'Save setting'} icon="check" onPress={() => { setStored(true); if (!isAppearance) void AsyncStorage.setItem(`railguard:${kind}`, String(enabled)); }} /></>;
 }
 
 function NotificationsScreen() { return <><Header title="Notifications" subtitle="Signals from your network" back /><ListRow icon="alert-triangle" title="CRK-2048 requires verification" subtitle="North Loop · 12 min ago" tone="critical" onPress={() => router.push('/crack-details')} /><ListRow icon="tool" title="MT-881 due in 4 hours" subtitle="North Loop · 18 min ago" tone="warning" onPress={() => router.push('/task-details')} /><ListRow icon="check-circle" title="Inspection synced successfully" subtitle="East Junction · Yesterday" tone="healthy" onPress={() => router.push('/inspection-summary')} /></>; }
@@ -532,6 +577,9 @@ const styles = StyleSheet.create({
   detailGrid: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16, paddingTop: 12, borderTopWidth: 1 },
   detailLabel: { fontFamily: 'Inter_700Bold', fontSize: 9, letterSpacing: 1 },
   detailValue: { fontFamily: 'Inter_600SemiBold', fontSize: 14, marginTop: 5 },
+  detailSignalGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
+  detailSignal: { flexGrow: 1, minWidth: 100, borderWidth: 1, padding: 11 },
+  detailSignalValue: { fontFamily: 'Inter_700Bold', fontSize: 15, marginTop: 6 },
   detailHeader: { alignItems: 'flex-start', paddingVertical: 8 },
   detailScore: { fontFamily: 'Inter_700Bold', fontSize: 56, letterSpacing: -2, marginTop: 12 },
   featureIcon: { width: 60, height: 60, alignItems: 'center', justifyContent: 'center', marginTop: 8 },

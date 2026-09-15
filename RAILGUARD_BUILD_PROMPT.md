@@ -8,7 +8,7 @@ The app must feel like a trusted field engineering instrument used beside live t
 
 Use one shared design system across every screen:
 
-- Dark-first surfaces: near-black app background, charcoal sections, graphite cards, restrained 1px borders.
+- Light mode is the default product experience: cool-white background, white cards, graphite text, navy-blue actions, and restrained 1px borders. Include a fully supported dark mode as an explicit in-app setting.
 - Strong white primary text, muted gray secondary text, and compact information-dense layouts.
 - Semantic states must include a label and icon, not color alone:
   - Healthy: green + check/verified icon
