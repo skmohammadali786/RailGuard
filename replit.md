@@ -1,6 +1,6 @@
-# [Project name]
+# RailGuard
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+RailGuard is a dark-first mobile field engineering platform for AI-assisted railway crack detection, inspection evidence, risk analysis, and maintenance verification.
 
 ## Run & Operate
 
@@ -22,23 +22,29 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/railguard/app/` — Expo Router screens and navigation
+- `artifacts/railguard/components/RailGuard.tsx` — shared mobile UI primitives, screen registry, and screen renderers
+- `artifacts/railguard/constants/colors.ts` — RailGuard semantic color tokens
+- `artifacts/railguard/assets/images/icon.png` — RailGuard app icon
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The first build is frontend-only and uses local device persistence for settings and field-workspace state.
+- A route-driven screen registry keeps the large inspection product surface consistent without duplicating screen chrome.
+- Railway status semantics are always expressed with text and icons in addition to color.
+- Expo Router provides the tabbed control surface and deep links into every supporting workflow screen.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+RailGuard covers authentication and onboarding, live inspection capture, AI crack detections, defect history, evidence and engineer verification, railway maps, maintenance tasks, reports, analytics, scheduling, and field-team settings. The primary flow is inspection setup → live inspection → detection result → crack review → measurement/verification → saved inspection.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Premium, technical, dark-first industrial interface; avoid generic SaaS styling, excessive gradients, and placeholder-looking screens.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- The mobile app is served by the managed Expo workflow `artifacts/railguard: expo`.
 
 ## Pointers
 
