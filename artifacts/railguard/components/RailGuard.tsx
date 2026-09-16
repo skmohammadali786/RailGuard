@@ -60,7 +60,7 @@ const sectionRoutes = [
 
 export const SCREEN_REGISTRY = [
   'splash', 'onboarding', 'login', 'registration', 'otp', 'email-verification', 'forgot-password', 'reset-password',
-  'home', 'notifications', 'profile', 'inspection-setup', 'live-inspection', 'camera', 'detection-result', 'crack-details',
+  'home', 'notifications', 'attention', 'profile', 'inspection-setup', 'live-inspection', 'camera', 'detection-result', 'crack-details',
   'crack-measurement', 'object-detection', 'alignment-analysis', 'vibration-analysis', 'gps', 'inspection-summary', 'save-inspection',
   'defects', 'defect-list', 'defect-details', 'crack-history', 'image-comparison', 'growth-analysis', 'evidence', 'comments', 'engineer-verification',
   'map', 'railway-map', 'defect-map', 'track-map', 'location-details', 'risk-heatmap', 'maintenance', 'maintenance-dashboard', 'maintenance-task', 'task-details',
@@ -209,7 +209,7 @@ function HomeScreen() {
         <View style={styles.rowMain}><Text style={[styles.rowTitle, { color: colors.foreground }]}>North Loop · Section 14</Text><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>Last scan 8 min ago · 1.8 km remaining</Text></View>
         <Feather name="arrow-up-right" size={18} color={colors.primary} />
       </RailCard>
-      <SectionLabel action="See all" onAction={() => router.push('/notifications')}>REQUIRES ATTENTION</SectionLabel>
+      <SectionLabel action="See all" onAction={() => router.push('/attention')}>REQUIRES ATTENTION</SectionLabel>
       <ListRow icon="alert-triangle" title="CRK-2048 · Gauge corner crack" subtitle="North Loop · 14+320 · Detected 12 min ago" trailing="92" tone="critical" onPress={() => router.push('/crack-details')} />
       <ListRow icon="tool" title="MT-881 · Replace rail clip pair" subtitle="North Loop · Assigned to M. Alvarez" trailing="DUE" tone="warning" onPress={() => router.push('/task-details')} />
       <SectionLabel>WORKSPACE</SectionLabel>
@@ -386,6 +386,26 @@ function DetailScreen({ kind }: { kind: string }) {
   return <><Header title={item.title} subtitle={item.subtitle} icon={item.icon} back /><View style={[styles.featureIcon, { backgroundColor: colors.secondary }]}><Feather name={iconFor(item.icon)} size={26} color={colors.primary} /></View><Text style={[styles.featureBody, { color: colors.foreground }]}>{item.body}</Text><View style={styles.detailSignalGrid}>{signals.map((signal) => <View key={signal.label} style={[styles.detailSignal, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>{signal.label}</Text><Text style={[styles.detailSignalValue, { color: toneColor(colors, signal.tone) }]}>{signal.value}</Text></View>)}</View><SectionLabel>RECORD</SectionLabel><RailCard><View style={[styles.infoRow, { borderBottomColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>SOURCE</Text><Text style={[styles.rowTitle, { color: colors.foreground }]}>Local field record</Text></View><View style={[styles.infoRow, { borderBottomColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>UPDATED</Text><Text style={[styles.rowTitle, { color: colors.foreground }]}>Just now · Unit 04</Text></View><View style={styles.infoRow}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>STATUS</Text><StatusPill label={completed ? 'Saved' : 'Ready for action'} tone={completed ? 'healthy' : 'info'} /></View></RailCard><SectionLabel>WORKFLOW</SectionLabel>{item.action ? <PrimaryButton title={completed ? 'Saved to device' : item.action} icon={completed ? 'check' : 'arrow-right'} onPress={handleAction} disabled={completed} /> : null}<PrimaryButton title="Return to screen directory" icon="list" secondary onPress={() => router.push('/screen-directory')} /></>;
 }
 
+function AttentionScreen() {
+  const colors = useColors();
+  return <><Header title="Required attention" subtitle="Prioritized actions for this shift" back /><RailCard style={[styles.attentionHero, { borderColor: colors.critical }]}><View style={styles.attentionHeroTop}><View style={[styles.attentionIcon, { backgroundColor: `${colors.critical}18` }]}><Feather name="alert-triangle" size={22} color={colors.critical} /></View><View style={styles.rowMain}><Text style={[styles.cardTitle, { color: colors.foreground }]}>2 actions need a field owner</Text><Text style={[styles.cardBody, { color: colors.mutedForeground }]}>Resolve the critical finding first, then confirm the maintenance handoff.</Text></View></View><View style={styles.progressTrack}><View style={[styles.progressFill, { backgroundColor: colors.critical, width: '33%' }]} /></View><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>1 of 3 priority items reviewed</Text></RailCard><SectionLabel>CRITICAL NOW</SectionLabel><ListRow icon="alert-triangle" title="CRK-2048 · Gauge corner crack" subtitle="North Loop · 14+320 · engineer verification required" trailing="92" tone="critical" onPress={() => router.push('/crack-details')} /><SectionLabel>UPCOMING</SectionLabel><ListRow icon="tool" title="MT-881 · Replace rail clip pair" subtitle="Assigned to M. Alvarez · due today at 14:00" trailing="DUE" tone="warning" onPress={() => router.push('/task-details')} /><ListRow icon="calendar" title="South Yard · Section 08 inspection" subtitle="Tomorrow · 13:30 · S. Morgan" trailing="NEXT" tone="info" onPress={() => router.push('/assigned-inspections')} /><PrimaryButton title="Open notifications" icon="bell" secondary onPress={() => router.push('/notifications')} /></>;
+}
+
+function ProfileScreen() {
+  const colors = useColors();
+  return <><Header title="E. Chen" subtitle="Rail safety lead · Unit 04" back /><View style={styles.profileHero}><View style={[styles.avatar, { backgroundColor: colors.primary }]}><Text style={[styles.avatarText, { color: colors.primaryForeground }]}>EC</Text></View><View style={styles.rowMain}><Text style={[styles.cardTitle, { color: colors.foreground }]}>E. Chen</Text><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>North corridor access · Verified engineer</Text><StatusPill label="Available for sign-off" tone="healthy" /></View></View><View style={styles.metricGrid}><MetricTile value="27" label="Inspections" tone="info" /><MetricTile value="142" label="Findings reviewed" tone="healthy" /><MetricTile value="98%" label="Sync health" tone="healthy" /></View><SectionLabel>FIELD ACCESS</SectionLabel><RailCard><View style={[styles.infoRow, { borderBottomColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>CORRIDOR</Text><Text style={[styles.rowTitle, { color: colors.foreground }]}>North + East network</Text></View><View style={[styles.infoRow, { borderBottomColor: colors.border }]}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>ROLE</Text><Text style={[styles.rowTitle, { color: colors.foreground }]}>Safety lead</Text></View><View style={styles.infoRow}><Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>LAST SYNC</Text><Text style={[styles.rowTitle, { color: colors.foreground }]}>2 minutes ago</Text></View></RailCard><PrimaryButton title="Edit account" icon="user" onPress={() => router.push('/account')} /><PrimaryButton title="Review security" icon="shield" secondary onPress={() => router.push('/security')} /></>;
+}
+
+function CrackHistoryScreen() {
+  const colors = useColors();
+  const observations = [
+    { date: '18 Jun 2024', length: '46 mm', note: 'Above watch threshold', tone: 'critical' as Tone },
+    { date: '12 Jun 2024', length: '31 mm', note: 'First recorded indication', tone: 'warning' as Tone },
+    { date: '29 May 2024', length: '18 mm', note: 'Monitor at next cycle', tone: 'info' as Tone },
+  ];
+  return <><Header title="Crack history" subtitle="CRK-2048 · North Loop 14+320" back /><RailCard style={styles.historyCard}><View style={styles.healthTop}><View><Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>ESTIMATED LENGTH</Text><Text style={[styles.healthValue, { color: colors.critical }]}>46 mm</Text></View><StatusPill label="+48% in 6 days" tone="critical" /></View><View style={styles.historyChart}>{[26, 43, 67, 100].map((height, index) => <View key={index} style={styles.historyBarWrap}><View style={[styles.historyBar, { height: `${height}%`, backgroundColor: index === 3 ? colors.critical : colors.warning }]} /><Text style={[styles.historyBarLabel, { color: colors.mutedForeground }]}>{['29M', '12J', '16J', '18J'][index]}</Text></View>)}</View><Text style={[styles.cardBody, { color: colors.mutedForeground }]}>Growth is above the 2 mm watch threshold. Confirm with a manual gauge measurement.</Text></RailCard><SectionLabel>OBSERVATIONS</SectionLabel>{observations.map((item) => <ListRow key={item.date} icon="activity" title={`${item.date} · ${item.length}`} subtitle={item.note} trailing={item.length === '46 mm' ? 'NOW' : 'ARCHIVE'} tone={item.tone} onPress={() => router.push('/image-comparison')} />)}<PrimaryButton title="Compare inspection images" icon="copy" onPress={() => router.push('/image-comparison')} /><PrimaryButton title="Create maintenance task" icon="tool" secondary onPress={() => router.push('/maintenance-task')} /></>;
+}
+
 function SettingsDetail({ kind }: { kind: string }) {
   const colors = useColors();
   const { mode, setMode } = useTheme();
@@ -408,6 +428,20 @@ function SettingsDetail({ kind }: { kind: string }) {
   const switchValue = isAppearance ? mode === 'dark' : enabled;
   const onSwitch = isAppearance ? (value: boolean) => setMode(value ? 'dark' : 'light') : toggle;
   return <><Header title={titles[kind] ?? 'Settings'} subtitle="RailGuard workspace" back /><RailCard style={styles.settingCard}><View style={styles.settingRow}><View style={styles.rowMain}><Text style={[styles.rowTitle, { color: colors.foreground }]}>{settingTitle}</Text><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>{settingSubtitle}</Text></View>{kind === 'language' || kind === 'about' || kind === 'account' ? <Feather name="chevron-right" size={17} color={colors.mutedForeground} /> : <Switch value={switchValue} onValueChange={onSwitch} trackColor={{ false: colors.secondary, true: colors.primary }} thumbColor={colors.foreground} />}</View></RailCard><SectionLabel>{isAppearance ? 'APPEARANCE' : 'LOCAL PERSISTENCE'}</SectionLabel><Text style={[styles.featureBody, { color: colors.mutedForeground }]}>{isAppearance ? 'RailGuard keeps the selected appearance across sessions. Use the switch above to preview both supported modes.' : `Settings are available offline and stored securely on this device. ${stored ? 'Saved.' : ''}`}</Text><PrimaryButton title={isAppearance ? 'Keep appearance' : 'Save setting'} icon="check" onPress={() => { setStored(true); if (!isAppearance) void AsyncStorage.setItem(`railguard:${kind}`, String(enabled)); }} /></>;
+}
+
+function NotificationSettingsScreen() {
+  const colors = useColors();
+  const [critical, setCritical] = useState(true);
+  const [maintenance, setMaintenance] = useState(true);
+  const [summaries, setSummaries] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const rows = [
+    { label: 'Critical defect alerts', body: 'Immediate findings and restrictions', value: critical, setValue: setCritical },
+    { label: 'Maintenance due reminders', body: 'Upcoming tasks and overdue work', value: maintenance, setValue: setMaintenance },
+    { label: 'Shift summaries', body: 'Daily coverage and network health digest', value: summaries, setValue: setSummaries },
+  ];
+  return <><Header title="Notification settings" subtitle="Choose which field signals reach you" back /><RailCard><Text style={[styles.cardTitle, { color: colors.foreground }]}>Field alerts</Text><Text style={[styles.cardBody, { color: colors.mutedForeground }]}>Critical safety signals stay on by default. Changes are saved locally for offline shifts.</Text></RailCard><SectionLabel>ALERT TYPES</SectionLabel>{rows.map((row) => <View key={row.label} style={[styles.preferenceRow, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={styles.rowMain}><Text style={[styles.rowTitle, { color: colors.foreground }]}>{row.label}</Text><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>{row.body}</Text></View><Switch value={row.value} onValueChange={(value) => { row.setValue(value); setSaved(false); }} trackColor={{ false: colors.secondary, true: colors.primary }} thumbColor={colors.foreground} /></View>)}<PrimaryButton title={saved ? 'Notification preferences saved' : 'Save preferences'} icon={saved ? 'check' : 'bell'} onPress={() => { setSaved(true); void AsyncStorage.setItem('railguard:notification-preferences', JSON.stringify({ critical, maintenance, summaries })); }} disabled={saved} /><PrimaryButton title="View notification inbox" icon="list" secondary onPress={() => router.push('/notifications')} /></>;
 }
 
 function NotificationsScreen() {
@@ -486,7 +520,7 @@ function ScreenDirectory() {
   const colors = useColors();
   const groups: Array<{ title: string; keys: string[] }> = [
     { title: 'AUTHENTICATION', keys: ['splash', 'onboarding', 'login', 'registration', 'otp', 'email-verification', 'forgot-password', 'reset-password'] },
-    { title: 'MAIN', keys: ['home', 'notifications', 'profile'] },
+    { title: 'MAIN', keys: ['home', 'notifications', 'attention', 'profile'] },
     { title: 'INSPECTION', keys: ['inspection-setup', 'live-inspection', 'camera', 'detection-result', 'crack-details', 'crack-measurement', 'object-detection', 'alignment-analysis', 'vibration-analysis', 'gps', 'inspection-summary', 'save-inspection'] },
     { title: 'DEFECTS & EVIDENCE', keys: ['defects', 'defect-list', 'defect-details', 'crack-history', 'image-comparison', 'growth-analysis', 'evidence', 'comments', 'engineer-verification'] },
     { title: 'MAP', keys: ['map', 'railway-map', 'defect-map', 'track-map', 'location-details', 'risk-heatmap'] },
@@ -520,7 +554,7 @@ function ScreenDirectory() {
 export default function RailGuardScreen({ screen = '/' }: { screen?: ScreenKey }) {
   const insets = useSafeAreaInsets();
   const key = screen.replace(/^\//, '') || '/';
-  const content = key === '/' || key === 'home' ? <HomeScreen /> : key === 'inspections' ? <InspectionsScreen /> : key === 'defects' ? <DefectsScreen /> : key === 'defect-list' ? <DefectsScreen variant="defect-list" /> : key === 'map' ? <MapScreen /> : key === 'railway-map' ? <MapScreen variant="railway-map" /> : key === 'defect-map' ? <DefectMapScreen /> : key === 'maintenance' ? <MaintenanceScreen /> : key === 'maintenance-dashboard' ? <MaintenanceScreen variant="maintenance-dashboard" /> : key === 'reports' ? <ReportsScreen /> : key === 'analytics' ? <AnalyticsScreen /> : key === 'scheduling' ? <SchedulingScreen /> : key === 'inspection-schedule' ? <SchedulingScreen variant="inspection-schedule" /> : key === 'settings' ? <SettingsScreen /> : key === 'notifications' ? <NotificationsScreen /> : key === 'screen-directory' ? <ScreenDirectory /> : ['splash', 'login', 'registration', 'forgot-password', 'reset-password', 'otp', 'email-verification', 'onboarding'].includes(key) ? <FormScreen kind={key} /> : ['account', 'app-settings', 'notification-settings', 'security', 'language', 'help-center', 'about'].includes(key) ? <SettingsDetail kind={key} /> : key === 'inspection-setup' ? <InspectionSetup /> : key === 'live-inspection' ? <LiveInspection /> : key === 'detection-result' ? <DetectionResult /> : <DetailScreen kind={key} />;
+  const content = key === '/' || key === 'home' ? <HomeScreen /> : key === 'inspections' ? <InspectionsScreen /> : key === 'defects' ? <DefectsScreen /> : key === 'defect-list' ? <DefectsScreen variant="defect-list" /> : key === 'map' ? <MapScreen /> : key === 'railway-map' ? <MapScreen variant="railway-map" /> : key === 'defect-map' ? <DefectMapScreen /> : key === 'maintenance' ? <MaintenanceScreen /> : key === 'maintenance-dashboard' ? <MaintenanceScreen variant="maintenance-dashboard" /> : key === 'reports' ? <ReportsScreen /> : key === 'analytics' ? <AnalyticsScreen /> : key === 'scheduling' ? <SchedulingScreen /> : key === 'inspection-schedule' ? <SchedulingScreen variant="inspection-schedule" /> : key === 'settings' ? <SettingsScreen /> : key === 'notifications' ? <NotificationsScreen /> : key === 'attention' ? <AttentionScreen /> : key === 'profile' ? <ProfileScreen /> : key === 'crack-history' ? <CrackHistoryScreen /> : key === 'notification-settings' ? <NotificationSettingsScreen /> : key === 'screen-directory' ? <ScreenDirectory /> : ['splash', 'login', 'registration', 'forgot-password', 'reset-password', 'otp', 'email-verification', 'onboarding'].includes(key) ? <FormScreen kind={key} /> : ['account', 'app-settings', 'security', 'language', 'help-center', 'about'].includes(key) ? <SettingsDetail kind={key} /> : key === 'inspection-setup' ? <InspectionSetup /> : key === 'live-inspection' ? <LiveInspection /> : key === 'detection-result' ? <DetectionResult /> : <DetailScreen kind={key} />;
   return <View style={[styles.root, { backgroundColor: useColors().background, paddingTop: Platform.OS === 'web' ? 67 : insets.top }]}><ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'web' ? 34 : 24) }]} showsVerticalScrollIndicator={false}>{content}</ScrollView></View>;
 }
 
@@ -619,6 +653,14 @@ const styles = StyleSheet.create({
   detailScore: { fontFamily: 'Inter_700Bold', fontSize: 56, letterSpacing: -2, marginTop: 12 },
   featureIcon: { width: 60, height: 60, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   featureBody: { fontFamily: 'Inter_400Regular', fontSize: 16, lineHeight: 25, marginVertical: 9 },
+  attentionHero: { padding: 15 },
+  attentionHeroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 11 },
+  attentionIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  historyCard: { padding: 15 },
+  historyChart: { height: 135, flexDirection: 'row', alignItems: 'flex-end', gap: 13, marginTop: 18, borderBottomWidth: 1, borderBottomColor: '#29323A' },
+  historyBarWrap: { flex: 1, height: '100%', justifyContent: 'flex-end', alignItems: 'center', gap: 6 },
+  historyBar: { width: '70%', minHeight: 6 },
+  historyBarLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 9 },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 35, borderBottomWidth: 1 },
   authWrap: { flex: 1, paddingTop: 28, gap: 14 },
   authBrand: { alignItems: 'center', marginBottom: 25 },
@@ -643,4 +685,5 @@ const styles = StyleSheet.create({
   avatarText: { fontFamily: 'Inter_700Bold', fontSize: 17 },
   languageOption: { minHeight: 64, borderWidth: 1, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 10 },
   aboutMark: { alignItems: 'center', paddingVertical: 12 },
+  preferenceRow: { minHeight: 68, borderWidth: 1, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 10 },
 });
