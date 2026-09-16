@@ -1,0 +1,1 @@
+- [RailGuard route resolution](railguard-routing.md) — use explicit Expo Router files for primary field workflow pages; the catch-all can fail in preview.
