@@ -275,16 +275,60 @@ function SettingsScreen() {
 function FormScreen({ kind }: { kind: string }) {
   const colors = useColors();
   const [value, setValue] = useState('');
-  const isAuth = ['login', 'registration', 'forgot-password', 'reset-password'].includes(kind);
-  const titles: Record<string, string> = { splash: 'RailGuard', login: 'Welcome back', registration: 'Create your field account', 'forgot-password': 'Recover access', 'reset-password': 'Set a new passcode', otp: 'Verify your number', 'email-verification': 'Verify your email', onboarding: 'Built for the live track' };
-  const title = titles[kind] ?? 'RailGuard';
+  const [secondaryValue, setSecondaryValue] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const [error, setError] = useState('');
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const onboardingSlides = [
+    { icon: 'camera', label: 'Capture with confidence', body: 'Record sharp, geolocated rail evidence from the field.' },
+    { icon: 'alert-triangle', label: 'Review what matters', body: 'Prioritize AI findings by confidence, severity, and chainage.' },
+    { icon: 'shield', label: 'Close the loop', body: 'Keep verification, maintenance, and safety decisions connected.' },
+  ];
   const submit = () => {
-    if (kind === 'login' || kind === 'registration') router.replace('/');
-    else if (kind === 'forgot-password') router.push('/otp');
-    else if (kind === 'otp' || kind === 'email-verification') router.replace('/');
-    else if (kind === 'reset-password') router.push('/login');
+    setError('');
+    if (kind === 'login') {
+      if (!value.includes('@')) return setError('Enter a valid work email.');
+      if (secondaryValue.length < 6) return setError('Password must be at least 6 characters.');
+      void AsyncStorage.setItem('railguard:session', 'active');
+      router.replace('/');
+    } else if (kind === 'registration') {
+      if (fullName.trim().length < 2) return setError('Enter your full name.');
+      if (!value.includes('@')) return setError('Enter a valid work email.');
+      if (secondaryValue.length < 8) return setError('Use a password with at least 8 characters.');
+      if (!accepted) return setError('Accept the field safety terms to continue.');
+      void AsyncStorage.multiSet([['railguard:session', 'active'], ['railguard:profile-name', fullName.trim()]]);
+      router.replace('/');
+    } else if (kind === 'forgot-password') {
+      if (!value.includes('@')) return setError('Enter the email associated with your account.');
+      router.push('/otp');
+    } else if (kind === 'otp') {
+      if (!/^\d{6}$/.test(value)) return setError('Enter the 6-digit verification code.');
+      router.push('/reset-password');
+    } else if (kind === 'reset-password') {
+      if (secondaryValue.length < 8) return setError('Use a password with at least 8 characters.');
+      router.push('/login');
+    } else if (kind === 'email-verification') {
+      if (!/^\d{6}$/.test(value)) return setError('Enter the 6-digit verification code.');
+      void AsyncStorage.setItem('railguard:email-verified', 'true');
+      router.replace('/');
+    }
   };
-  return <View style={styles.authWrap}><View style={styles.authBrand}><LogoMark /><Text style={[styles.brandName, { color: colors.foreground }]}>RAILGUARD</Text><Text style={[styles.brandTag, { color: colors.mutedForeground }]}>FIELD ENGINEERING CONTROL</Text></View><Text style={[styles.authTitle, { color: colors.foreground }]}>{title}</Text><Text style={[styles.authBody, { color: colors.mutedForeground }]}>{kind === 'splash' ? 'A trusted instrument for the live track.' : kind === 'onboarding' ? 'A calm, precise instrument for detecting rail defects before they become incidents.' : 'Secure access to live inspections, evidence, and network risk.'}</Text>{kind === 'splash' ? <PrimaryButton title="Continue to sign in" onPress={() => router.replace('/login')} /> : kind === 'onboarding' ? <><View style={styles.onboardingRow}><View style={[styles.onboardingIcon, { backgroundColor: colors.secondary }]}><Feather name="camera" size={19} color={colors.primary} /></View><View style={styles.rowMain}><Text style={[styles.rowTitle, { color: colors.foreground }]}>Capture once, review anywhere</Text><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>AI findings stay linked to the exact track position.</Text></View></View><View style={styles.onboardingRow}><View style={[styles.onboardingIcon, { backgroundColor: colors.secondary }]}><Feather name="shield" size={19} color={colors.healthy} /></View><View style={styles.rowMain}><Text style={[styles.rowTitle, { color: colors.foreground }]}>Evidence that stands up</Text><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>A defensible record for every decision.</Text></View></View><PrimaryButton title="Enter RailGuard" onPress={() => router.replace('/login')} /></> : <><TextInput value={value} onChangeText={setValue} placeholder={kind === 'login' ? 'Work email' : kind === 'otp' ? '6-digit verification code' : 'Email address'} placeholderTextColor={colors.mutedForeground} keyboardType={kind === 'otp' ? 'number-pad' : 'email-address'} style={[styles.input, { color: colors.foreground, backgroundColor: colors.input, borderColor: colors.border }]} /><TextInput secureTextEntry={kind !== 'otp' && kind !== 'forgot-password' && kind !== 'email-verification'} placeholder={kind === 'login' ? 'Password' : kind === 'reset-password' ? 'New password' : 'Full name'} placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, backgroundColor: colors.input, borderColor: colors.border }]} /><PrimaryButton title={kind === 'login' ? 'Sign in' : kind === 'registration' ? 'Create account' : 'Continue'} onPress={submit} />{kind === 'login' ? <Pressable onPress={() => router.push('/forgot-password')}><Text style={[styles.authLink, { color: colors.primary }]}>Forgot password?</Text></Pressable> : null}{kind === 'login' ? <Pressable onPress={() => router.push('/registration')}><Text style={[styles.authLink, { color: colors.primary }]}>Create a new account</Text></Pressable> : null}</>}</View>;
+  const inputStyle = [styles.input, { color: colors.foreground, backgroundColor: colors.input, borderColor: error ? colors.critical : colors.border }];
+  if (kind === 'splash') return <View style={styles.authWrap}><View style={styles.splashHero}><LogoMark /><Text style={[styles.splashName, { color: colors.foreground }]}>RAILGUARD</Text><Text style={[styles.brandTag, { color: colors.primary }]}>FIELD ENGINEERING CONTROL</Text><View style={[styles.splashSignal, { backgroundColor: colors.secondary }]}><View style={[styles.statusDot, { backgroundColor: colors.healthy }]} /><Text style={[styles.statusText, { color: colors.healthy }]}>FIELD SYSTEM READY</Text></View></View><Text style={[styles.authTitle, { color: colors.foreground }]}>Inspect with evidence.</Text><Text style={[styles.authBody, { color: colors.mutedForeground }]}>A trusted instrument for live track inspections, defect review, and maintenance handoff.</Text><PrimaryButton title="Continue" icon="arrow-right" onPress={() => router.replace('/onboarding')} /><Pressable onPress={() => router.replace('/login')}><Text style={[styles.authLink, { color: colors.primary }]}>Already have an account? Sign in</Text></Pressable></View>;
+  if (kind === 'onboarding') {
+    const slide = onboardingSlides[onboardingStep];
+    const isLast = onboardingStep === onboardingSlides.length - 1;
+    return <View style={styles.authWrap}><View style={styles.authBrand}><LogoMark /><Text style={[styles.brandName, { color: colors.foreground }]}>RAILGUARD</Text><Text style={[styles.brandTag, { color: colors.mutedForeground }]}>FIELD ENGINEERING CONTROL</Text></View><View style={[styles.onboardingHero, { backgroundColor: colors.surfaceInset, borderColor: colors.border }]}><View style={[styles.onboardingHeroIcon, { backgroundColor: colors.secondary }]}><Feather name={iconFor(slide.icon)} size={30} color={colors.primary} /></View><Text style={[styles.authTitle, { color: colors.foreground }]}>{slide.label}</Text><Text style={[styles.authBody, { color: colors.mutedForeground }]}>{slide.body}</Text></View><View style={styles.progressDots}>{onboardingSlides.map((item, index) => <View key={item.label} style={[styles.progressDot, { backgroundColor: index === onboardingStep ? colors.primary : colors.secondary }]} />)}</View><PrimaryButton title={isLast ? 'Get started' : 'Next'} icon={isLast ? 'arrow-right' : 'chevron-right'} onPress={() => isLast ? router.replace('/login') : setOnboardingStep((step) => step + 1)} /><Pressable onPress={() => router.replace('/login')}><Text style={[styles.authLink, { color: colors.mutedForeground }]}>Skip onboarding</Text></Pressable></View>;
+  }
+  const isLogin = kind === 'login';
+  const isRegistration = kind === 'registration';
+  const isReset = kind === 'reset-password';
+  const isOtp = kind === 'otp' || kind === 'email-verification';
+  const title = isLogin ? 'Welcome back' : isRegistration ? 'Create your field account' : kind === 'forgot-password' ? 'Recover access' : isReset ? 'Set a new passcode' : isOtp ? 'Verify your code' : 'RailGuard';
+  const body = isLogin ? 'Sign in to continue your inspections and safety decisions.' : isRegistration ? 'Create a secure account for your field workspace.' : kind === 'forgot-password' ? 'We’ll send a verification code to your work email.' : isReset ? 'Choose a new password for your RailGuard account.' : 'Enter the 6-digit code we sent to your email.';
+  return <View style={styles.authWrap}><Pressable onPress={() => router.back()} style={styles.authBack}><Feather name="arrow-left" size={18} color={colors.mutedForeground} /><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>Back</Text></Pressable><View style={styles.authBrand}><LogoMark small /><Text style={[styles.brandName, { color: colors.foreground }]}>RAILGUARD</Text></View><Text style={[styles.authTitle, { color: colors.foreground }]}>{title}</Text><Text style={[styles.authBody, { color: colors.mutedForeground }]}>{body}</Text>{isRegistration ? <TextInput value={fullName} onChangeText={setFullName} placeholder="Full name" placeholderTextColor={colors.mutedForeground} style={inputStyle} /> : null}<TextInput value={value} onChangeText={setValue} placeholder={isOtp ? '6-digit verification code' : 'Work email'} placeholderTextColor={colors.mutedForeground} keyboardType={isOtp ? 'number-pad' : 'email-address'} autoCapitalize="none" style={inputStyle} />{isLogin || isRegistration || isReset ? <View style={[styles.passwordField, { backgroundColor: colors.input, borderColor: error ? colors.critical : colors.border }]}><TextInput value={secondaryValue} onChangeText={setSecondaryValue} placeholder={isReset ? 'New password' : 'Password'} placeholderTextColor={colors.mutedForeground} secureTextEntry={!showPassword} style={[styles.passwordInput, { color: colors.foreground }]} /><Pressable accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'} onPress={() => setShowPassword((visible) => !visible)}><Feather name={showPassword ? 'eye-off' : 'eye'} size={18} color={colors.mutedForeground} /></Pressable></View> : null}{isRegistration ? <Pressable onPress={() => setAccepted((checked) => !checked)} style={styles.checkRow}><View style={[styles.checkbox, { borderColor: accepted ? colors.primary : colors.border, backgroundColor: accepted ? colors.primary : 'transparent' }]}>{accepted ? <Feather name="check" size={13} color={colors.primaryForeground} /> : null}</View><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>I agree to the field safety and evidence terms.</Text></Pressable> : null}{error ? <Text style={[styles.errorText, { color: colors.critical }]}>{error}</Text> : null}<PrimaryButton title={isLogin ? 'Sign in' : isRegistration ? 'Create account' : isReset ? 'Save new password' : 'Continue'} icon="arrow-right" onPress={submit} />{isLogin ? <><Pressable onPress={() => router.push('/forgot-password')}><Text style={[styles.authLink, { color: colors.primary }]}>Forgot password?</Text></Pressable><View style={styles.authFooter}><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>New to RailGuard?</Text><Pressable onPress={() => router.push('/registration')}><Text style={[styles.authLink, { color: colors.primary }]}>Create an account</Text></Pressable></View></> : isRegistration ? <View style={styles.authFooter}><Text style={[styles.rowSubtitle, { color: colors.mutedForeground }]}>Already registered?</Text><Pressable onPress={() => router.replace('/login')}><Text style={[styles.authLink, { color: colors.primary }]}>Sign in</Text></Pressable></View> : null}</View>;
 }
 
 function InspectionSetup() {
@@ -670,6 +714,20 @@ const styles = StyleSheet.create({
   authBody: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 21, marginBottom: 7 },
   input: { minHeight: 50, borderWidth: 1, paddingHorizontal: 14, fontFamily: 'Inter_400Regular', fontSize: 14 },
   authLink: { fontFamily: 'Inter_600SemiBold', textAlign: 'center', fontSize: 13, marginVertical: 3 },
+  authBack: { flexDirection: 'row', alignItems: 'center', gap: 7, alignSelf: 'flex-start', marginBottom: 3 },
+  authFooter: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 5, marginTop: 2 },
+  errorText: { fontFamily: 'Inter_500Medium', fontSize: 12, lineHeight: 17 },
+  passwordField: { minHeight: 50, borderWidth: 1, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center' },
+  passwordInput: { flex: 1, minHeight: 48, fontFamily: 'Inter_400Regular', fontSize: 14 },
+  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 2 },
+  checkbox: { width: 21, height: 21, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  splashHero: { alignItems: 'center', paddingTop: 30, paddingBottom: 22 },
+  splashName: { fontFamily: 'Inter_700Bold', fontSize: 25, letterSpacing: 4, marginTop: 13 },
+  splashSignal: { minHeight: 28, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 20 },
+  onboardingHero: { borderWidth: 1, padding: 20, alignItems: 'center', minHeight: 270, justifyContent: 'center' },
+  onboardingHeroIcon: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
+  progressDots: { flexDirection: 'row', justifyContent: 'center', gap: 7, paddingVertical: 2 },
+  progressDot: { width: 22, height: 4 },
   directoryIntro: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20, marginTop: 2 },
   onboardingRow: { flexDirection: 'row', gap: 11, alignItems: 'center', paddingVertical: 9 },
   onboardingIcon: { width: 42, height: 42, justifyContent: 'center', alignItems: 'center' },
