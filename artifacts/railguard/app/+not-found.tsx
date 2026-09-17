@@ -1,5 +1,5 @@
-import { Link, Stack } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { router, Stack } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 
 export default function NotFoundScreen() {
@@ -13,11 +13,9 @@ export default function NotFoundScreen() {
           This screen doesn&apos;t exist.
         </Text>
 
-        <Link href="/" style={styles.link}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>
-            Go to home screen!
-          </Text>
-        </Link>
+        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace('/splash'))} style={styles.link}>
+          <Text style={[styles.linkText, { color: colors.primary }]}>Go back</Text>
+        </Pressable>
       </View>
     </>
   );
