@@ -77,6 +77,8 @@ sealed class Screen(val route: String) {
     object About : Screen("about")
     object Attention : Screen("attention")
     object Notifications : Screen("notifications")
+    object AiOracle : Screen("ai_oracle")
+    object TrainConnection : Screen("train_connection")
 }
 
 data class NavigationTab(
@@ -445,6 +447,26 @@ fun RailGuardApp() {
                         )
                         Screen.Notifications.route -> NotificationsScreen(
                             notifications = notifications,
+                            onBack = { navigateBack() }
+                        )
+                        Screen.AiOracle.route -> AiOracleScreen(
+                            defects = defects,
+                            tasks = tasks,
+                            onInspectDefect = {
+                                selectedDefect = it
+                                navigateTo(Screen.DefectDetails.route)
+                            },
+                            onDispatchTask = {
+                                selectedTask = it
+                                navigateTo(Screen.TaskDetails.route)
+                            },
+                            onNavigateCrackGrowth = { navigateTo(Screen.GrowthAnalysis.route) },
+                            onNavigateHeatmap = { navigateTo(Screen.RiskHeatmap.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.TrainConnection.route -> TrainConnectionScreen(
+                            onNavigateLiveScan = { navigateTo(Screen.LiveInspection.route) },
+                            onNavigateMap = { navigateTo(Screen.Map.route) },
                             onBack = { navigateBack() }
                         )
                     }

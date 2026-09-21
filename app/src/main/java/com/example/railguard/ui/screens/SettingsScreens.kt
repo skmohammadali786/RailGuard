@@ -140,6 +140,34 @@ fun SettingsScreen(
             SectionLabel(title = "SYSTEM MODULES")
 
             ListRow(
+                icon = Icons.Default.Train,
+                title = "Train Telemetry & Cab Uplink",
+                subtitle = "Live ETCS Level 2 train connection, speed & dispatch",
+                trailing = "Live",
+                tone = Tone.HEALTHY,
+                onClick = { onNavigate("train_connection") }
+            )
+            ListRow(
+                icon = Icons.Default.Psychology,
+                title = "AI Predictive Safety Oracle",
+                subtitle = "Tensor crack kinetics, derailment risk & Paris law",
+                trailing = "92.4%",
+                tone = Tone.INFO,
+                onClick = { onNavigate("ai_oracle") }
+            )
+            ListRow(
+                icon = Icons.Default.Explore,
+                title = "Welcome Tour & Onboarding",
+                subtitle = "Review interactive field guide walkthrough",
+                onClick = { onNavigate("onboarding") }
+            )
+            ListRow(
+                icon = Icons.Default.Lock,
+                title = "Authentication & Splash Flow",
+                subtitle = "Splash screen, sign in, registration & password reset",
+                onClick = { onNavigate("splash") }
+            )
+            ListRow(
                 icon = Icons.Default.PriorityHigh,
                 title = "Requires Immediate Attention",
                 subtitle = "Active restrictions and open priority tasks",

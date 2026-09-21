@@ -3,9 +3,11 @@ package com.example.railguard.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -306,7 +308,7 @@ fun PdfPreviewScreen(
     val colorScheme = MaterialTheme.colorScheme
     var isDownloaded by remember { mutableStateOf(false) }
     var isDownloading by remember { mutableStateOf(false) }
-    var selectedPage by remember { mutableIntStateOf(1) }
+    var selectedPage by remember { mutableIntStateOf(0) } // 0 = All Pages (Full Dossier)
 
     LaunchedEffect(isDownloading) {
         if (isDownloading) {
@@ -315,6 +317,14 @@ fun PdfPreviewScreen(
             isDownloaded = true
         }
     }
+
+    val pageTitles = listOf(
+        0 to "All Pages (Full Dossier)",
+        1 to "Page 1: Overview & GPS",
+        2 to "Page 2: Defect Register",
+        3 to "Page 3: AI & Kinetics",
+        4 to "Page 4: Train & Maintenance"
+    )
 
     LazyColumn(
         modifier = Modifier
@@ -325,7 +335,7 @@ fun PdfPreviewScreen(
     ) {
         item {
             Header(
-                title = "Verified PDF Document",
+                title = "Verified PDF Evidence Dossier",
                 subtitle = reportTitle,
                 onBack = onBack
             )
@@ -352,14 +362,14 @@ fun PdfPreviewScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isDownloading) "Generating PDF..." else if (isDownloaded) "PDF Downloaded ✓" else "Download PDF (3.2 MB)",
+                        text = if (isDownloading) "Compiling PDF..." else if (isDownloaded) "PDF Downloaded (4.8 MB) ✓" else "Download Full PDF (4.8 MB)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
                 }
 
                 OutlinedButton(
-                    onClick = { /* Print simulated */ },
+                    onClick = { isDownloading = true },
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.height(46.dp)
                 ) {
@@ -373,19 +383,21 @@ fun PdfPreviewScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Page Selector Tab
+            // Page Selector Tabs
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                listOf(1 to "Page 1: Executive Findings", 2 to "Page 2: Sensor Telemetry & Hashes").forEach { (pg, title) ->
+                pageTitles.forEach { (pg, title) ->
                     val isSel = selectedPage == pg
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .background(if (isSel) colorScheme.primary else colorScheme.surfaceVariant)
                             .clickable { selectedPage = pg }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
                             text = title,
@@ -400,7 +412,7 @@ fun PdfPreviewScreen(
             Spacer(modifier = Modifier.height(14.dp))
         }
 
-        // Clean and Colorful PDF Sheet
+        // Clean, High-Fidelity Colorful PDF Sheet Canvas
         item {
             Column(
                 modifier = Modifier
@@ -410,7 +422,9 @@ fun PdfPreviewScreen(
                     .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(10.dp))
                     .padding(18.dp)
             ) {
-                // Official Colorful Header
+                // ==========================================
+                // OFFICIAL PDF HEADER (Present on Document)
+                // ==========================================
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -419,7 +433,7 @@ fun PdfPreviewScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(40.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Color(0xFF0369A1)),
                             contentAlignment = Alignment.Center
@@ -428,7 +442,7 @@ fun PdfPreviewScreen(
                                 imageVector = Icons.Default.Train,
                                 contentDescription = null,
                                 tint = Color.White,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
@@ -436,13 +450,13 @@ fun PdfPreviewScreen(
                             Text(
                                 text = "RAILGUARD AUDIT NETWORK",
                                 color = Color(0xFF0369A1),
-                                fontSize = 13.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontFamily = FontFamily.Monospace
                             )
                             Text(
-                                text = "INFRASTRUCTURE SAFETY & DERAILMENT PREVENTION",
-                                color = Color(0xFF64748B),
+                                text = "OFFICIAL FIELD ENGINEERING & SAFETY DOSSIER",
+                                color = Color(0xFF475569),
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -464,36 +478,49 @@ fun PdfPreviewScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
                 Spacer(modifier = Modifier.height(12.dp))
 
-                if (selectedPage == 1) {
-                    // Page 1: Executive Summary & Table
+                // ====================================================
+                // PAGE 1: EXECUTIVE FINDINGS & CORRIDOR GEOLOCATION
+                // ====================================================
+                if (selectedPage == 0 || selectedPage == 1) {
+                    Text(
+                        text = "DOCUMENT SPECIFICATIONS & PARAMETERS",
+                        color = Color(0xFF0369A1),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column {
-                            Text(text = "DOCUMENT REF:", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "REP-2024-W25/S14", color = Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            Text(text = "DOCUMENT REF:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "REP-2024-W25/S14-EVIDENCE", color = Color(0xFF0F172A), fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(text = "SECURITY CLASS:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "OFFICIAL-SENSITIVE / IMMUTABLE", color = Color(0xFF475569), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                         Column {
-                            Text(text = "DATE OF AUDIT:", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "2024-06-18 14:32 UTC", color = Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Column {
-                            Text(text = "CORRIDOR:", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "North Loop (Sec 14)", color = Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "DATE & TIMESTAMP:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "2024-06-18 14:32:15 UTC", color = Color(0xFF0F172A), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(text = "LEAD INSPECTOR:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "E. Chen (IRSE-UK #849201)", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Colorful Metric Highlight Tiles
+                    // Colorful Highlight Badges
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Box(
                             modifier = Modifier
@@ -504,8 +531,8 @@ fun PdfPreviewScreen(
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("DEFECT SEVERITY", color = Color(0xFFDC2626), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("CRITICAL 92/100", color = Color(0xFF991B1B), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("MAX SEVERITY", color = Color(0xFFDC2626), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text("CRITICAL 92/100", color = Color(0xFF991B1B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -518,8 +545,8 @@ fun PdfPreviewScreen(
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("SPEED RESTRICTION", color = Color(0xFF854D0E), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("25 km/h CAP", color = Color(0xFF713F12), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("ACTIVE TSR LIMIT", color = Color(0xFF854D0E), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text("25 km/h TSR", color = Color(0xFF713F12), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -532,8 +559,8 @@ fun PdfPreviewScreen(
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("AUDIT STATUS", color = Color(0xFF059669), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("DISPATCHED", color = Color(0xFF065F46), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("TOTAL DISTANCE", color = Color(0xFF059669), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text("1,250 METERS", color = Color(0xFF065F46), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -541,24 +568,7 @@ fun PdfPreviewScreen(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
-                        text = "Executive Inspection Summary",
-                        color = Color(0xFF0F172A),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "During visual & ultrasonic inspection pass INSP-240618-04, optical neural detection identified rapid propagation of transverse fatigue crack CRK-2048 at chainage 14+320. Crack has penetrated 46 mm into the rail head. Immediate derailment mitigation has been enforced.",
-                        color = Color(0xFF334155),
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Colorful Finding Table
-                    Text(
-                        text = "Identified Corridor Findings",
+                        text = "1. Corridor Geolocation & Linear Referencing (LRS)",
                         color = Color(0xFF0F172A),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
@@ -568,80 +578,288 @@ fun PdfPreviewScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .background(Color(0xFFF8FAFC))
                             .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
+                            .padding(10.dp)
                     ) {
-                        // Header
+                        Text("• Corridor / Line: North Loop Line (Section 14) · Up & Down Main Tracks", color = Color(0xFF1E293B), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Chainage Bounds: KM 14+000 to KM 15+250 (1,250 meters total surveyed)", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Start Geodetic GPS: 51°30'08.4\"N 0°07'31.2\"W (Lat: 51.50233°, Lon: -0.12533° · Alt 46.8m)", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("• Critical Defect GPS: 51°30'14.2\"N 0°07'42.8\"W (Lat: 51.50394°, Lon: -0.12856° · Alt 48.2m)", color = Color(0xFFB91C1C), fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        Text("• End Geodetic GPS: 51°30'26.1\"N 0°07'59.4\"W (Lat: 51.50725°, Lon: -0.13317° · Alt 51.0m)", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("• RTK GNSS Correction: Base Station Oxford South · Mode: RTK FIXED (H: ±1.2cm, V: ±1.8cm)", color = Color(0xFF059669), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Rail Profile & Grade: 60E1 (UIC 60) Continuous Welded Rail (CWR) · R260 Grade Steel", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Sleeper / Fastener Type: Monobloc Concrete Tie G44 · Pandrol Fastclip FC-1500", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Track Geometry Parameters: Dynamic Gauge 1,438.2 mm (+3.2mm) · Cant 65mm · Twist 1.2mm/m", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // ====================================================
+                // PAGE 2: COMPLETE DEFECT REGISTER (EVERY SINGLE DEFECT)
+                // ====================================================
+                if (selectedPage == 0 || selectedPage == 2) {
+                    if (selectedPage == 0) {
+                        HorizontalDivider(color = Color(0xFFCBD5E1), thickness = 2.dp)
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    Text(
+                        text = "2. Complete Defect Register (All Logged Anomalies)",
+                        color = Color(0xFF0F172A),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(6.dp))
+                    ) {
+                        // Table Header
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFFF1F5F9))
+                                .background(Color(0xFFE2E8F0))
                                 .padding(8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("DEFECT ID / TYPE", color = Color(0xFF475569), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text("CHAINAGE", color = Color(0xFF475569), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text("ACTION", color = Color(0xFF475569), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("ID · DEFECT TYPE", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(2f))
+                            Text("CHAINAGE / GPS", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.5f))
+                            Text("SEVERITY", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("DIRECTIVE", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.2f))
                         }
 
-                        // Row 1
+                        // Defect 1: CRK-2048
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color.White)
+                                .background(Color(0xFFFEF2F2))
                                 .padding(8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text("CRK-2048 · Transverse Crack", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Depth: 46 mm · Severity: 92", color = Color(0xFF64748B), fontSize = 9.sp)
+                            Column(modifier = Modifier.weight(2f)) {
+                                Text("CRK-2048 · Transverse Crack", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Depth: 46mm · Gauge Face · Tie #14-320", color = Color(0xFF475569), fontSize = 8.sp)
+                                Text("Growth: +0.71 mm/day · Rupture in 72h", color = Color(0xFFB91C1C), fontSize = 8.sp, fontWeight = FontWeight.Bold)
                             }
-                            Text("14+320", color = Color(0xFF0F172A), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFFFEE2E2))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text("RESTRICT 25", color = Color(0xFFB91C1C), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Column(modifier = Modifier.weight(1.5f)) {
+                                Text("14+320 UP", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                Text("51.50394, -0.12856", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Color(0xFFDC2626))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text("92/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1.2f)) {
+                                Text("25 km/h TSR", color = Color(0xFF991B1B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text("Clamp + Replace", color = Color(0xFF475569), fontSize = 8.sp)
                             }
                         }
 
                         HorizontalDivider(color = Color(0xFFF1F5F9))
 
-                        // Row 2
+                        // Defect 2: CRK-2044
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFFFAFAFA))
+                                .background(Color.White)
                                 .padding(8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text("CRK-2044 · Head Check Flaw", color = Color(0xFFD97706), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Length: 28 mm · Severity: 74", color = Color(0xFF64748B), fontSize = 9.sp)
+                            Column(modifier = Modifier.weight(2f)) {
+                                Text("CRK-2044 · Head Check Flaw", color = Color(0xFFB45309), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Length: 28mm · Running Surface · Tie #14-112", color = Color(0xFF475569), fontSize = 8.sp)
+                                Text("Growth: +0.22 mm/day · Non-immediate", color = Color(0xFF64748B), fontSize = 8.sp)
                             }
-                            Text("14+890", color = Color(0xFF0F172A), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFFFEF3C7))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text("MONITOR 48H", color = Color(0xFFD97706), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Column(modifier = Modifier.weight(1.5f)) {
+                                Text("14+108 DOWN", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                Text("51.50290, -0.12640", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Color(0xFFF59E0B))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text("74/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1.2f)) {
+                                Text("Monitor 48h", color = Color(0xFFB45309), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text("Grind profile", color = Color(0xFF475569), fontSize = 8.sp)
+                            }
+                        }
+
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+
+                        // Defect 3: FL-1092
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFFFFFBEB))
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(2f)) {
+                                Text("FL-1092 · Clip Displacement", color = Color(0xFF92400E), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Displacement: 14mm · Sleeper #14-380 Left", color = Color(0xFF475569), fontSize = 8.sp)
+                            }
+                            Column(modifier = Modifier.weight(1.5f)) {
+                                Text("14+380 UP", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                Text("51.50420, -0.12910", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Color(0xFFD97706))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text("58/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1.2f)) {
+                                Text("Dispatch MT-881", color = Color(0xFF92400E), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text("Replace clip tonight", color = Color(0xFF475569), fontSize = 8.sp)
+                            }
+                        }
+
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+
+                        // Defect 4: GEO-0402
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.White)
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(2f)) {
+                                Text("GEO-0402 · Gauge Widening", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Gauge: 1,442.0 mm (+7mm variance)", color = Color(0xFF475569), fontSize = 8.sp)
+                            }
+                            Column(modifier = Modifier.weight(1.5f)) {
+                                Text("14+250 UP", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                Text("51.50340, -0.12780", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Color(0xFF0284C7))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text("44/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1.2f)) {
+                                Text("Re-gauge Pass", color = Color(0xFF0369A1), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text("Tamping cycle", color = Color(0xFF475569), fontSize = 8.sp)
+                            }
+                        }
+
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+
+                        // Defect 5: SW-0801
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFFF8FAFC))
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(2f)) {
+                                Text("SW-0801 · Switch Blade Gap", color = Color(0xFF475569), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Gap: 3.8mm at Turnout 14A · Lubricate", color = Color(0xFF475569), fontSize = 8.sp)
+                            }
+                            Column(modifier = Modifier.weight(1.5f)) {
+                                Text("14+520", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                Text("51.50510, -0.13020", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Color(0xFF64748B))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text("36/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1.2f)) {
+                                Text("Scheduled Check", color = Color(0xFF475569), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text("Crew 02 routine", color = Color(0xFF475569), fontSize = 8.sp)
                             }
                         }
                     }
-                } else {
-                    // Page 2: Sensor Telemetry & Cryptographic Verification
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // ====================================================
+                // PAGE 3: AI NEURAL INFERENCE & RUPTURE KINETICS
+                // ====================================================
+                if (selectedPage == 0 || selectedPage == 3) {
+                    if (selectedPage == 0) {
+                        HorizontalDivider(color = Color(0xFFCBD5E1), thickness = 2.dp)
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
                     Text(
-                        text = "Technical Telemetry & Calibration",
+                        text = "3. AI Predictive Analytics & Rupture Kinetics Model",
                         color = Color(0xFF0F172A),
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFF0F9FF))
+                            .border(1.dp, Color(0xFFBAE6FD), RoundedCornerShape(6.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text("• Neural Architecture: RailVision-DeepTrack v4.2 · Edge TPU FP16 Quantized Model", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Inference Latency: 16 ms / frame @ 60 FPS real-time vision pipeline", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Visual Tensor Confidence: 92.4% (Bounding Box: [X: 420, Y: 180, W: 310, H: 85])", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Ultrasonic B-Scan Correlation: 88.7% internal echo flaw signature at 46mm depth", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Thermal Core Readout: FLIR Boson Radiometric · Ambient 24.2°C · Rail 38.4°C · Hotspot 44.1°C", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Crack Propagation Formula: Paris Law da/dN = 2.4e-11 * (ΔK)^3.2 (Cycles to critical break: 1,840)", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Nadal Derailment Ratio: Y/Q = 0.68 under current geometry (Critical threshold Y/Q = 0.80)", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Flange Climb Probabilities: 96.2% at 45 km/h · 48.7% at 35 km/h · 12.4% at 25 km/h (TSR ACTIVE)", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Continuous Welded Rail Neutral Temp: SFT 27°C · Current tension stress: +18 MPa", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // ====================================================
+                // PAGE 4: TRAIN TELEMETRY & MAINTENANCE SIGN-OFF
+                // ====================================================
+                if (selectedPage == 0 || selectedPage == 4) {
+                    if (selectedPage == 0) {
+                        HorizontalDivider(color = Color(0xFFCBD5E1), thickness = 2.dp)
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    Text(
+                        text = "4. Connected Train Live Telemetry (Train TR-104 Link)",
+                        color = Color(0xFF0F172A),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     Column(
                         modifier = Modifier
@@ -650,19 +868,43 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                             .padding(10.dp)
                     ) {
-                        Text("• Sensor Rig: Sony Pregius S 4K Optical + FLIR Boson LWIR + Olympus Ultrasonic", color = Color(0xFF334155), fontSize = 10.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("• RTK GPS Correction: Base Station Oxford South (RTK Lock ± 1.2 cm)", color = Color(0xFF334155), fontSize = 10.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("• Rail Gauge Variance: +4.2 mm deviation from nominal 1435 mm standard", color = Color(0xFF334155), fontSize = 10.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("• Rail Temperature: 38.4°C (Safe limit below buckling threshold 54°C)", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Connected Locomotive: TR-104 High-Speed InterCity Express (Class 800 Locomotive)", color = Color(0xFF1E293B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Onboard Unit (OBU): Alstom Atlas 200 ETCS Level 2 · IP 10.142.8.50:50051 UDP", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("• Telemetry Uplink: 5G Train-to-Ground Radio + GSM-R Backup (-64 dBm · 12ms ping)", color = Color(0xFF059669), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Live Operational Speed: 118.4 km/h approaching Section 14 at 14:32:15 UTC", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Axle Load & Vibration: 18.5 tonnes/axle · Vertical vibration 0.042g RMS (Safe < 0.15g)", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Wheel Bearing Infrared Temp: Axle 1: 31.8°C · Axle 2: 32.4°C · Axle 3: 33.1°C (Nominal)", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Driver DMI Cab Display Alert: TSR 25 km/h enforced and acknowledged by Driver at 14:32:05 UTC", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
-                        text = "Cryptographic Package Ledger",
+                        text = "5. Maintenance Work Orders Dispatched",
+                        color = Color(0xFF0F172A),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFFEFCE8))
+                            .border(1.dp, Color(0xFFFEF08A), RoundedCornerShape(6.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text("• Work Order MT-881: Replace Rail Clip Pair & Emergency Fishplate Clamp at 14+320", color = Color(0xFF713F12), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("  - Assigned: Crew 04 (Lead: M. Ross) · Window: 01:15 - 04:30 GMT tonight · Est: 85 mins", color = Color(0xFF854D0E), fontSize = 9.sp)
+                        Text("  - Required Hardware: Pandrol FC-1500 clip pair, 6-hole emergency fishplate, torque wrench", color = Color(0xFF854D0E), fontSize = 9.sp)
+                        Text("• Work Order MT-882: Ultrasonic B-scan Re-verification at 14+108 (Ultrasonic Team B)", color = Color(0xFF713F12), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Work Order MT-883: Railhead Milling & Grinding Pass 14+000 - 14+400 (Rail Grinder RG-02)", color = Color(0xFF713F12), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "6. Cryptographic Audit Seal & Blockchain Block Hash",
                         color = Color(0xFF0F172A),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
@@ -676,57 +918,51 @@ fun PdfPreviewScreen(
                             .clip(RoundedCornerShape(6.dp))
                             .padding(10.dp)
                     ) {
-                        Text(
-                            text = "SHA-256 ROOTHASH:",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-                            color = Color(0xFF38BDF8),
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "TIMESTAMP STAMP: 2024-06-18T14:32:00Z · BLOCK #849102",
-                            color = Color(0xFF22C55E),
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-                HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Official Signature Block
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("CERTIFIED BY:", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        Text("E. Chen · Chartered Safety Inspector", color = Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text("License IRSE-UK #849201 · Level 3", color = Color(0xFF64748B), fontSize = 9.sp)
+                        Text("SHA-256 ROOT BUNDLE HASH:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        Text("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", color = Color(0xFF38BDF8), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("MERKLE TREE ROOT:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        Text("7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069", color = Color(0xFF818CF8), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("BLOCK INDEX: #849102-S14 · TIMESTAMP: 2024-06-18T14:32:15.829Z", color = Color(0xFF4ADE80), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .border(1.dp, Color(0xFF16A34A), RoundedCornerShape(4.dp))
-                            .background(Color(0xFFF0FDF4))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Official Digital Signature Block
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "DIGITALLY SIGNED ✓",
-                            color = Color(0xFF16A34A),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        Column {
+                            Text("CERTIFIED & SEALED BY:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            Text("E. Chen, BEng (Hons) CEng FIRSE", color = Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Lead Rail Safety Inspector · License IRSE-UK #849201 Level 3", color = Color(0xFF64748B), fontSize = 9.sp)
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .border(1.5.dp, Color(0xFF16A34A), RoundedCornerShape(4.dp))
+                                .background(Color(0xFFF0FDF4))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "CRYPTOGRAPHICALLY SEALED",
+                                    color = Color(0xFF16A34A),
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "IRSE #849201 VERIFIED ✓",
+                                    color = Color(0xFF15803D),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
                 }
             }
