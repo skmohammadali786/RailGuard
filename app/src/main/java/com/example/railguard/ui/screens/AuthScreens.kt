@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.railguard.components.PrimaryButton
 import com.example.railguard.components.StatusPill
+import com.example.railguard.model.LocalAppSettings
 import com.example.railguard.model.Tone
 
 @Composable
@@ -271,6 +272,7 @@ fun LoginScreen(
     onRegisterClick: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val settings = LocalAppSettings.current
     var email by remember { mutableStateOf("e.chen@railguard.field") }
     var password by remember { mutableStateOf("••••••••") }
     var showPassword by remember { mutableStateOf(false) }
@@ -281,12 +283,13 @@ fun LoginScreen(
             .fillMaxSize()
             .background(colorScheme.background)
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .size(54.dp)
+                .clip(RoundedCornerShape(14.dp))
                 .background(colorScheme.primary),
             contentAlignment = Alignment.Center
         ) {
@@ -294,26 +297,30 @@ fun LoginScreen(
                 imageVector = Icons.Default.Shield,
                 contentDescription = null,
                 tint = colorScheme.onPrimary,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(30.dp)
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Welcome back",
+            text = settings.translate("welcome_back"),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            color = colorScheme.onBackground
+            color = colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Sign in to continue your inspections and safety decisions.",
+            text = settings.translate("welcome_back_sub"),
             style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.onSurfaceVariant
+            color = colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
         OutlinedTextField(
             value = email,
@@ -348,18 +355,20 @@ fun LoginScreen(
             Text(
                 text = errorMessage,
                 color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
         ) {
             Text(
-                text = "Forgot password?",
+                text = settings.translate("forgot_password"),
                 style = MaterialTheme.typography.labelMedium,
                 color = colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
@@ -370,7 +379,7 @@ fun LoginScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         PrimaryButton(
-            title = "Sign in",
+            title = settings.translate("sign_in"),
             icon = Icons.AutoMirrored.Filled.ArrowForward,
             onClick = {
                 if (!email.contains("@")) {
@@ -390,15 +399,11 @@ fun LoginScreen(
             horizontalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "New to RailGuard? ",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Create an account",
+                text = settings.translate("new_to_railguard"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colorScheme.primary,
                 fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
                 modifier = Modifier.clickable { onRegisterClick() }
             )
         }
@@ -411,6 +416,7 @@ fun RegistrationScreen(
     onLoginClick: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val settings = LocalAppSettings.current
     var fullName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -422,19 +428,41 @@ fun RegistrationScreen(
             .fillMaxSize()
             .background(colorScheme.background)
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(colorScheme.primary),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PersonAdd,
+                contentDescription = null,
+                tint = colorScheme.onPrimary,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
-            text = "Create your field account",
+            text = settings.translate("create_account"),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            color = colorScheme.onBackground
+            color = colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Access live track inspections, defect register, and audit trails.",
+            text = settings.translate("create_account_sub"),
             style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.onSurfaceVariant
+            color = colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -493,14 +521,16 @@ fun RegistrationScreen(
             Text(
                 text = errorMessage,
                 color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
         PrimaryButton(
-            title = "Create account",
+            title = settings.translate("create_account_btn"),
             onClick = {
                 if (fullName.trim().length < 2) {
                     errorMessage = "Enter your full name."
@@ -518,23 +548,14 @@ fun RegistrationScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = "Already registered? ",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Sign in",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable { onLoginClick() }
-            )
-        }
+        Text(
+            text = settings.translate("already_registered"),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.clickable { onLoginClick() }
+        )
     }
 }
 
@@ -544,6 +565,7 @@ fun ForgotPasswordScreen(
     onBackToLogin: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val settings = LocalAppSettings.current
     var email by remember { mutableStateOf("e.chen@railguard.field") }
     var errorMessage by remember { mutableStateOf("") }
 
@@ -552,19 +574,41 @@ fun ForgotPasswordScreen(
             .fillMaxSize()
             .background(colorScheme.background)
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(colorScheme.primary),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.LockReset,
+                contentDescription = null,
+                tint = colorScheme.onPrimary,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
-            text = "Recover access",
+            text = settings.translate("recover_access"),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            color = colorScheme.onBackground
+            color = colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "We’ll send a 6-digit verification code to your verified work email.",
+            text = settings.translate("recover_access_sub"),
             style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.onSurfaceVariant
+            color = colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -582,14 +626,16 @@ fun ForgotPasswordScreen(
             Text(
                 text = errorMessage,
                 color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
         PrimaryButton(
-            title = "Send verification code",
+            title = settings.translate("send_code"),
             onClick = {
                 if (!email.contains("@")) {
                     errorMessage = "Enter the email associated with your account."
@@ -599,16 +645,15 @@ fun ForgotPasswordScreen(
             }
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         Text(
             text = "Back to sign in",
             style = MaterialTheme.typography.bodyMedium,
             color = colorScheme.primary,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier
-                .align(Alignment.CenterHorizontally)
-                .clickable { onBackToLogin() }
+            textAlign = TextAlign.Center,
+            modifier = Modifier.clickable { onBackToLogin() }
         )
     }
 }
@@ -629,18 +674,38 @@ fun OtpScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(colorScheme.primary),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Pin,
+                contentDescription = null,
+                tint = colorScheme.onPrimary,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
             text = "Verify your code",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            color = colorScheme.onBackground
+            color = colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = "Enter the 6-digit passcode dispatched to e.chen@railguard.field",
             style = MaterialTheme.typography.bodyMedium,
             color = colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -665,7 +730,9 @@ fun OtpScreen(
             Text(
                 text = errorMessage,
                 color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
 
@@ -698,19 +765,41 @@ fun ResetPasswordScreen(
             .fillMaxSize()
             .background(colorScheme.background)
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(colorScheme.primary),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Key,
+                contentDescription = null,
+                tint = colorScheme.onPrimary,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
             text = "Set a new passcode",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            color = colorScheme.onBackground
+            color = colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = "Choose a strong password to protect your field evidence sign-offs.",
             style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.onSurfaceVariant
+            color = colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -740,7 +829,9 @@ fun ResetPasswordScreen(
             Text(
                 text = errorMessage,
                 color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
 

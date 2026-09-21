@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.railguard.model.LocalAppSettings
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
@@ -497,6 +498,7 @@ fun RealTimeTrainLineMap(
         label = "SignalPulse"
     )
 
+    val settings = LocalAppSettings.current
     var selectedStationName by remember { mutableStateOf<String?>(null) }
     var selectedTrainId by remember { mutableStateOf<String?>(null) }
 
@@ -513,7 +515,7 @@ fun RealTimeTrainLineMap(
             .clip(RoundedCornerShape(10.dp))
             .background(if (isDark) Color(0xFF0F1722) else Color(0xFF1E293B))
             .border(1.dp, colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-            .padding(if (compact) 8.dp else 14.dp)
+            .padding(if (compact) 6.dp else 14.dp)
     ) {
         // Map HUD Header
         Row(
@@ -532,7 +534,7 @@ fun RealTimeTrainLineMap(
                 Text(
                     text = "REAL-TIME CORRIDOR LINE MAP",
                     color = Color.White,
-                    fontSize = 11.sp,
+                    fontSize = if (compact) 9.5.sp else 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 0.5.sp
@@ -546,24 +548,29 @@ fun RealTimeTrainLineMap(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .background(Color(0xFFEF4444).copy(alpha = 0.2f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
                 ) {
-                    Text("25 km/h ZONE", color = Color(0xFFFCA5A5), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "${settings.formatSpeed(25)} ZONE",
+                        color = Color(0xFFFCA5A5),
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-                Text("LIVE", color = Color(0xFF22C55E), fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                Text("LIVE", color = Color(0xFF22C55E), fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
         }
 
-        Spacer(modifier = Modifier.height(if (compact) 6.dp else 10.dp))
+        Spacer(modifier = Modifier.height(if (compact) 4.dp else 10.dp))
 
         // Schematic Canvas
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (compact) 115.dp else 190.dp)
+                .height(if (compact) 76.dp else 190.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color(0xFF0B131E))
-                .padding(horizontal = 10.dp, vertical = if (compact) 4.dp else 8.dp)
+                .padding(horizontal = 8.dp, vertical = if (compact) 2.dp else 8.dp)
         ) {
             // Speed restriction zone highlight band
             Box(
@@ -571,7 +578,7 @@ fun RealTimeTrainLineMap(
                     .fillMaxHeight()
                     .fillMaxWidth(0.35f)
                     .align(Alignment.CenterStart)
-                    .offset(x = 90.dp)
+                    .offset(x = 80.dp)
                     .background(Color(0xFFEF4444).copy(alpha = 0.08f))
                     .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.25f), RoundedCornerShape(4.dp))
             )
@@ -582,7 +589,7 @@ fun RealTimeTrainLineMap(
                     .fillMaxWidth()
                     .height(2.dp)
                     .align(Alignment.Center)
-                    .offset(y = (-18).dp)
+                    .offset(y = if (compact) (-10).dp else (-18).dp)
                     .background(Color(0xFF38BDF8).copy(alpha = 0.8f))
             )
             // Down Line (Southbound)
@@ -591,7 +598,7 @@ fun RealTimeTrainLineMap(
                     .fillMaxWidth()
                     .height(2.dp)
                     .align(Alignment.Center)
-                    .offset(y = 18.dp)
+                    .offset(y = if (compact) 10.dp else 18.dp)
                     .background(Color(0xFF94A3B8).copy(alpha = 0.6f))
             )
 
@@ -605,8 +612,8 @@ fun RealTimeTrainLineMap(
                 repeat(18) {
                     Box(
                         modifier = Modifier
-                            .width(3.dp)
-                            .height(46.dp)
+                            .width(2.5.dp)
+                            .height(if (compact) 28.dp else 46.dp)
                             .background(Color.White.copy(alpha = 0.12f))
                     )
                 }
@@ -677,20 +684,20 @@ fun RealTimeTrainLineMap(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.Center)
-                    .offset(y = (-18).dp)
+                    .offset(y = if (compact) (-10).dp else (-18).dp)
             ) {
                 val trainX = maxWidth * train1Progress - 20.dp
                 Box(
                     modifier = Modifier
                         .offset(x = trainX)
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(RoundedCornerShape(5.dp))
                         .background(Color(0xFF0284C7))
-                        .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(6.dp))
+                        .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(5.dp))
                         .clickable {
                             selectedTrainId = "TR-104"
                             onSelectTrain?.invoke("TR-104")
                         }
-                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                        .padding(horizontal = 4.dp, vertical = 1.5.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -698,13 +705,13 @@ fun RealTimeTrainLineMap(
                             imageVector = Icons.Default.Train,
                             contentDescription = "TR-104",
                             tint = Color.White,
-                            modifier = Modifier.size(11.dp)
+                            modifier = Modifier.size(if (compact) 9.dp else 11.dp)
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
                         Text(
-                            text = "TR-104 118km/h",
+                            text = "TR-104 ${settings.formatSpeed(118)}",
                             color = Color.White,
-                            fontSize = 8.sp,
+                            fontSize = if (compact) 7.sp else 8.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
@@ -717,20 +724,20 @@ fun RealTimeTrainLineMap(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.Center)
-                    .offset(y = 18.dp)
+                    .offset(y = if (compact) 10.dp else 18.dp)
             ) {
                 val train2X = maxWidth * train2Progress - 20.dp
                 Box(
                     modifier = Modifier
                         .offset(x = train2X)
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(RoundedCornerShape(5.dp))
                         .background(Color(0xFFD97706))
-                        .border(1.dp, Color(0xFFFCD34D), RoundedCornerShape(6.dp))
+                        .border(1.dp, Color(0xFFFCD34D), RoundedCornerShape(5.dp))
                         .clickable {
                             selectedTrainId = "FR-802"
                             onSelectTrain?.invoke("FR-802")
                         }
-                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                        .padding(horizontal = 4.dp, vertical = 1.5.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -738,13 +745,13 @@ fun RealTimeTrainLineMap(
                             imageVector = Icons.Default.DirectionsRailway,
                             contentDescription = "FR-802",
                             tint = Color.White,
-                            modifier = Modifier.size(11.dp)
+                            modifier = Modifier.size(if (compact) 9.dp else 11.dp)
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
                         Text(
-                            text = "FR-802 45km/h",
+                            text = "FR-802 ${settings.formatSpeed(45)}",
                             color = Color.White,
-                            fontSize = 8.sp,
+                            fontSize = if (compact) 7.sp else 8.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
