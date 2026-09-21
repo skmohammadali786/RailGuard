@@ -1,0 +1,6 @@
+{
+  "name": "RailGuard",
+  "description": "AI-powered railway crack detection and safety analysis platform for field inspection and maintenance engineering",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
