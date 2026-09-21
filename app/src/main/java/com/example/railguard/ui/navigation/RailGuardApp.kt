@@ -1,6 +1,8 @@
 package com.example.railguard.ui.navigation
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -36,6 +38,7 @@ sealed class Screen(val route: String) {
     object InspectionSummary : Screen("inspection_summary")
     object InspectionCalendar : Screen("inspection_calendar")
     object Gps : Screen("gps")
+    object Camera : Screen("camera")
 
     object DefectDetails : Screen("defect_details")
     object CrackMeasurement : Screen("crack_measurement")
@@ -164,257 +167,287 @@ fun RailGuardApp() {
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                when (currentRoute) {
-                    Screen.Splash.route -> SplashScreen(
-                        onContinue = { navigateTo(Screen.Onboarding.route) },
-                        onLoginClick = { navigateTo(Screen.Login.route) }
-                    )
-                    Screen.Onboarding.route -> OnboardingScreen(
-                        onFinish = { navigateTo(Screen.Home.route) }
-                    )
-                    Screen.Login.route -> LoginScreen(
-                        onLoginSuccess = { navigateTo(Screen.Home.route) },
-                        onForgotPasswordClick = { navigateTo(Screen.ForgotPassword.route) },
-                        onRegisterClick = { navigateTo(Screen.Register.route) }
-                    )
-                    Screen.Register.route -> RegistrationScreen(
-                        onRegisterSuccess = { navigateTo(Screen.Home.route) },
-                        onLoginClick = { navigateTo(Screen.Login.route) }
-                    )
-                    Screen.ForgotPassword.route -> ForgotPasswordScreen(
-                        onSendOtp = { navigateTo(Screen.Otp.route) },
-                        onBackToLogin = { navigateTo(Screen.Login.route) }
-                    )
-                    Screen.Otp.route -> OtpScreen(
-                        onVerifySuccess = { navigateTo(Screen.ResetPassword.route) }
-                    )
-                    Screen.ResetPassword.route -> ResetPasswordScreen(
-                        onResetSuccess = { navigateTo(Screen.Login.route) }
-                    )
+                AnimatedContent(
+                    targetState = currentRoute,
+                    transitionSpec = {
+                        fadeIn(tween(220)) togetherWith fadeOut(tween(180))
+                    },
+                    label = "ScreenTransition"
+                ) { targetRoute ->
+                    when (targetRoute) {
+                        Screen.Splash.route -> SplashScreen(
+                            onContinue = { navigateTo(Screen.Onboarding.route) },
+                            onLoginClick = { navigateTo(Screen.Login.route) }
+                        )
+                        Screen.Onboarding.route -> OnboardingScreen(
+                            onFinish = { navigateTo(Screen.Home.route) }
+                        )
+                        Screen.Login.route -> LoginScreen(
+                            onLoginSuccess = { navigateTo(Screen.Home.route) },
+                            onForgotPasswordClick = { navigateTo(Screen.ForgotPassword.route) },
+                            onRegisterClick = { navigateTo(Screen.Register.route) }
+                        )
+                        Screen.Register.route -> RegistrationScreen(
+                            onRegisterSuccess = { navigateTo(Screen.Home.route) },
+                            onLoginClick = { navigateTo(Screen.Login.route) }
+                        )
+                        Screen.ForgotPassword.route -> ForgotPasswordScreen(
+                            onSendOtp = { navigateTo(Screen.Otp.route) },
+                            onBackToLogin = { navigateTo(Screen.Login.route) }
+                        )
+                        Screen.Otp.route -> OtpScreen(
+                            onVerifySuccess = { navigateTo(Screen.ResetPassword.route) }
+                        )
+                        Screen.ResetPassword.route -> ResetPasswordScreen(
+                            onResetSuccess = { navigateTo(Screen.Login.route) }
+                        )
 
-                    // Tabs
-                    Screen.Home.route -> HomeScreen(
-                        defects = defects,
-                        tasks = tasks,
-                        onNavigate = { navigateTo(it) },
-                        onDefectClick = {
-                            selectedDefect = it
-                            navigateTo(Screen.DefectDetails.route)
-                        },
-                        onTaskClick = {
-                            selectedTask = it
-                            navigateTo(Screen.TaskDetails.route)
-                        }
-                    )
-                    Screen.Inspections.route -> InspectionsListScreen(
-                        inspections = inspections,
-                        onSelectInspection = {
-                            selectedInspection = it
-                            navigateTo(Screen.InspectionDetails.route)
-                        },
-                        onStartNew = { navigateTo(Screen.InspectionSetup.route) },
-                        onViewCalendar = { navigateTo(Screen.InspectionCalendar.route) }
-                    )
-                    Screen.Defects.route -> DefectsListScreen(
-                        defects = defects,
-                        onSelectDefect = {
-                            selectedDefect = it
-                            navigateTo(Screen.DefectDetails.route)
-                        },
-                        onViewObservations = { navigateTo(Screen.AllObservations.route) }
-                    )
-                    Screen.Map.route -> MapScreen(
-                        onNavigateToDefectMap = { navigateTo(Screen.DefectMap.route) },
-                        onNavigateToHeatmap = { navigateTo(Screen.RiskHeatmap.route) },
-                        onNavigateToLocationDetails = { navigateTo(Screen.LocationDetails.route) },
-                        onSelectDefect = {
-                            selectedDefect = it
-                            navigateTo(Screen.DefectDetails.route)
-                        },
-                        defects = defects
-                    )
-                    Screen.Settings.route -> SettingsScreen(
-                        isDarkMode = isDarkMode,
-                        onToggleDarkMode = { isDarkMode = it },
-                        onNavigate = { navigateTo(it) },
-                        onSignOut = { navigateTo(Screen.Login.route) }
-                    )
+                        // Tabs
+                        Screen.Home.route -> HomeScreen(
+                            defects = defects,
+                            tasks = tasks,
+                            onNavigate = { navigateTo(it) },
+                            onDefectClick = {
+                                selectedDefect = it
+                                navigateTo(Screen.DefectDetails.route)
+                            },
+                            onTaskClick = {
+                                selectedTask = it
+                                navigateTo(Screen.TaskDetails.route)
+                            }
+                        )
+                        Screen.Inspections.route -> InspectionsListScreen(
+                            inspections = inspections,
+                            onSelectInspection = {
+                                selectedInspection = it
+                                navigateTo(Screen.InspectionDetails.route)
+                            },
+                            onStartNew = { navigateTo(Screen.InspectionSetup.route) },
+                            onViewCalendar = { navigateTo(Screen.InspectionCalendar.route) },
+                            onOpenCamera = { navigateTo(Screen.Camera.route) },
+                            onOpenGps = { navigateTo(Screen.Gps.route) }
+                        )
+                        Screen.Defects.route -> DefectsListScreen(
+                            defects = defects,
+                            onSelectDefect = {
+                                selectedDefect = it
+                                navigateTo(Screen.DefectDetails.route)
+                            },
+                            onViewObservations = { navigateTo(Screen.AllObservations.route) },
+                            onOpenDefectMap = { navigateTo(Screen.DefectMap.route) },
+                            onOpenCrackGrowth = { navigateTo(Screen.GrowthAnalysis.route) }
+                        )
+                        Screen.Map.route -> MapScreen(
+                            onNavigateToDefectMap = { navigateTo(Screen.DefectMap.route) },
+                            onNavigateToHeatmap = { navigateTo(Screen.RiskHeatmap.route) },
+                            onNavigateToLocationDetails = { navigateTo(Screen.LocationDetails.route) },
+                            onSelectDefect = {
+                                selectedDefect = it
+                                navigateTo(Screen.DefectDetails.route)
+                            },
+                            defects = defects
+                        )
+                        Screen.Settings.route -> SettingsScreen(
+                            isDarkMode = isDarkMode,
+                            onToggleDarkMode = { isDarkMode = it },
+                            onNavigate = { navigateTo(it) },
+                            onSignOut = { navigateTo(Screen.Login.route) }
+                        )
 
-                    // Sub-screens: Inspections
-                    Screen.InspectionSetup.route -> InspectionSetupScreen(
-                        onStartPatrol = { newRecord ->
-                            inspections.add(0, newRecord)
-                            selectedInspection = newRecord
-                            navigateTo(Screen.LiveInspection.route)
-                        },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.LiveInspection.route -> LiveInspectionScreen(
-                        onEndInspection = { navigateTo(Screen.InspectionSummary.route) },
-                        onDefectDetected = {
-                            selectedDefect = defects.first()
-                            navigateTo(Screen.DefectDetails.route)
-                        },
-                        onOpenGps = { navigateTo(Screen.Gps.route) },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.InspectionDetails.route -> InspectionDetailsScreen(
-                        inspection = selectedInspection,
-                        onOpenLive = { navigateTo(Screen.LiveInspection.route) },
-                        onOpenSummary = { navigateTo(Screen.InspectionSummary.route) },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.InspectionSummary.route -> InspectionSummaryScreen(
-                        onDone = {
-                            backStack.clear()
-                            currentRoute = Screen.Home.route
-                        },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.InspectionCalendar.route -> InspectionCalendarScreen(
-                        onBack = { navigateBack() }
-                    )
-                    Screen.Gps.route -> GpsScreen(onBack = { navigateBack() })
+                        // Sub-screens: Inspections
+                        Screen.InspectionSetup.route -> InspectionSetupScreen(
+                            onStartPatrol = { newRecord, isLive ->
+                                inspections.add(0, newRecord)
+                                selectedInspection = newRecord
+                                if (isLive) {
+                                    navigateTo(Screen.LiveInspection.route)
+                                } else {
+                                    navigateTo(Screen.InspectionDetails.route)
+                                }
+                            },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.LiveInspection.route -> LiveInspectionScreen(
+                            onEndInspection = { navigateTo(Screen.InspectionSummary.route) },
+                            onDefectDetected = {
+                                selectedDefect = defects.first()
+                                navigateTo(Screen.DefectDetails.route)
+                            },
+                            onOpenGps = { navigateTo(Screen.Gps.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.InspectionDetails.route -> InspectionDetailsScreen(
+                            inspection = selectedInspection,
+                            onOpenLive = { navigateTo(Screen.LiveInspection.route) },
+                            onOpenSummary = { navigateTo(Screen.InspectionSummary.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.InspectionSummary.route -> InspectionSummaryScreen(
+                            onDone = {
+                                navigateBack()
+                            },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.InspectionCalendar.route -> InspectionCalendarScreen(
+                            onBack = { navigateBack() }
+                        )
+                        Screen.Gps.route -> GpsScreen(onBack = { navigateBack() })
+                        Screen.Camera.route -> CameraScreen(
+                            onCaptureDefect = {
+                                selectedDefect = defects.first()
+                                navigateTo(Screen.DefectDetails.route)
+                            },
+                            onBack = { navigateBack() }
+                        )
 
-                    // Sub-screens: Defects
-                    Screen.DefectDetails.route -> DefectDetailsScreen(
-                        defect = selectedDefect,
-                        onOpenMeasurement = { navigateTo(Screen.CrackMeasurement.route) },
-                        onOpenComparison = { navigateTo(Screen.ImageComparison.route) },
-                        onOpenObjectDetection = { navigateTo(Screen.ObjectDetection.route) },
-                        onOpenAlignment = { navigateTo(Screen.Alignment.route) },
-                        onOpenGrowth = { navigateTo(Screen.GrowthAnalysis.route) },
-                        onOpenVerify = { navigateTo(Screen.EngineerVerification.route) },
-                        onOpenComments = { navigateTo(Screen.Comments.route) },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.CrackMeasurement.route -> CrackMeasurementScreen(onBack = { navigateBack() })
-                    Screen.GrowthAnalysis.route -> GrowthAnalysisScreen(onBack = { navigateBack() })
-                    Screen.ImageComparison.route -> ImageComparisonScreen(onBack = { navigateBack() })
-                    Screen.ObjectDetection.route -> ObjectDetectionScreen(onBack = { navigateBack() })
-                    Screen.Alignment.route -> AlignmentAnalysisScreen(onBack = { navigateBack() })
-                    Screen.EngineerVerification.route -> EngineerVerificationScreen(
-                        onSigned = { navigateBack() },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.Comments.route -> CommentsScreen(onBack = { navigateBack() })
-                    Screen.AllObservations.route -> AllObservationsScreen(
-                        observations = observations,
-                        onBack = { navigateBack() }
-                    )
+                        // Sub-screens: Defects
+                        Screen.DefectDetails.route -> DefectDetailsScreen(
+                            defect = selectedDefect,
+                            onOpenMeasurement = { navigateTo(Screen.CrackMeasurement.route) },
+                            onOpenComparison = { navigateTo(Screen.ImageComparison.route) },
+                            onOpenObjectDetection = { navigateTo(Screen.ObjectDetection.route) },
+                            onOpenAlignment = { navigateTo(Screen.Alignment.route) },
+                            onOpenGrowth = { navigateTo(Screen.GrowthAnalysis.route) },
+                            onOpenVerify = { navigateTo(Screen.EngineerVerification.route) },
+                            onOpenComments = { navigateTo(Screen.Comments.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.CrackMeasurement.route -> CrackMeasurementScreen(onBack = { navigateBack() })
+                        Screen.GrowthAnalysis.route -> GrowthAnalysisScreen(onBack = { navigateBack() })
+                        Screen.ImageComparison.route -> ImageComparisonScreen(onBack = { navigateBack() })
+                        Screen.ObjectDetection.route -> ObjectDetectionScreen(onBack = { navigateBack() })
+                        Screen.Alignment.route -> AlignmentAnalysisScreen(onBack = { navigateBack() })
+                        Screen.EngineerVerification.route -> EngineerVerificationScreen(
+                            onSigned = { navigateBack() },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.Comments.route -> CommentsScreen(onBack = { navigateBack() })
+                        Screen.AllObservations.route -> AllObservationsScreen(
+                            observations = observations,
+                            onBack = { navigateBack() }
+                        )
 
-                    // Sub-screens: Map
-                    Screen.DefectMap.route -> DefectMapScreen(
-                        defects = defects,
-                        onSelectDefect = {
-                            selectedDefect = it
-                            navigateTo(Screen.DefectDetails.route)
-                        },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.RiskHeatmap.route -> RiskHeatmapScreen(onBack = { navigateBack() })
-                    Screen.LocationDetails.route -> LocationDetailsScreen(onBack = { navigateBack() })
+                        // Sub-screens: Map
+                        Screen.DefectMap.route -> DefectMapScreen(
+                            defects = defects,
+                            onSelectDefect = {
+                                selectedDefect = it
+                                navigateTo(Screen.DefectDetails.route)
+                            },
+                            onNavigateToHeatmap = { navigateTo(Screen.RiskHeatmap.route) },
+                            onNavigateToGps = { navigateTo(Screen.Gps.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.RiskHeatmap.route -> RiskHeatmapScreen(onBack = { navigateBack() })
+                        Screen.LocationDetails.route -> LocationDetailsScreen(onBack = { navigateBack() })
 
-                    // Sub-screens: Maintenance
-                    Screen.Maintenance.route -> MaintenanceScreen(
-                        tasks = tasks,
-                        onSelectTask = {
-                            selectedTask = it
-                            navigateTo(Screen.TaskDetails.route)
-                        },
-                        onCreateTask = { navigateTo(Screen.CreateTask.route) },
-                        onViewAnalytics = { navigateTo(Screen.MaintenanceAnalytics.route) },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.CreateTask.route -> CreateMaintenanceTaskScreen(
-                        onTaskCreated = { newTask: MaintenanceTask ->
-                            tasks.add(0, newTask)
-                            selectedTask = newTask
-                            navigateTo(Screen.TaskDetails.route)
-                        },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.TaskDetails.route -> TaskDetailsScreen(
-                        task = selectedTask,
-                        onOpenBeforeAfter = { navigateTo(Screen.BeforeAfter.route) },
-                        onOpenVerify = { navigateTo(Screen.MaintenanceVerification.route) },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.BeforeAfter.route -> BeforeAfterScreen(onBack = { navigateBack() })
-                    Screen.MaintenanceVerification.route -> MaintenanceVerificationScreen(
-                        onVerified = { navigateBack() },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.MaintenanceAnalytics.route -> MaintenanceAnalyticsScreen(onBack = { navigateBack() })
+                        // Sub-screens: Maintenance
+                        Screen.Maintenance.route -> MaintenanceScreen(
+                            tasks = tasks,
+                            onSelectTask = {
+                                selectedTask = it
+                                navigateTo(Screen.TaskDetails.route)
+                            },
+                            onCreateTask = { navigateTo(Screen.CreateTask.route) },
+                            onViewAnalytics = { navigateTo(Screen.MaintenanceAnalytics.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.CreateTask.route -> CreateMaintenanceTaskScreen(
+                            onTaskCreated = { newTask: MaintenanceTask ->
+                                tasks.add(0, newTask)
+                                selectedTask = newTask
+                                navigateTo(Screen.TaskDetails.route)
+                            },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.TaskDetails.route -> TaskDetailsScreen(
+                            task = selectedTask,
+                            onOpenBeforeAfter = { navigateTo(Screen.BeforeAfter.route) },
+                            onOpenVerify = { navigateTo(Screen.MaintenanceVerification.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.BeforeAfter.route -> BeforeAfterScreen(onBack = { navigateBack() })
+                        Screen.MaintenanceVerification.route -> MaintenanceVerificationScreen(
+                            onVerified = { navigateBack() },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.MaintenanceAnalytics.route -> MaintenanceAnalyticsScreen(onBack = { navigateBack() })
 
-                    // Sub-screens: Reports
-                    Screen.Reports.route -> ReportsScreen(
-                        onBuildPackage = { navigateTo(Screen.EvidencePackage.route) },
-                        onOpenPdf = {
-                            selectedReportTitle = it
-                            navigateTo(Screen.PdfPreview.route)
-                        },
-                        onOpenShare = {
-                            selectedReportTitle = it
-                            navigateTo(Screen.ShareReport.route)
-                        },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.EvidencePackage.route -> BuildEvidencePackageScreen(
-                        onGenerated = {
-                            selectedReportTitle = "Compiled Field Package · SHA-256 Verified"
-                            navigateTo(Screen.PdfPreview.route)
-                        },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.PdfPreview.route -> PdfPreviewScreen(
-                        reportTitle = selectedReportTitle,
-                        onBack = { navigateBack() }
-                    )
-                    Screen.ShareReport.route -> ShareReportScreen(
-                        reportTitle = selectedReportTitle,
-                        onBack = { navigateBack() }
-                    )
+                        // Sub-screens: Reports
+                        Screen.Reports.route -> ReportsScreen(
+                            onBuildPackage = { navigateTo(Screen.EvidencePackage.route) },
+                            onOpenPdf = {
+                                selectedReportTitle = it
+                                navigateTo(Screen.PdfPreview.route)
+                            },
+                            onOpenShare = {
+                                selectedReportTitle = it
+                                navigateTo(Screen.ShareReport.route)
+                            },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.EvidencePackage.route -> BuildEvidencePackageScreen(
+                            onGenerated = {
+                                selectedReportTitle = "Compiled Field Package · SHA-256 Verified"
+                                navigateTo(Screen.PdfPreview.route)
+                            },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.PdfPreview.route -> PdfPreviewScreen(
+                            reportTitle = selectedReportTitle,
+                            onBack = { navigateBack() }
+                        )
+                        Screen.ShareReport.route -> ShareReportScreen(
+                            reportTitle = selectedReportTitle,
+                            onBack = { navigateBack() }
+                        )
 
-                    // Sub-screens: Analytics
-                    Screen.Analytics.route -> AnalyticsScreen(
-                        onNavigateTrackHealth = { navigateTo(Screen.TrackHealth.route) },
-                        onNavigateCrackAnalytics = { navigateTo(Screen.GrowthAnalysis.route) },
-                        onNavigateRiskAnalytics = { navigateTo(Screen.RiskHeatmap.route) },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.TrackHealth.route -> TrackHealthScreen(onBack = { navigateBack() })
+                        // Sub-screens: Analytics
+                        Screen.Analytics.route -> AnalyticsScreen(
+                            onNavigateTrackHealth = { navigateTo(Screen.TrackHealth.route) },
+                            onNavigateCrackAnalytics = { navigateTo(Screen.GrowthAnalysis.route) },
+                            onNavigateRiskAnalytics = { navigateTo(Screen.RiskHeatmap.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.TrackHealth.route -> TrackHealthScreen(onBack = { navigateBack() })
 
-                    // Sub-screens: Settings
-                    Screen.Profile.route -> ProfileScreen(
-                        name = profileName,
-                        email = profileEmail,
-                        onSave = { n, e ->
-                            profileName = n
-                            profileEmail = e
-                        },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.AppSettings.route -> AppSettingsScreen(onBack = { navigateBack() })
-                    Screen.Security.route -> SecurityScreen(onBack = { navigateBack() })
-                    Screen.Language.route -> LanguageScreen(onBack = { navigateBack() })
-                    Screen.Help.route -> HelpCenterScreen(onBack = { navigateBack() })
-                    Screen.About.route -> AboutScreen(onBack = { navigateBack() })
-                    Screen.Attention.route -> AttentionScreen(
-                        onNavigateDefect = {
-                            selectedDefect = defects.first()
-                            navigateTo(Screen.DefectDetails.route)
-                        },
-                        onNavigateTask = {
-                            selectedTask = tasks.first()
-                            navigateTo(Screen.TaskDetails.route)
-                        },
-                        onBack = { navigateBack() }
-                    )
-                    Screen.Notifications.route -> NotificationsScreen(
-                        notifications = notifications,
-                        onBack = { navigateBack() }
-                    )
+                        // Sub-screens: Settings
+                        Screen.Profile.route -> ProfileScreen(
+                            name = profileName,
+                            email = profileEmail,
+                            onSave = { n, e ->
+                                profileName = n
+                                profileEmail = e
+                            },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.AppSettings.route -> AppSettingsScreen(onBack = { navigateBack() })
+                        Screen.Security.route -> SecurityScreen(onBack = { navigateBack() })
+                        Screen.Language.route -> LanguageScreen(onBack = { navigateBack() })
+                        Screen.Help.route -> HelpCenterScreen(onBack = { navigateBack() })
+                        Screen.About.route -> AboutScreen(onBack = { navigateBack() })
+                        Screen.Attention.route -> AttentionScreen(
+                            onNavigateDefect = {
+                                selectedDefect = defects.first()
+                                navigateTo(Screen.DefectDetails.route)
+                            },
+                            onNavigateTask = {
+                                selectedTask = tasks.first()
+                                navigateTo(Screen.TaskDetails.route)
+                            },
+                            onCreateTask = { navigateTo(Screen.CreateTask.route) },
+                            onCompareImages = { navigateTo(Screen.ImageComparison.route) },
+                            onAllObservations = { navigateTo(Screen.AllObservations.route) },
+                            onReviewDetection = { navigateTo(Screen.ObjectDetection.route) },
+                            onBuildEvidencePackage = { navigateTo(Screen.EvidencePackage.route) },
+                            onRiskHeatmap = { navigateTo(Screen.RiskHeatmap.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.Notifications.route -> NotificationsScreen(
+                            notifications = notifications,
+                            onBack = { navigateBack() }
+                        )
+                    }
                 }
             }
         }

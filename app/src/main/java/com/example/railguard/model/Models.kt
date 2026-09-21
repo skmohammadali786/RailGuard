@@ -18,7 +18,26 @@ data class Defect(
     val detail: String,
     val estimatedLength: String = "46 mm",
     val trackSide: String = "Up line",
-    val riskScore: Int = 92
+    val riskScore: Int = 92,
+    // Track Coordinates & Geolocation
+    val gpsCoordinates: String = "51°30'14.2\"N 0°07'42.8\"W",
+    val latitude: Double = 51.50394,
+    val longitude: Double = -0.12856,
+    val altitudeMeters: Double = 48.2,
+    val chainageCoordinate: String = "14+320 (Up Line)",
+    val tieSleeperNumber: String = "Sleeper #14-320",
+    val trackGaugeMm: Double = 1438.2,
+    // Inspection Timestamps
+    val detectedTimestamp: String = "2024-06-18 08:54:32 UTC",
+    val lastAuditedTimestamp: String = "2024-06-18 09:20:27 UTC",
+    // AI Analysis Engine Results
+    val aiConfidencePercent: Double = 92.4,
+    val aiEngineModel: String = "RailVision-DeepTrack-v4.2",
+    val aiDerailmentRiskIndex: Double = 0.68,
+    val aiGrowthRateMmPerDay: Double = 0.71,
+    val aiPredictedFailureDays: Int = 11,
+    val aiRecommendedSpeedLimitKmH: Int = 25,
+    val aiPrescribedAction: String = "Impose 25 km/h limit; replace 6m rail segment before Day 11."
 )
 
 data class MaintenanceTask(
@@ -46,7 +65,26 @@ data class InspectionRecord(
     val status: String,
     val createdAt: String,
     val framesCount: Int = 42,
-    val detectionsCount: Int = 3
+    val detectionsCount: Int = 3,
+    // Inspection Timestamps
+    val startTimestamp: String = "2024-06-18 08:42:15 UTC",
+    val completionTimestamp: String = "2024-06-18 09:20:27 UTC",
+    val durationFormatted: String = "38 min 12 sec",
+    val lastSyncedTimestamp: String = "2024-06-18 09:21:04 UTC",
+    // Track Coordinates & LRS Geolocation
+    val startGps: String = "51°30'08.4\"N 0°07'31.2\"W",
+    val endGps: String = "51°30'28.1\"N 0°07'58.4\"W",
+    val elevationAmsl: String = "48.2 m AMSL",
+    val trackCorridorLrs: String = "North Loop Line · Up Line (Track 1)",
+    val railProfile: String = "60E1 (UIC 60) Continuous Welded Rail",
+    // AI Analysis Engine Results
+    val aiModelName: String = "RailVision-DeepTrack-v4.2",
+    val aiConfidenceScore: String = "92.4%",
+    val aiDerailmentRiskScore: Double = 0.68,
+    val aiCriticalFindingsCount: Int = 1,
+    val aiWarningFindingsCount: Int = 1,
+    val aiInferenceLatencyMs: Int = 16,
+    val aiVerdictSummary: String = "CRITICAL: Gauge corner fracture identified at 14+320. Derailment risk index 0.68. Mandatory 25 km/h restriction enacted."
 )
 
 data class Observation(

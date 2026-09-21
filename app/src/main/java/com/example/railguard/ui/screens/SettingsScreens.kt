@@ -536,6 +536,12 @@ fun AboutScreen(onBack: () -> Unit) {
 fun AttentionScreen(
     onNavigateDefect: () -> Unit,
     onNavigateTask: () -> Unit,
+    onCreateTask: () -> Unit,
+    onCompareImages: () -> Unit,
+    onAllObservations: () -> Unit,
+    onReviewDetection: () -> Unit,
+    onBuildEvidencePackage: () -> Unit,
+    onRiskHeatmap: () -> Unit,
     onBack: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -558,9 +564,81 @@ fun AttentionScreen(
         item {
             Header(
                 title = "Requires Attention",
-                subtitle = "5 shift action items with safety impact",
+                subtitle = "Shift critical actions, diagnostic workspaces, and risk interventions",
                 onBack = onBack
             )
+        }
+
+        // Dedicated Actions Hub
+        item {
+            SectionLabel(title = "CRITICAL WORKSPACES & INTERVENTIONS")
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                WorkspaceTile(
+                    title = "Create Task",
+                    subtitle = "Work order dispatch",
+                    icon = Icons.Default.AddCircle,
+                    onClick = onCreateTask,
+                    modifier = Modifier.weight(1f)
+                )
+                WorkspaceTile(
+                    title = "Compare Images",
+                    subtitle = "Crack growth audit",
+                    icon = Icons.Default.Compare,
+                    onClick = onCompareImages,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                WorkspaceTile(
+                    title = "All Observations",
+                    subtitle = "Raw sensor findings",
+                    icon = Icons.Default.Visibility,
+                    onClick = onAllObservations,
+                    modifier = Modifier.weight(1f)
+                )
+                WorkspaceTile(
+                    title = "Review Detection",
+                    subtitle = "Vision AI models",
+                    icon = Icons.Default.CameraAlt,
+                    onClick = onReviewDetection,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                WorkspaceTile(
+                    title = "Evidence Pack",
+                    subtitle = "Cryptographic PDF",
+                    icon = Icons.Default.AddModerator,
+                    onClick = onBuildEvidencePackage,
+                    modifier = Modifier.weight(1f)
+                )
+                WorkspaceTile(
+                    title = "Risk Heatmap",
+                    subtitle = "Corridor density",
+                    icon = Icons.Default.Layers,
+                    onClick = onRiskHeatmap,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            SectionLabel(title = "HIGH PRIORITY FIELD FINDINGS")
         }
 
         items(attentionItems) { (title, subtitle, tone) ->

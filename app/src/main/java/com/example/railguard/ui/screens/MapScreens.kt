@@ -110,6 +110,8 @@ fun MapScreen(
 fun DefectMapScreen(
     defects: List<Defect>,
     onSelectDefect: (Defect) -> Unit,
+    onNavigateToHeatmap: () -> Unit,
+    onNavigateToGps: () -> Unit,
     onBack: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -129,6 +131,38 @@ fun DefectMapScreen(
                 subtitle = "Geolocated findings across North Loop Line",
                 onBack = onBack
             )
+        }
+
+        // Dedicated Defect Map Workspaces (3 dedicated hubs)
+        item {
+            SectionLabel(title = "MAP WORKSPACES")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                WorkspaceTile(
+                    title = "Risk Heatmap",
+                    subtitle = "Stress gradients",
+                    icon = Icons.Default.Layers,
+                    onClick = onNavigateToHeatmap,
+                    modifier = Modifier.weight(1f)
+                )
+                WorkspaceTile(
+                    title = "GPS Lock",
+                    subtitle = "RTK fix ±1.2m",
+                    icon = Icons.Default.GpsFixed,
+                    onClick = onNavigateToGps,
+                    modifier = Modifier.weight(1f)
+                )
+                WorkspaceTile(
+                    title = "Open Dossier",
+                    subtitle = selectedDefect?.id ?: "Inspect",
+                    icon = Icons.Default.FindInPage,
+                    onClick = { selectedDefect?.let { onSelectDefect(it) } },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
         }
 
         // Map Canvas Area
