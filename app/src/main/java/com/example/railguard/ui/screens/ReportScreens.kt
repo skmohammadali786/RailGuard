@@ -1,5 +1,6 @@
 package com.example.railguard.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -25,6 +27,8 @@ import com.example.railguard.components.*
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
+import com.example.railguard.util.PdfExporter
+import java.io.File
 
 @Composable
 fun ReportsScreen(
@@ -313,16 +317,32 @@ fun PdfPreviewScreen(
     inspectorName: String = "E. Chen",
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
     var isDownloaded by remember { mutableStateOf(false) }
     var isDownloading by remember { mutableStateOf(false) }
+    var generatedPdfFile by remember { mutableStateOf<File?>(null) }
     var selectedPage by remember { mutableIntStateOf(0) } // 0 = All Pages (Full Dossier)
 
-    LaunchedEffect(isDownloading) {
-        if (isDownloading) {
-            kotlinx.coroutines.delay(1200)
+    val doExportPdf: () -> Unit = {
+        try {
+            isDownloading = true
+            val file = PdfExporter.generateInspectionPdf(
+                context = context,
+                reportTitle = reportTitle,
+                inspectorName = inspectorName
+            )
+            generatedPdfFile = file
             isDownloading = false
             isDownloaded = true
+            Toast.makeText(
+                context,
+                "✓ PDF Saved to Documents: ${file.name} (${file.length() / 1024} KB)",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (e: Exception) {
+            isDownloading = false
+            Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -350,14 +370,14 @@ fun PdfPreviewScreen(
             )
         }
 
-        // Action Buttons Row
+        // Action Buttons Row (Download / Share / Open / Print)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = { isDownloading = true },
+                    onClick = { doExportPdf() },
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isDownloaded) Color(0xFF16A34A) else colorScheme.primary
@@ -371,22 +391,96 @@ fun PdfPreviewScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isDownloading) "Compiling PDF..." else if (isDownloaded) "PDF Downloaded (4.8 MB) ✓" else "Download Full PDF (4.8 MB)",
+                        text = if (isDownloading) "Compiling PDF..." else if (isDownloaded) "PDF Exported (${(generatedPdfFile?.length() ?: 4800000L) / 1024} KB) ✓" else "Export Official PDF",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
                 }
 
+                // Share PDF Button
+                Button(
+                    onClick = {
+                        val file = generatedPdfFile ?: run {
+                            val f = PdfExporter.generateInspectionPdf(context, reportTitle, inspectorName)
+                            generatedPdfFile = f
+                            isDownloaded = true
+                            f
+                        }
+                        PdfExporter.sharePdf(context, file)
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorScheme.secondaryContainer,
+                        contentColor = colorScheme.onSecondaryContainer
+                    ),
+                    modifier = Modifier.height(46.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share PDF",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Share", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+
+                // Open in External PDF Viewer / Print Button
                 OutlinedButton(
-                    onClick = { isDownloading = true },
+                    onClick = {
+                        val file = generatedPdfFile ?: run {
+                            val f = PdfExporter.generateInspectionPdf(context, reportTitle, inspectorName)
+                            generatedPdfFile = f
+                            isDownloaded = true
+                            f
+                        }
+                        PdfExporter.openPdf(context, file)
+                    },
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.height(46.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Print,
-                        contentDescription = "Print PDF",
+                        imageVector = Icons.Default.OpenInNew,
+                        contentDescription = "Open in PDF Viewer",
                         modifier = Modifier.size(18.dp)
                     )
+                }
+            }
+
+            // Real Exported File Banner if ready
+            if (generatedPdfFile != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Card(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16A34A).copy(alpha = 0.12f)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF16A34A).copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "FILE SAVED: ${generatedPdfFile?.name}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF16A34A)
+                            )
+                            Text(
+                                text = "Format: A4 Dual-Page · Storage: Documents/ · Ready to email or print",
+                                fontSize = 10.sp,
+                                color = colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(
+                            onClick = { generatedPdfFile?.let { PdfExporter.openPdf(context, it) } }
+                        ) {
+                            Text("Open", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF16A34A))
+                        }
+                    }
                 }
             }
 

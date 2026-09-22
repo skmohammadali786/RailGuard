@@ -84,7 +84,16 @@ data class InspectionRecord(
     val aiCriticalFindingsCount: Int = 1,
     val aiWarningFindingsCount: Int = 1,
     val aiInferenceLatencyMs: Int = 16,
-    val aiVerdictSummary: String = "CRITICAL: Gauge corner fracture identified at 14+320. Derailment risk index 0.68. Mandatory 25 km/h restriction enacted."
+    val aiVerdictSummary: String = "CRITICAL: Gauge corner fracture identified at 14+320. Derailment risk index 0.68. Mandatory 25 km/h restriction enacted.",
+    // Detected Cracks & Maintenance Recommendations
+    val detectedCrackTitle: String = "CRK-2048: Transverse Gauge Corner Crack",
+    val crackSeverity: Tone = Tone.CRITICAL,
+    val crackSeverityScore: Int = 92,
+    val crackMeasurementMm: String = "46.2 mm",
+    val crackLocationExact: String = "Chainage 14+320 · Left Rail Gauge Face",
+    val recommendedMaintenanceAction: String = "Emergency 25 km/h TSR enacted. Deploy Crew 04 with Pandrol Fastclip FC-1500 pair and emergency fishplate clamp. Schedule 6m rail plug replacement before Day 11.",
+    val maintenanceUrgency: String = "Immediate (Within 4h)",
+    val processedImageDimensions: String = "46.2 mm length × 3.4 mm width × 18.5 mm depth"
 )
 
 data class Observation(
@@ -185,7 +194,15 @@ object RailDataRepository {
             status = "In progress",
             createdAt = "2024-06-18T08:42:00Z",
             framesCount = 42,
-            detectionsCount = 3
+            detectionsCount = 3,
+            detectedCrackTitle = "CRK-2048: Transverse Gauge Corner Crack",
+            crackSeverity = Tone.CRITICAL,
+            crackSeverityScore = 92,
+            crackMeasurementMm = "46.2 mm",
+            crackLocationExact = "Chainage 14+320 · Left Rail Gauge Face",
+            recommendedMaintenanceAction = "Emergency 25 km/h TSR enacted. Deploy Crew 04 with Pandrol Fastclip FC-1500 pair and emergency fishplate clamp. Schedule 6m rail plug replacement before Day 11.",
+            maintenanceUrgency = "Immediate (Within 4h)",
+            processedImageDimensions = "46.2 mm length × 3.4 mm width × 18.5 mm depth"
         ),
         InspectionRecord(
             id = "INSP-240616-03",
@@ -199,7 +216,17 @@ object RailDataRepository {
             status = "Completed",
             createdAt = "2024-06-16T07:15:00Z",
             framesCount = 58,
-            detectionsCount = 1
+            detectionsCount = 1,
+            aiConfidenceScore = "88.5%",
+            aiDerailmentRiskScore = 0.44,
+            detectedCrackTitle = "CRK-2044: Railhead Checking & Flaking",
+            crackSeverity = Tone.WARNING,
+            crackSeverityScore = 74,
+            crackMeasurementMm = "28.0 mm",
+            crackLocationExact = "Chainage 03+660 · Running Surface",
+            recommendedMaintenanceAction = "Schedule RG-02 rail grinder milling pass within 7 days. Monitor fatigue growth rate on next shift sweep.",
+            maintenanceUrgency = "Planned (Within 7 days)",
+            processedImageDimensions = "28.0 mm length × 2.1 mm width × 8.2 mm depth"
         ),
         InspectionRecord(
             id = "INSP-240619-01",
@@ -213,7 +240,17 @@ object RailDataRepository {
             status = "Planned",
             createdAt = "2024-06-17T11:00:00Z",
             framesCount = 0,
-            detectionsCount = 0
+            detectionsCount = 0,
+            aiConfidenceScore = "98.2%",
+            aiDerailmentRiskScore = 0.12,
+            detectedCrackTitle = "No Active Rail Fractures Detected",
+            crackSeverity = Tone.HEALTHY,
+            crackSeverityScore = 12,
+            crackMeasurementMm = "0.0 mm (Nominal)",
+            crackLocationExact = "Chainage 08+000 - 09+600",
+            recommendedMaintenanceAction = "Track geometry and railhead integrity within nominal CWR tolerances. Maintain standard 120 km/h corridor speed.",
+            maintenanceUrgency = "Routine Monitoring",
+            processedImageDimensions = "Cross-section nominal: 1435.0 mm gauge"
         )
     )
 
