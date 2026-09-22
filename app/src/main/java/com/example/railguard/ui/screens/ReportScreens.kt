@@ -300,9 +300,17 @@ fun EvidenceCheckboxRow(title: String, checked: Boolean, onChecked: (Boolean) ->
     }
 }
 
+data class ReportKpiItem(
+    val kpi: String,
+    val value: String,
+    val standard: String,
+    val status: String
+)
+
 @Composable
 fun PdfPreviewScreen(
     reportTitle: String,
+    inspectorName: String = "E. Chen",
     onBack: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -323,7 +331,8 @@ fun PdfPreviewScreen(
         1 to "Page 1: Overview & GPS",
         2 to "Page 2: Defect Register",
         3 to "Page 3: AI & Kinetics",
-        4 to "Page 4: Train & Maintenance"
+        4 to "Page 4: Train & Maintenance",
+        5 to "Page 5: Network Analytics & Sensors"
     )
 
     LazyColumn(
@@ -511,7 +520,7 @@ fun PdfPreviewScreen(
                             Text(text = "2024-06-18 14:32:15 UTC", color = Color(0xFF0F172A), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = "LEAD INSPECTOR:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "E. Chen (IRSE-UK #849201)", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "$inspectorName (IRSE-UK #849201)", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -937,7 +946,7 @@ fun PdfPreviewScreen(
                     ) {
                         Column {
                             Text("CERTIFIED & SEALED BY:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                            Text("E. Chen, BEng (Hons) CEng FIRSE", color = Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("$inspectorName, BEng (Hons) CEng FIRSE", color = Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Text("Lead Rail Safety Inspector · License IRSE-UK #849201 Level 3", color = Color(0xFF64748B), fontSize = 9.sp)
                         }
 
@@ -963,6 +972,150 @@ fun PdfPreviewScreen(
                                 )
                             }
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // ====================================================
+                // PAGE 5: COMPLETE NETWORK ANALYTICS & SENSOR MATRIX
+                // ====================================================
+                if (selectedPage == 0 || selectedPage == 5) {
+                    if (selectedPage == 0) {
+                        HorizontalDivider(color = Color(0xFFCBD5E1), thickness = 2.dp)
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    Text(
+                        text = "5. Complete Network Analytics & Sensor Telemetry Matrix",
+                        color = Color(0xFF0F172A),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Table: Network Reliability KPIs
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(6.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFFE2E8F0))
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("CORE RELIABILITY KPI", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.8f))
+                            Text("RECORDED VALUE", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.4f))
+                            Text("STANDARD / CAP", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.4f))
+                            Text("INTEGRITY", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.0f))
+                        }
+
+                        val kpiList = listOf(
+                            ReportKpiItem("Track Health Index (THI)", "94.2% (Network Avg)", "Threshold ≥ 90.0%", "HEALTHY"),
+                            ReportKpiItem("Active Critical Fractures", "18 Logged Anomalies", "Tolerance = 0", "ACTIONABLE"),
+                            ReportKpiItem("Survey Coverage Reliability", "98.5% Ultrasonic/Vision", "Standard ≥ 95.0%", "CERTIFIED"),
+                            ReportKpiItem("Corridor Gross Tonnage", "48.6 MGT Cumulative", "Rated Cap 60.0 MGT", "NOMINAL"),
+                            ReportKpiItem("Mean Time Between Failures", "1,420 Operating Hours", "Target ≥ 1,200h", "COMPLIANT"),
+                            ReportKpiItem("Peak Nadal Derailment Ratio", "0.68 Y/Q (Section 14)", "Critical Cap 0.80 Y/Q", "TSR 25 KM/H")
+                        )
+
+                        kpiList.forEachIndexed { idx, (kpi, value, standard, status) ->
+                            val bg = if (idx % 2 == 0) Color.White else Color(0xFFF8FAFC)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(bg)
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(kpi, color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1.8f))
+                                Text(value, color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1.4f))
+                                Text(standard, color = Color(0xFF64748B), fontSize = 8.sp, modifier = Modifier.weight(1.4f))
+                                Text(
+                                    status,
+                                    color = if (status.contains("HEALTHY") || status.contains("CERTIFIED") || status.contains("NOMINAL") || status.contains("COMPLIANT")) Color(0xFF15803D) else Color(0xFFB91C1C),
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1.0f)
+                                )
+                            }
+                            if (idx < kpiList.size - 1) HorizontalDivider(color = Color(0xFFF1F5F9))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Defect Typology Distribution & Growth Rates",
+                        color = Color(0xFF0F172A),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFF1F5F9))
+                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(6.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text("• Transverse Fissures (42% · 8 defects): Cyclic growth +0.71 mm/day · Critical danger zone", color = Color(0xFF991B1B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text("• Squats & Rolling Contact Fatigue (28% · 5 defects): Depth 12-28mm · Surface spalling", color = Color(0xFF854D0E), fontSize = 9.sp)
+                        Text("• Gauge Corner Head Checking (18% · 3 defects): Micro-cracks at running band radius", color = Color(0xFF334155), fontSize = 9.sp)
+                        Text("• Bolt Hole & Web Fractures (8% · 1 defect): Fishplate shear stress concentration", color = Color(0xFF334155), fontSize = 9.sp)
+                        Text("• Thermite Weld Heat Affected Zone (4% · 1 defect): Porosity at aluminothermic joint", color = Color(0xFF334155), fontSize = 9.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Real-Time Sensor & Continuum Metallurgy Telemetry",
+                        color = Color(0xFF0F172A),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFF0FDF4))
+                            .border(1.dp, Color(0xFFBBF7D0), RoundedCornerShape(6.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text("• CWR Axial Thermal Stress: +68.4 MPa Tension (Neutral Temp SFT: 27.0°C · Rail Head: 38.4°C)", color = Color(0xFF166534), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Dynamic Wheel Impact Peak: 162.4 kN (Impact safety limit: < 220 kN · Measured at Tie #14-320)", color = Color(0xFF166534), fontSize = 9.sp)
+                        Text("• Dynamic Track Gauge Variance: 1,438.2 mm (+3.2mm from standard 1,435.0 mm · Safe < +8mm)", color = Color(0xFF166534), fontSize = 9.sp)
+                        Text("• Sleeper / Tie Retention: 96.8% integrity · Pandrol clip toe load 10.2 kN (Nominal)", color = Color(0xFF166534), fontSize = 9.sp)
+                        Text("• Ballast Vibration Damping: Vertical RMS 0.042g · Lateral RMS 0.028g (Safe < 0.15g)", color = Color(0xFF166534), fontSize = 9.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Corridor Risk Distribution & Maintenance SLA Adherence",
+                        color = Color(0xFF0F172A),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFFEF2F2))
+                            .border(1.dp, Color(0xFFFECACA), RoundedCornerShape(6.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text("• Section 14 (North Loop Line): Risk 92/100 · 8 defects · TSR 25 km/h · Clamp Work Order MT-881", color = Color(0xFF991B1B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text("• Section 08 (South Freight Yard): Risk 68/100 · 5 defects · TSR 40 km/h · Heavy haul freight zone", color = Color(0xFF854D0E), fontSize = 9.sp)
+                        Text("• Section 03 (East High-Speed Main): Risk 44/100 · 3 defects · Clear speed (180 km/h) · Grinding cycle", color = Color(0xFF334155), fontSize = 9.sp)
+                        Text("• Section 01 (West Deep Cut): Risk 12/100 · 2 defects · Optimal condition · Next cycle in 30 days", color = Color(0xFF15803D), fontSize = 9.sp)
+                        Text("• Maintenance SLA Performance: 94.8% on-time resolution · MTTR: 4.2 hours · 2 Active TSRs", color = Color(0xFF0F172A), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1035,9 +1188,12 @@ fun AnalyticsScreen(
     onNavigateTrackHealth: () -> Unit,
     onNavigateCrackAnalytics: () -> Unit,
     onNavigateRiskAnalytics: () -> Unit,
+    onExportPdf: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val isDark = LocalIsDark.current
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     LazyColumn(
         modifier = Modifier
@@ -1049,12 +1205,71 @@ fun AnalyticsScreen(
         item {
             Header(
                 title = "Network Analytics",
-                subtitle = "Telemetry, health indices, and defect propagation",
+                subtitle = "Comprehensive telemetry, defect kinetics, and safety metrics",
                 onBack = onBack
             )
         }
 
+        // Export to PDF Banner Card
         item {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDark) Color(0xFF0F2537) else Color(0xFFE0F2FE)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "OFFICIAL REPORT EXPORT",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF0284C7),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Full Analytics Dossier in PDF",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Includes all 6 KPI matrices, Paris law kinetics, sensors & signatures",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Button(
+                        onClick = { onExportPdf?.invoke() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("View PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // 6 Primary Network Reliability Metrics
+        item {
+            SectionLabel(title = "CORE RELIABILITY METRICS")
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1074,17 +1289,200 @@ fun AnalyticsScreen(
                     onClick = onNavigateCrackAnalytics
                 )
                 MetricTile(
-                    value = "88.5%",
+                    value = "98.5%",
                     label = "Coverage",
                     tone = Tone.INFO,
                     modifier = Modifier.weight(1f),
                     onClick = onNavigateRiskAnalytics
                 )
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MetricTile(
+                    value = "48.6 MGT",
+                    label = "Load Tonnage",
+                    tone = Tone.HEALTHY,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricTile(
+                    value = "1,420 h",
+                    label = "MTBF",
+                    tone = Tone.HEALTHY,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricTile(
+                    value = "0.68 Y/Q",
+                    label = "Peak Nadal",
+                    tone = Tone.WARNING,
+                    modifier = Modifier.weight(1f),
+                    onClick = onNavigateRiskAnalytics
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
         }
 
+        // Segment Tabs
         item {
-            SectionLabel(title = "DETAILED REPORT PANELS")
+            val tabs = listOf("Defect Typology", "Paris Kinetics", "Sensors & Metallurgy", "Corridor SLAs")
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                tabs.forEachIndexed { idx, label ->
+                    val isSel = selectedTab == idx
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSel) colorScheme.primary else colorScheme.surfaceVariant)
+                            .clickable { selectedTab = idx }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSel) colorScheme.onPrimary else colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // TAB CONTENT 0: Defect Typology
+        if (selectedTab == 0) {
+            item {
+                RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
+                    Text(
+                        text = "DEFECT POPULATION BREAKDOWN (18 TOTAL)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    val defectCategories = listOf(
+                        Triple("Transverse Fissures", 42, Tone.CRITICAL),
+                        Triple("Squats & Rolling Contact Fatigue", 28, Tone.WARNING),
+                        Triple("Gauge Corner Head Checking", 18, Tone.WARNING),
+                        Triple("Bolt Hole & Web Fractures", 8, Tone.INFO),
+                        Triple("Thermite Weld HAZ Anomalies", 4, Tone.HEALTHY)
+                    )
+
+                    defectCategories.forEach { (cat, pct, tone) ->
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(cat, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurface)
+                                Text("$pct%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = toneColor(tone, isDark))
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = { pct / 100f },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp)),
+                                color = toneColor(tone, isDark),
+                                trackColor = colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // TAB CONTENT 1: Paris Kinetics & Crack Growth
+        if (selectedTab == 1) {
+            item {
+                RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
+                    Text(
+                        text = "PARIS-ERDOGAN FATIGUE KINETICS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colorScheme.error,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Formula: da/dN = C · (ΔK)^m",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    DetailRow(label = "Stress Intensity Range (ΔK)", value = "18.4 MPa√m")
+                    DetailRow(label = "Cyclic Growth Rate (da/dN)", value = "2.40 × 10⁻⁷ mm/cycle")
+                    DetailRow(label = "Linear Growth Rate", value = "+0.71 mm/day")
+                    DetailRow(label = "Cycles to Critical Fracture", value = "1,840 wheelsets")
+                    DetailRow(label = "Estimated Time to Break", value = "72 hours (at 14+320)")
+                    DetailRow(label = "Critical Fracture Toughness (K_IC)", value = "38.0 MPa√m")
+                }
+            }
+        }
+
+        // TAB CONTENT 2: Sensors & Metallurgy
+        if (selectedTab == 2) {
+            item {
+                RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
+                    Text(
+                        text = "REAL-TIME TRACK SENSORS & METALLURGY",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF16A34A),
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    DetailRow(label = "CWR Axial Thermal Stress", value = "+68.4 MPa (Tension)")
+                    DetailRow(label = "Stress Free Temperature (SFT)", value = "27.0°C Nominal")
+                    DetailRow(label = "Current Rail Surface Temp", value = "38.4°C (+11.4°C Delta)")
+                    DetailRow(label = "Dynamic Wheel Impact Load", value = "162.4 kN (Peak)")
+                    DetailRow(label = "Dynamic Track Gauge", value = "1,438.2 mm (+3.2mm variance)")
+                    DetailRow(label = "Vertical Cant Angle", value = "65 mm (Design: 68 mm)")
+                    DetailRow(label = "Sleeper Fastener Integrity", value = "96.8% Secured")
+                }
+            }
+        }
+
+        // TAB CONTENT 3: Corridor SLAs
+        if (selectedTab == 3) {
+            item {
+                RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
+                    Text(
+                        text = "CORRIDOR SEGMENT RISK & REPAIR SLAS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFD97706),
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    DetailRow(label = "Section 14 (North Loop)", value = "92 Risk · 8 Defects · TSR 25")
+                    DetailRow(label = "Section 08 (South Yard)", value = "68 Risk · 5 Defects · TSR 40")
+                    DetailRow(label = "Section 03 (East Junction)", value = "44 Risk · 3 Defects · Clear")
+                    DetailRow(label = "Section 01 (West Cut)", value = "12 Risk · 2 Defects · Nominal")
+                    DetailRow(label = "Maintenance SLA On-Time", value = "94.8% (Target ≥ 90%)")
+                    DetailRow(label = "Mean Time to Repair (MTTR)", value = "4.2 Hours")
+                }
+            }
+        }
+
+        // Sub-screen Navigation Links
+        item {
+            Spacer(modifier = Modifier.height(14.dp))
+            SectionLabel(title = "DETAILED REPORT PANELS & DRILL-DOWNS")
 
             ListRow(
                 icon = Icons.Default.TrendingUp,
@@ -1104,8 +1502,8 @@ fun AnalyticsScreen(
             )
             ListRow(
                 icon = Icons.Default.PieChart,
-                title = "Corridor Risk Distribution",
-                subtitle = "North Loop holds 52% of high-severity anomalies",
+                title = "Corridor Risk Heatmap & Sectors",
+                subtitle = "Visual multi-zone heat maps and stress tensors",
                 trailing = "52% North",
                 tone = Tone.WARNING,
                 onClick = onNavigateRiskAnalytics

@@ -2,6 +2,7 @@ package com.example.railguard.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,7 +20,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -30,6 +35,14 @@ import com.example.railguard.model.MaintenanceTask
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
+import kotlinx.coroutines.delay
+
+data class AiChatMessage(
+    val sender: String,
+    val text: String,
+    val actionableType: String? = null, // "TSR", "DISPATCH", "HEATMAP", "GROWTH", "ULTRASONIC"
+    val actionableLabel: String? = null
+)
 
 @Composable
 fun AiOracleScreen(
@@ -44,30 +57,87 @@ fun AiOracleScreen(
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDark.current
 
+    // Active Neural Model
+    var activeModelIndex by remember { mutableIntStateOf(0) }
+    val models = listOf(
+        "RailVision-DeepTrack v4.2 (Multi-Spectral CNN)",
+        "Paris-FractureNet (Non-linear FEA Fatigue)",
+        "Nadal-KinematicEngine (Wheel-Climb Dynamics)",
+        "ThermalBuckle-SFT (Axial Euler Beam CWR)"
+    )
+
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabTitles = listOf("Failure Time", "Derailment Risk", "Work Windows", "Thermal Buckle")
+    val tabTitles = listOf("Failure Kinetics", "Nadal Derailment", "Possession Windows", "Thermal SFT Buckle", "Fleet Interlock")
 
     var queryText by remember { mutableStateOf("") }
     var isRunningTensorScan by remember { mutableStateOf(false) }
     var scanProgress by remember { mutableFloatStateOf(0f) }
-    var lastTensorScanResult by remember { mutableStateOf("RailVision-DeepTrack v4.2 · Multi-spectral pass synced with track sensors") }
+    var currentScanPhase by remember { mutableStateOf("Ready") }
+    var lastTensorScanResult by remember {
+        mutableStateOf("Multi-Tensor Inference Synced · Section 14 · Defect CRK-2048 verified at 46.2mm depth (99.2% confidence)")
+    }
 
-    // Live AI query chat history
+    // Interactive Action Feedback Banner
+    var quickActionFeedback by remember { mutableStateOf<String?>(null) }
+
+    // Oscilloscope Animation
+    val infiniteTransition = rememberInfiniteTransition(label = "Oscilloscope")
+    val sweepPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "SweepPhase"
+    )
+    val pulseGlow by infiniteTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "PulseGlow"
+    )
+
+    // Chat History
     val chatMessages = remember {
         mutableStateListOf(
-            Pair("assistant", "Hello Inspector Chen. RailVision-DeepTrack v4.2 is online. Connected to Section 14 track telemetry and Train TR-104 live uplink. Ask me anything regarding track safety, derailment thresholds, or maintenance windows.")
+            AiChatMessage(
+                sender = "assistant",
+                text = "⚡ System initialized: RailVision-DeepTrack v4.2 Edge TPU cluster online (16 ms latency).\n\n" +
+                    "Real-time telemetric streams active across 4 corridor sectors. Critical flaw detected: CRK-2048 at Chainage 14+320 UP Line (46.2mm transverse crack, Paris growth +0.41 mm/day).",
+                actionableType = "TSR",
+                actionableLabel = "Verify TSR 25 km/h on TR-104"
+            )
         )
     }
 
     LaunchedEffect(isRunningTensorScan) {
         if (isRunningTensorScan) {
             scanProgress = 0f
-            for (i in 1..10) {
-                kotlinx.coroutines.delay(120)
-                scanProgress = i / 10f
+            val phases = listOf(
+                "Ingesting Multi-Spectral Ultrasonic Waves...",
+                "Running 2D Convolutional Feature Maps...",
+                "Calculating Paris-Erdogan Stress Intensity (ΔK)...",
+                "Evaluating Nadal Flange Climb Ratio (Y/Q)...",
+                "Solving Euler Beam-Column Compressive Buckling...",
+                "Synthesizing Multi-Tensor Confidence Matrix..."
+            )
+            for (i in 1..phases.size) {
+                currentScanPhase = phases[i - 1]
+                scanProgress = i / phases.size.toFloat()
+                delay(180)
             }
             isRunningTensorScan = false
-            lastTensorScanResult = "Tensor inference completed: CRK-2048 verified at 46.2mm depth (93.1% confidence). Nadal derailment ratio confirmed at 0.68. TSR 25 km/h restriction active."
+            currentScanPhase = "Inference Complete (100%)"
+            lastTensorScanResult = when (activeModelIndex) {
+                0 -> "DeepTrack v4.2: Flaw depth 46.2mm ±0.3mm · Acoustic signature confirmed · Zero false positives in 12,000 frames"
+                1 -> "Paris-FractureNet: da/dN = 2.4×10⁻¹¹ (ΔK)³·² · Remaining safe life: 72.4 Operating Hours · Limit: 50.0mm"
+                2 -> "Nadal-KinematicEngine: Y/Q ratio = 0.68 · Wheel climb envelope safe at 25 km/h · Derailment probability 12.4%"
+                else -> "ThermalBuckle-SFT: Neutral SFT 27.0°C · Rail temp +11.4°C · Axial stress +68.4 MPa · Buckle margin safe"
+            }
         }
     }
 
@@ -81,21 +151,51 @@ fun AiOracleScreen(
         item {
             Header(
                 title = "AI Predictive Safety Engine",
-                subtitle = "RailVision-DeepTrack v4.2 · Multi-Tensor Analytics",
+                subtitle = "RailVision-DeepTrack v4.2 · Multi-Tensor Physics & Ultrasonic Telemetry",
                 onBack = onBack
             )
         }
 
-        // Engine Status Banner
+        // Quick Action Feedback Banner
+        if (quickActionFeedback != null) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF065F46)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(quickActionFeedback!!, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        IconButton(onClick = { quickActionFeedback = null }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Neural Model Selector & HUD Status Banner
         item {
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDark) Color(0xFF0F1B2B) else Color(0xFF132338)
+                    containerColor = if (isDark) Color(0xFF0B1422) else Color(0xFF0F1E33)
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Color(0xFF0284C7), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f), RoundedCornerShape(12.dp))
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(
@@ -121,15 +221,15 @@ fun AiOracleScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "RAILVISION-DEEPTRACK v4.2",
+                                    text = "RAILVISION NEURAL ENGINE",
                                     color = Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    text = "Edge TPU Accelerated · Latency: 16 ms",
-                                    color = Color(0xFF7DD3FC),
+                                    text = "Active: ${models[activeModelIndex].substringBefore(" ")}",
+                                    color = Color(0xFF38BDF8),
                                     fontSize = 10.sp
                                 )
                             }
@@ -143,7 +243,7 @@ fun AiOracleScreen(
                                 .padding(horizontal = 7.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = "ONLINE",
+                                text = "16 ms · TPU ONLINE",
                                 color = Color(0xFF4ADE80),
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
@@ -152,9 +252,39 @@ fun AiOracleScreen(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Model Selector Pills
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        models.forEachIndexed { index, modelName ->
+                            val isSel = activeModelIndex == index
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSel) Color(0xFF0284C7) else Color(0xFF1E293B).copy(alpha = 0.6f))
+                                    .border(1.dp, if (isSel) Color(0xFF38BDF8) else Color(0xFF334155), RoundedCornerShape(6.dp))
+                                    .clickable { activeModelIndex = index }
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = modelName.substringBefore(" ("),
+                                    fontSize = 9.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (isSel) Color.White else Color(0xFF94A3B8)
+                                )
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Metrics row
+                    // Precision Metrics Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -163,59 +293,62 @@ fun AiOracleScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF0B1420))
+                                .background(Color(0xFF070D18))
+                                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(6.dp))
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("DERAILMENT RISK", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("0.68 / 1.00", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("NADAL RATIO", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("0.68 Y/Q", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF0B1420))
+                                .background(Color(0xFF070D18))
+                                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(6.dp))
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("CONFIDENCE", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("97.8%", color = Color(0xFF22C55E), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("CONFIDENCE", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("99.2%", color = Color(0xFF22C55E), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF0B1420))
+                                .background(Color(0xFF070D18))
+                                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(6.dp))
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("SECTOR", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("Section 14", color = Color(0xFF38BDF8), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("RUL SAFE LIFE", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("72.4 Hours", color = Color(0xFFF59E0B), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Tensor Re-Scan Action
+                    // Tensor Re-Scan Trigger
                     if (isRunningTensorScan) {
                         Column {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Running Neural Tensor Re-Scan...", color = Color(0xFF38BDF8), fontSize = 10.sp)
-                                Text("${(scanProgress * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(currentScanPhase, color = Color(0xFF38BDF8), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                Text("${(scanProgress * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(5.dp))
                             LinearProgressIndicator(
                                 progress = { scanProgress },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp)),
+                                    .height(5.dp)
+                                    .clip(RoundedCornerShape(3.dp)),
                                 color = Color(0xFF38BDF8),
                                 trackColor = Color(0xFF1E293B)
                             )
@@ -230,7 +363,8 @@ fun AiOracleScreen(
                                 text = lastTensorScanResult,
                                 color = Color(0xFFCBD5E1),
                                 fontSize = 10.sp,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                lineHeight = 14.sp
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(
@@ -242,7 +376,7 @@ fun AiOracleScreen(
                             ) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Re-Scan", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Run Inference", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -252,9 +386,156 @@ fun AiOracleScreen(
             Spacer(modifier = Modifier.height(14.dp))
         }
 
+        // Live Ultrasonic Rail A-Scan Spectrogram Oscilloscope
+        item {
+            SectionLabel(title = "LIVE ULTRASONIC A-SCAN SPECTROGRAM (4.0 MHz SHEAR WAVE)")
+
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDark) Color(0xFF060B12) else Color(0xFF0B1420)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF1E2E44), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "70° SHEAR WAVE · ECHO AT DEPTH 46.2 mm",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF22C55E))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "ACOUSTIC SYNC",
+                                color = Color(0xFF86EFAC),
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Oscilloscope Canvas
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(130.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF03060B))
+                    ) {
+                        val w = size.width
+                        val h = size.height
+
+                        // Grid lines
+                        for (gx in 1..8) {
+                            val x = (w / 9) * gx
+                            drawLine(color = Color(0xFF0F1B2B), start = Offset(x, 0f), end = Offset(x, h), strokeWidth = 1f)
+                        }
+                        for (gy in 1..4) {
+                            val y = (h / 5) * gy
+                            drawLine(color = Color(0xFF0F1B2B), start = Offset(0f, y), end = Offset(w, y), strokeWidth = 1f)
+                        }
+
+                        // Ground baseline
+                        val baselineY = h * 0.82f
+                        drawLine(color = Color(0xFF1E293B), start = Offset(0f, baselineY), end = Offset(w, baselineY), strokeWidth = 1.5f)
+
+                        // Ultrasonic Waveform Path
+                        val wavePath = Path()
+                        wavePath.moveTo(0f, baselineY)
+
+                        val numPoints = 120
+                        for (i in 0..numPoints) {
+                            val x = (w / numPoints) * i
+                            val normX = i / numPoints.toFloat()
+
+                            // Entrance echo at x = 0.08
+                            val entranceEcho = if (normX in 0.05f..0.12f) {
+                                kotlin.math.sin((normX - 0.05f) / 0.07f * Math.PI.toFloat()) * (h * 0.40f)
+                            } else 0f
+
+                            // Critical flaw echo at x = 0.62 (depth 46.2 mm)
+                            val flawEcho = if (normX in 0.58f..0.66f) {
+                                kotlin.math.sin((normX - 0.58f) / 0.08f * Math.PI.toFloat()) * (h * 0.68f) * pulseGlow
+                            } else 0f
+
+                            // Backwall echo at x = 0.90 (rail base 172mm)
+                            val backwallEcho = if (normX in 0.86f..0.94f) {
+                                kotlin.math.sin((normX - 0.86f) / 0.08f * Math.PI.toFloat()) * (h * 0.50f)
+                            } else 0f
+
+                            // Material noise ripple
+                            val noise = kotlin.math.sin(i * 0.8f + sweepPhase * 6.28f) * 3f
+
+                            val y = baselineY - (entranceEcho + flawEcho + backwallEcho) + noise
+                            wavePath.lineTo(x, y)
+                        }
+
+                        // Draw Waveform Glow & Stroke
+                        drawPath(
+                            path = wavePath,
+                            color = Color(0xFF38BDF8).copy(alpha = 0.35f),
+                            style = Stroke(width = 4f)
+                        )
+                        drawPath(
+                            path = wavePath,
+                            color = Color(0xFF38BDF8),
+                            style = Stroke(width = 2f)
+                        )
+
+                        // Peak indicator over flaw
+                        val flawPeakX = w * 0.62f
+                        val flawPeakY = baselineY - (h * 0.68f * pulseGlow)
+                        drawCircle(color = Color(0xFFEF4444), radius = 5f, center = Offset(flawPeakX, flawPeakY))
+                        drawCircle(color = Color.White, radius = 2f, center = Offset(flawPeakX, flawPeakY))
+
+                        // Sweep vertical line
+                        val sweepX = w * sweepPhase
+                        drawLine(
+                            color = Color(0xFF22C55E).copy(alpha = 0.6f),
+                            start = Offset(sweepX, 0f),
+                            end = Offset(sweepX, h),
+                            strokeWidth = 1.5f
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Entrance Echo (0mm)", color = Color(0xFF64748B), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                        Text("FLAW PEAK: 46.2mm (+18.4 dB)", color = Color(0xFFEF4444), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        Text("Backwall Echo (172mm)", color = Color(0xFF64748B), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
         // Analytical Models Tabs
         item {
-            SectionLabel(title = "PREDICTIVE RISK MODELS")
+            SectionLabel(title = "PHYSICS-INFORMED RISK EVALUATION PANELS")
 
             Row(
                 modifier = Modifier
@@ -268,8 +549,9 @@ fun AiOracleScreen(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (isSel) colorScheme.primary else colorScheme.surfaceVariant)
+                            .border(1.dp, if (isSel) colorScheme.primary else colorScheme.outline.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
                             .clickable { selectedTab = index }
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .padding(horizontal = 11.dp, vertical = 7.dp)
                     ) {
                         Text(
                             text = title,
@@ -284,17 +566,18 @@ fun AiOracleScreen(
             Spacer(modifier = Modifier.height(10.dp))
         }
 
-        // Selected Predictive Model Detail
+        // Tab Content Deep Dive
         item {
             when (selectedTab) {
                 0 -> {
+                    // Failure Kinetics
                     RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "CRACK KINETICS & FAILURE TIME",
+                                text = "PARIS-ERDOGAN CRACK KINETICS",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colorScheme.primary,
                                 fontWeight = FontWeight.Bold
@@ -310,11 +593,12 @@ fun AiOracleScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "• Current Crack Depth: 46 mm (92% through railhead)\n" +
-                                "• Growth Velocity: +0.41 mm/day under 2,400t freight axle loads\n" +
-                                "• Critical Rail Break Threshold: 50 mm (Estimated in 72 hours)\n" +
-                                "• Paris-Erdogan Equation: da/dN = 2.4e-11 * (ΔK)^3.2\n" +
-                                "• Recommendation: Immediate rail clamp installation + 25 km/h restriction.",
+                            text = "• Current Crack Depth: 46.2 mm (92.4% through 60E1 railhead)\n" +
+                                "• Growth Velocity: +0.41 mm/day under 2,400t freight cyclic loads\n" +
+                                "• Critical Rail Fracture Limit: 50.0 mm (72.4 Operating Hours remaining)\n" +
+                                "• Governing Equation: da/dN = 2.4×10⁻¹¹ (ΔK)³·² with ΔK = 24.2 MPa√m\n" +
+                                "• Fracture Toughness: K_IC = 30.0 MPa√m (Risk Margin: 5.8 MPa√m)\n" +
+                                "• Directive: Emergency fishplate splice clamp and 25 km/h restriction mandatory.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
@@ -335,7 +619,7 @@ fun AiOracleScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             PrimaryButton(
-                                title = "Growth Analytics",
+                                title = "Growth Curve",
                                 icon = Icons.Default.ShowChart,
                                 secondary = true,
                                 onClick = onNavigateCrackGrowth,
@@ -345,33 +629,35 @@ fun AiOracleScreen(
                     }
                 }
                 1 -> {
+                    // Nadal Derailment Matrix
                     RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "DERAILMENT RISK MATRIX (NADAL LIMIT)",
+                                text = "NADAL DERAILMENT LIMIT & WHEEL CLIMB",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
-                            StatusPill(label = "HIGH RISK", tone = Tone.CRITICAL)
+                            StatusPill(label = "0.68 Y/Q", tone = Tone.CRITICAL)
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Chainage 14+320 Curvature (300m Radius)",
+                            text = "Chainage 14+320 High-Rail Curve (300m Radius)",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Wheel flange climb risk calculated via Nadal Derailment Criteria (Y/Q):\n" +
-                                "• Speed @ 45 km/h: 96.2% derailment probability (DANGEROUS)\n" +
+                            text = "Calculated wheel climb margin via Nadal Criterion (Y/Q):\n" +
+                                "• Speed @ 45 km/h: 96.2% derailment probability (CATASTROPHIC)\n" +
                                 "• Speed @ 35 km/h: 48.7% flange climb potential\n" +
                                 "• Speed @ 25 km/h: 12.4% safe envelope (ACTIVE RESTRICTION ENFORCED)\n" +
-                                "• Wheel / Rail Angle of Attack: 1.42° with dynamic lateral gauge variance.",
+                                "• Nadal Equation: Y/Q = (tan δ - μ)/(1 + μ tan δ) = 0.68 (Limit: 0.80)\n" +
+                                "• Dynamic Angle of Attack: 1.42° with dynamic track gauge variance (+9.4mm).",
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
@@ -380,40 +666,41 @@ fun AiOracleScreen(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         PrimaryButton(
-                            title = "View Spatial Risk Heatmap",
+                            title = "Open Corridor Risk Heatmap",
                             icon = Icons.Default.Layers,
                             onClick = onNavigateHeatmap
                         )
                     }
                 }
                 2 -> {
+                    // Possession Windows
                     RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "TIMETABLE & MAINTENANCE BLACKOUT",
+                                text = "OPTIMAL MAINTENANCE POSSESSION WINDOW",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
-                            StatusPill(label = "OPTIMAL SLOT", tone = Tone.HEALTHY)
+                            StatusPill(label = "01:15 - 04:30 GMT", tone = Tone.HEALTHY)
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "North Loop Corridor Window: 01:15 - 04:30 GMT",
+                            text = "North Loop Corridor Window: 3h 15m Blackout Tonight",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "• Traffic Blackout: 3 hours 15 minutes without passenger interference.\n" +
-                                "• Work Order MT-881: Replace Rail Clip Pair & Emergency Fishplate Clamp\n" +
-                                "• Estimated Repair Time: 85 minutes\n" +
-                                "• Available Crew: Crew 04 (Lead: M. Ross) ready for dispatch\n" +
-                                "• Service Disruption: 0% morning peak delay impact.",
+                            text = "• Traffic Blackout: 195 minutes without commercial train conflict\n" +
+                                "• Work Order WO-881: Replace Rail Clip Pair & Emergency Splice Clamps\n" +
+                                "• Required Possession Duration: 85 minutes (Margin: +110 mins)\n" +
+                                "• Crew 04 (Lead: M. Ross) equipped with induction heater & torque kit\n" +
+                                "• Service Disruption: 0% morning passenger peak delay impact.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
@@ -422,45 +709,93 @@ fun AiOracleScreen(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         PrimaryButton(
-                            title = "Dispatch Work Order MT-881",
+                            title = "Dispatch Work Order WO-881 to Crew 04",
                             icon = Icons.Default.Build,
                             onClick = {
                                 if (tasks.isNotEmpty()) onDispatchTask(tasks.first())
+                                quickActionFeedback = "Work Order WO-881 dispatched to Crew 04 for 01:15 GMT possession window."
                             }
                         )
                     }
                 }
-                else -> {
+                3 -> {
+                    // Thermal Buckle
                     RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "THERMAL STRESS & CWR BUCKLE EVALUATION",
+                                text = "THERMAL STRESS & CWR BUCKLE CRITICALITY",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
-                            StatusPill(label = "ELEVATED", tone = Tone.WARNING)
+                            StatusPill(label = "+68.4 MPa", tone = Tone.WARNING)
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Continuous Welded Rail (60E1 CWR)",
+                            text = "Continuous Welded Rail (60E1 CWR) Thermal Stability",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "• Tomorrow Ambient Forecast: 34°C (Rail surface projected > 52°C)\n" +
-                                "• Stress-Free Neutral Temp (SFT): 27°C\n" +
-                                "• Compressive Stress at 14:00: 128 MPa between KM 14+100 and 14+450\n" +
-                                "• Lateral Ballast Resistance: 4.8 kN/sleeper (Slightly degraded at 14+380)\n" +
-                                "• Recommendation: Deploy destressing crew prior to 11:30.",
+                            text = "• Projected Peak Rail Surface Temp: 48.4°C (+11.4°C over SFT)\n" +
+                                "• Stress-Free Neutral Temperature (SFT): 27.0°C\n" +
+                                "• Compressive Axial Stress: +68.4 MPa (128 kN axial force)\n" +
+                                "• Critical Euler Buckling Threshold: P_buckle = 145 kN (Margin: 17 kN)\n" +
+                                "• Lateral Ballast Resistance: 4.8 kN/sleeper (Marginal at 14+380)\n" +
+                                "• Recommendation: Deploy destressing hydraulic puller team before 11:30.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
+                        )
+                    }
+                }
+                else -> {
+                    // Fleet Interlock
+                    RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "AUTONOMOUS FLEET TSR INTERLOCK",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            StatusPill(label = "INTERLOCKED", tone = Tone.INFO)
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Live Cab Signal Enforcements Across Corridor",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• Train TR-104 (InterCity Express): Enforcing 25 km/h TSR at KM 14+000\n" +
+                                "• Train FR-802 (Heavy Haul Freight): Enforcing 40 km/h TSR at KM 08+000\n" +
+                                "• Train HS-301 (Arrow Bullet): Full 180 km/h authorized at KM 03+000\n" +
+                                "• Train RC-515 (Regional Metro): Full 90 km/h clear at KM 01+000\n" +
+                                "• Direct Cab DMI Beacon: Active via 5G Telemetry Uplink (Loss rate: 0.00%).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant,
+                            lineHeight = 18.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        PrimaryButton(
+                            title = "Broadcast TSR Advisory to Fleet",
+                            icon = Icons.Default.Send,
+                            onClick = {
+                                quickActionFeedback = "Emergency TSR advisory re-broadcasted to TR-104 and FR-802."
+                            }
                         )
                     }
                 }
@@ -469,44 +804,81 @@ fun AiOracleScreen(
             Spacer(modifier = Modifier.height(14.dp))
         }
 
-        // Interactive Natural Language AI Assistant Chat
+        // Interactive Natural Language AI Field Assistant
         item {
-            SectionLabel(title = "INTERACTIVE AI FIELD ASSISTANT")
+            SectionLabel(title = "AI MISSION CONTROL CONVERSATION ENGINE")
 
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDark) Color(0xFF0B1420) else Color(0xFFF1F5F9)
+                    containerColor = if (isDark) Color(0xFF070D18) else Color(0xFFF1F5F9)
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFF1E2E44), RoundedCornerShape(12.dp))
                     .padding(12.dp)
             ) {
                 Column {
                     // Chat messages history
-                    chatMessages.forEach { (sender, text) ->
-                        val isUser = sender == "user"
-                        Row(
+                    chatMessages.forEach { msg ->
+                        val isUser = msg.sender == "user"
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),
-                            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+                            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
                         ) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isUser) colorScheme.primary else (if (isDark) Color(0xFF1E293B) else Color.White))
-                                    .border(1.dp, if (isUser) colorScheme.primary else Color(0xFFCBD5E1), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    .widthIn(max = 280.dp)
+                                    .background(
+                                        if (isUser) colorScheme.primary
+                                        else (if (isDark) Color(0xFF0F1B2B) else Color.White)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isUser) colorScheme.primary else Color(0xFF1E2E44),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    .widthIn(max = 300.dp)
                             ) {
                                 Text(
-                                    text = text,
+                                    text = msg.text,
                                     fontSize = 11.sp,
-                                    lineHeight = 15.sp,
+                                    lineHeight = 16.sp,
                                     color = if (isUser) colorScheme.onPrimary else colorScheme.onSurface
                                 )
+                            }
+
+                            // Optional Actionable Button attached to assistant message
+                            if (msg.actionableType != null && msg.actionableLabel != null) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0xFF0284C7).copy(alpha = 0.2f))
+                                        .border(1.dp, Color(0xFF0284C7), RoundedCornerShape(6.dp))
+                                        .clickable {
+                                            when (msg.actionableType) {
+                                                "TSR" -> quickActionFeedback = "TSR 25 km/h verified and acknowledged by Driver on TR-104."
+                                                "DISPATCH" -> {
+                                                    if (tasks.isNotEmpty()) onDispatchTask(tasks.first())
+                                                    quickActionFeedback = "WO-881 dispatched to maintenance car."
+                                                }
+                                                "HEATMAP" -> onNavigateHeatmap()
+                                                "GROWTH" -> onNavigateCrackGrowth()
+                                                else -> quickActionFeedback = "Directive executed successfully."
+                                            }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(msg.actionableLabel, color = Color(0xFF38BDF8), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }
@@ -523,29 +895,53 @@ fun AiOracleScreen(
                         listOf(
                             "Safest speed for Section 14?",
                             "When will CRK-2048 break?",
-                            "Work window tonight?",
-                            "Train TR-104 status?"
+                            "Work possession window?",
+                            "CWR buckling risk?",
+                            "Explain Nadal ratio"
                         ).forEach { suggestion ->
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(colorScheme.primary.copy(alpha = 0.12f))
-                                    .border(1.dp, colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                    .border(1.dp, colorScheme.primary.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                                     .clickable {
-                                        chatMessages.add(Pair("user", suggestion))
-                                        val reply = when {
-                                            suggestion.contains("speed", ignoreCase = true) ->
-                                                "⚡ Under current 46mm transverse crack conditions, max permissible operating speed is strictly 25 km/h. Exceeding 35 km/h escalates wheel climb derailment risk to 48.7%."
-                                            suggestion.contains("break", ignoreCase = true) ->
-                                                "💥 CRK-2048 will reach the 50mm critical railhead rupture limit in approximately 72 hours under 2,400t freight passes without clamp reinforcement."
-                                            suggestion.contains("window", ignoreCase = true) ->
-                                                "🕒 North Loop is completely dark to commercial traffic between 01:15 and 04:30 GMT tonight. Ideal for Work Order MT-881 (85 mins duration)."
-                                            else ->
-                                                "🚆 Train TR-104 is actively connected via 5G uplink at IP 10.142.8.50. Current speed: 118 km/h. Speed restriction alert has been transmitted to the cab console."
+                                        chatMessages.add(AiChatMessage("user", suggestion))
+                                        val (replyText, actType, actLabel) = when {
+                                            suggestion.contains("speed", ignoreCase = true) -> Triple(
+                                                "⚡ Under current 46.2mm transverse crack and 300m curve radius conditions, maximum safe operating speed is strictly 25 km/h.\n\n" +
+                                                    "Exceeding 35 km/h escalates wheel climb derailment risk to 48.7%. Exceeding 45 km/h causes 96.2% derailment probability via Nadal flange climb.",
+                                                "TSR",
+                                                "Confirm Cab TSR 25 km/h"
+                                            )
+                                            suggestion.contains("break", ignoreCase = true) -> Triple(
+                                                "💥 Crack CRK-2048 (Depth 46.2mm) will reach the 50.0mm critical rupture limit in 72.4 Operating Hours under 2,400t freight passes (da/dN = +0.41 mm/day).\n\n" +
+                                                    "Recommendation: Install emergency splice clamps during tonight's 01:15 GMT window.",
+                                                "GROWTH",
+                                                "View Crack Growth FEA Curve"
+                                            )
+                                            suggestion.contains("window", ignoreCase = true) -> Triple(
+                                                "🕒 North Loop is completely dark to commercial traffic between 01:15 and 04:30 GMT tonight (195 minutes).\n\n" +
+                                                    "Work Order WO-881 requires 85 minutes. Crew 04 is currently available on standby.",
+                                                "DISPATCH",
+                                                "Dispatch WO-881 to Crew 04"
+                                            )
+                                            suggestion.contains("buckling", ignoreCase = true) -> Triple(
+                                                "🔥 Tomorrow's ambient 34°C will drive rail surface to 48.4°C (+11.4°C over Neutral SFT 27°C).\n\n" +
+                                                    "Compressive stress will peak at +68.4 MPa (128 kN axial force, near 145 kN Euler buckling limit). Destressing required before 11:30.",
+                                                "HEATMAP",
+                                                "Inspect Corridor Heatmap"
+                                            )
+                                            else -> Triple(
+                                                "📐 Nadal Derailment Criterion evaluates lateral wheel force (Y) over vertical axle load (Q):\n" +
+                                                    "Y/Q = (tan δ - μ) / (1 + μ tan δ)\n\n" +
+                                                    "With flange angle δ=68° and friction μ=0.38, current ratio is 0.68. The critical derailment boundary is 0.80.",
+                                                null,
+                                                null
+                                            )
                                         }
-                                        chatMessages.add(Pair("assistant", reply))
+                                        chatMessages.add(AiChatMessage("assistant", replyText, actType, actLabel))
                                     }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .padding(horizontal = 9.dp, vertical = 5.dp)
                             ) {
                                 Text(
                                     text = suggestion,
@@ -567,34 +963,30 @@ fun AiOracleScreen(
                         OutlinedTextField(
                             value = queryText,
                             onValueChange = { queryText = it },
-                            placeholder = { Text("Ask RailGuard AI...", fontSize = 11.sp) },
+                            placeholder = { Text("Ask RailGuard AI (e.g., crack kinetics, speed, thermal)...", fontSize = 11.sp) },
                             singleLine = true,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(48.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         IconButton(
                             onClick = {
                                 if (queryText.isNotBlank()) {
                                     val userMsg = queryText
-                                    chatMessages.add(Pair("user", userMsg))
+                                    chatMessages.add(AiChatMessage("user", userMsg))
                                     queryText = ""
-                                    chatMessages.add(
-                                        Pair(
-                                            "assistant",
-                                            "🤖 AI Evaluation for '$userMsg':\n" +
-                                                "• Section 14 track health is 94.2%.\n" +
-                                                "• 1 Critical defect active (CRK-2048 46mm at 14+320).\n" +
-                                                "• Safety confidence is 97.8% based on optical tensor & live accelerometer telemetry.\n" +
-                                                "• Temporary Speed Restriction of 25 km/h remains in effect."
-                                        )
-                                    )
+                                    val reply = "🤖 RailVision-DeepTrack Analysis for '$userMsg':\n\n" +
+                                        "• Sector 14 track integrity verified at 94.2% nominal.\n" +
+                                        "• Critical defect CRK-2048 (46.2mm at Chainage 14+320) is continuously monitored by acoustic emission sensors.\n" +
+                                        "• Multi-Tensor inference confidence: 99.2%.\n" +
+                                        "• Safety Directive: Mandatory 25 km/h TSR remains active on Train TR-104."
+                                    chatMessages.add(AiChatMessage("assistant", reply, "TSR", "Verify Cab Interlock"))
                                 }
                             },
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(46.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(colorScheme.primary)
                         ) {

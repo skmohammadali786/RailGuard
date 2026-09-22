@@ -90,7 +90,9 @@ data class NavigationTab(
 @Composable
 fun RailGuardApp() {
     var isDarkMode by remember { mutableStateOf(false) }
-    var currentRoute by remember { mutableStateOf<String>(Screen.Home.route) }
+    var appPreferences by remember { mutableStateOf(AppPreferences()) }
+    var isAppLocked by remember { mutableStateOf(false) }
+    var currentRoute by remember { mutableStateOf<String>(Screen.Splash.route) }
     val backStack = remember { mutableStateListOf<String>() }
 
     // State data
@@ -126,71 +128,84 @@ fun RailGuardApp() {
     }
 
     val tabs = listOf(
-        NavigationTab(Screen.Home.route, "Home", Icons.Default.Home),
-        NavigationTab(Screen.Inspections.route, "Inspect", Icons.Default.FactCheck),
-        NavigationTab(Screen.Defects.route, "Defects", Icons.Default.Warning),
-        NavigationTab(Screen.Map.route, "Map", Icons.Default.Map),
-        NavigationTab(Screen.Settings.route, "Control", Icons.Default.Settings)
+        NavigationTab(Screen.Home.route, appPreferences.translate("home"), Icons.Default.Home),
+        NavigationTab(Screen.Inspections.route, appPreferences.translate("inspect"), Icons.Default.FactCheck),
+        NavigationTab(Screen.Defects.route, appPreferences.translate("defects"), Icons.Default.Warning),
+        NavigationTab(Screen.Map.route, appPreferences.translate("map"), Icons.Default.Map),
+        NavigationTab(Screen.Settings.route, appPreferences.translate("control"), Icons.Default.Settings)
     )
 
     val isTabScreen = currentRoute in tabs.map { it.route }
 
-    RailGuardTheme(darkTheme = isDarkMode) {
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            bottomBar = {
-                if (isTabScreen) {
-                    NavigationBar {
-                        tabs.forEach { tab ->
-                            val selected = currentRoute == tab.route
-                            NavigationBarItem(
-                                selected = selected,
-                                onClick = {
-                                    if (currentRoute != tab.route) {
-                                        backStack.clear()
-                                        currentRoute = tab.route
-                                    }
-                                },
-                                icon = {
-                                    Icon(
-                                        imageVector = tab.icon,
-                                        contentDescription = tab.title
+    CompositionLocalProvider(LocalAppSettings provides appPreferences) {
+        RailGuardTheme(darkTheme = isDarkMode) {
+            androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    bottomBar = {
+                        if (isTabScreen) {
+                            NavigationBar {
+                                tabs.forEach { tab ->
+                                    val selected = currentRoute == tab.route
+                                    NavigationBarItem(
+                                        selected = selected,
+                                        onClick = {
+                                            if (currentRoute != tab.route) {
+                                                backStack.clear()
+                                                currentRoute = tab.route
+                                            }
+                                        },
+                                        icon = {
+                                            Icon(
+                                                imageVector = tab.icon,
+                                                contentDescription = tab.title
+                                            )
+                                        },
+                                        label = { Text(tab.title) }
                                     )
-                                },
-                                label = { Text(tab.title) }
-                            )
+                                }
+                            }
                         }
                     }
-                }
-            }
-        ) { innerPadding ->
-            Surface(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                AnimatedContent(
-                    targetState = currentRoute,
-                    transitionSpec = {
-                        fadeIn(tween(220)) togetherWith fadeOut(tween(180))
-                    },
-                    label = "ScreenTransition"
-                ) { targetRoute ->
-                    when (targetRoute) {
-                        Screen.Splash.route -> SplashScreen(
-                            onContinue = { navigateTo(Screen.Onboarding.route) },
-                            onLoginClick = { navigateTo(Screen.Login.route) }
-                        )
-                        Screen.Onboarding.route -> OnboardingScreen(
-                            onFinish = { navigateTo(Screen.Home.route) }
-                        )
-                        Screen.Login.route -> LoginScreen(
-                            onLoginSuccess = { navigateTo(Screen.Home.route) },
-                            onForgotPasswordClick = { navigateTo(Screen.ForgotPassword.route) },
-                            onRegisterClick = { navigateTo(Screen.Register.route) }
-                        )
+                ) { innerPadding ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                    ) {
+                        AnimatedContent(
+                            targetState = currentRoute,
+                            transitionSpec = {
+                                fadeIn(tween(220)) togetherWith fadeOut(tween(180))
+                            },
+                            label = "ScreenTransition"
+                        ) { targetRoute ->
+                            when (targetRoute) {
+                                Screen.Splash.route -> SplashScreen(
+                                    onContinue = { navigateTo(Screen.Onboarding.route) },
+                                    onLoginClick = { navigateTo(Screen.Login.route) }
+                                )
+                                Screen.Onboarding.route -> OnboardingScreen(
+                                    onFinish = {
+                                        backStack.clear()
+                                        navigateTo(Screen.Home.route)
+                                    }
+                                )
+                                Screen.Login.route -> LoginScreen(
+                                    onLoginSuccess = {
+                                        backStack.clear()
+                                        navigateTo(Screen.Home.route)
+                                    },
+                                    onForgotPasswordClick = { navigateTo(Screen.ForgotPassword.route) },
+                                    onRegisterClick = { navigateTo(Screen.Register.route) }
+                                )
                         Screen.Register.route -> RegistrationScreen(
-                            onRegisterSuccess = { navigateTo(Screen.Home.route) },
+                            onRegisterSuccess = { name, email ->
+                                if (name.isNotBlank()) profileName = name
+                                if (email.isNotBlank()) profileEmail = email
+                                backStack.clear()
+                                navigateTo(Screen.Home.route)
+                            },
                             onLoginClick = { navigateTo(Screen.Login.route) }
                         )
                         Screen.ForgotPassword.route -> ForgotPasswordScreen(
@@ -208,6 +223,7 @@ fun RailGuardApp() {
                         Screen.Home.route -> HomeScreen(
                             defects = defects,
                             tasks = tasks,
+                            inspectorName = profileName,
                             onNavigate = { navigateTo(it) },
                             onDefectClick = {
                                 selectedDefect = it
@@ -253,7 +269,11 @@ fun RailGuardApp() {
                             isDarkMode = isDarkMode,
                             onToggleDarkMode = { isDarkMode = it },
                             onNavigate = { navigateTo(it) },
-                            onSignOut = { navigateTo(Screen.Login.route) }
+                            onSignOut = {
+                                backStack.clear()
+                                navigateTo(Screen.Login.route)
+                            },
+                            onLockApp = { isAppLocked = true }
                         )
 
                         // Sub-screens: Inspections
@@ -397,6 +417,7 @@ fun RailGuardApp() {
                         )
                         Screen.PdfPreview.route -> PdfPreviewScreen(
                             reportTitle = selectedReportTitle,
+                            inspectorName = profileName,
                             onBack = { navigateBack() }
                         )
                         Screen.ShareReport.route -> ShareReportScreen(
@@ -409,6 +430,10 @@ fun RailGuardApp() {
                             onNavigateTrackHealth = { navigateTo(Screen.TrackHealth.route) },
                             onNavigateCrackAnalytics = { navigateTo(Screen.GrowthAnalysis.route) },
                             onNavigateRiskAnalytics = { navigateTo(Screen.RiskHeatmap.route) },
+                            onExportPdf = {
+                                selectedReportTitle = "Full Network Analytics & Sensor Telemetry Dossier"
+                                navigateTo(Screen.PdfPreview.route)
+                            },
                             onBack = { navigateBack() }
                         )
                         Screen.TrackHealth.route -> TrackHealthScreen(onBack = { navigateBack() })
@@ -423,9 +448,22 @@ fun RailGuardApp() {
                             },
                             onBack = { navigateBack() }
                         )
-                        Screen.AppSettings.route -> AppSettingsScreen(onBack = { navigateBack() })
-                        Screen.Security.route -> SecurityScreen(onBack = { navigateBack() })
-                        Screen.Language.route -> LanguageScreen(onBack = { navigateBack() })
+                        Screen.AppSettings.route -> AppSettingsScreen(
+                            preferences = appPreferences,
+                            onUpdatePreferences = { appPreferences = it },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.Security.route -> SecurityScreen(
+                            preferences = appPreferences,
+                            onUpdatePreferences = { appPreferences = it },
+                            onLockApp = { isAppLocked = true },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.Language.route -> LanguageScreen(
+                            preferences = appPreferences,
+                            onUpdatePreferences = { appPreferences = it },
+                            onBack = { navigateBack() }
+                        )
                         Screen.Help.route -> HelpCenterScreen(onBack = { navigateBack() })
                         Screen.About.route -> AboutScreen(onBack = { navigateBack() })
                         Screen.Attention.route -> AttentionScreen(
@@ -473,5 +511,15 @@ fun RailGuardApp() {
                 }
             }
         }
+
+        if (isAppLocked && appPreferences.passcodeEnabled) {
+            PasscodeLockScreen(
+                expectedPin = appPreferences.passcodePin,
+                allowBiometric = appPreferences.isBiometricEnabled,
+                onUnlock = { isAppLocked = false }
+            )
+        }
     }
+}
+}
 }

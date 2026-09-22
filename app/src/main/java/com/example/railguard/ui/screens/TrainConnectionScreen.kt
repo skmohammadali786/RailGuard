@@ -5,9 +5,10 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +29,22 @@ import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import kotlinx.coroutines.delay
 
+data class LiveTrain(
+    val id: String,
+    val name: String,
+    val trainType: String,
+    val corridorSection: String,
+    val chainage: String,
+    val normalSpeedCap: Int,
+    val ipAddress: String,
+    val driverName: String,
+    val obuType: String,
+    val gpsCoords: String,
+    var liveSpeed: Float,
+    var activeTsr: Int? = null,
+    var lastAlertReceived: String? = null
+)
+
 @Composable
 fun TrainConnectionScreen(
     onNavigateLiveScan: () -> Unit,
@@ -37,37 +54,140 @@ fun TrainConnectionScreen(
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDark.current
 
-    var isConnected by remember { mutableStateOf(true) }
-    var isStreamingLive by remember { mutableStateOf(true) }
-    var packetCount by remember { mutableIntStateOf(14820) }
-    var currentSpeed by remember { mutableFloatStateOf(118.4f) }
-    var currentChainage by remember { mutableStateOf("14+320") }
-    var currentTemp by remember { mutableFloatStateOf(28.4f) }
-    var cabAlertDispatched by remember { mutableStateOf(false) }
-    var alertBannerMessage by remember { mutableStateOf<String?>(null) }
-
-    val liveLogEntries = remember {
+    // Fleet of distinct trains
+    val trainFleet = remember {
         mutableStateListOf(
-            "[14:32:14.200] LINK ESTABLISHED: 5G Train-to-Ground Radio -> TR-104 (IP: 10.142.8.50:50051)",
-            "[14:32:14.450] SYNC: Locomotive OBU Atlas 200 Handshake OK · Latency 12ms",
-            "[14:32:15.102] TX -> TR-104: {\"gps\": [51.50394, -0.12856], \"speed_kmh\": 118.4, \"chainage\": \"14+320\", \"gauge_mm\": 1438.2}",
-            "[14:32:15.114] RX <- TR-104: {\"ack\": true, \"cab_sync\": \"TELEMETRY_LOCKED\"}",
-            "[14:32:15.820] TX -> TR-104: {\"vibe_z_g\": 0.042, \"rail_temp_c\": 28.4, \"tsr_warning\": \"25_KMH_ACTIVE_14+320\"}",
-            "[14:32:15.832] RX <- TR-104: {\"ack\": true, \"cab_dmi_display\": \"TSR_RESTRICTION_25_ACKNOWLEDGED\"}"
+            LiveTrain(
+                id = "TR-104",
+                name = "InterCity Express 104",
+                trainType = "High-Speed Passenger EMU",
+                corridorSection = "Section 14 (North Loop)",
+                chainage = "14+320 UP",
+                normalSpeedCap = 125,
+                ipAddress = "10.142.8.50:50051",
+                driverName = "Capt. E. Vance",
+                obuType = "Alstom Atlas 200 ETCS L2",
+                gpsCoords = "51°30'14.2\"N 0°07'42.8\"W",
+                liveSpeed = 118.4f
+            ),
+            LiveTrain(
+                id = "FR-802",
+                name = "Heavy Freight Hauler 802",
+                trainType = "3,400T Diesel-Electric Freight",
+                corridorSection = "Section 08 (South Freight Yard)",
+                chainage = "08+140 DOWN",
+                normalSpeedCap = 75,
+                ipAddress = "10.142.8.62:50052",
+                driverName = "Capt. M. Kowalski",
+                obuType = "Siemens Trainguard 200",
+                gpsCoords = "51°29'08.6\"N 0°08'12.4\"W",
+                liveSpeed = 62.5f
+            ),
+            LiveTrain(
+                id = "HS-301",
+                name = "Arrow Bullet High-Speed 301",
+                trainType = "High-Speed Inter-Corridor Shinkansen",
+                corridorSection = "Section 03 (East High-Speed Junction)",
+                chainage = "03+450 UP",
+                normalSpeedCap = 200,
+                ipAddress = "10.142.8.77:50053",
+                driverName = "Capt. K. Tanaka",
+                obuType = "Hitachi ETCS Level 2",
+                gpsCoords = "51°31'22.0\"N 0°05'55.1\"W",
+                liveSpeed = 184.2f
+            ),
+            LiveTrain(
+                id = "RC-515",
+                name = "Regional Metro Commuter 515",
+                trainType = "Class 387 8-Car EMU",
+                corridorSection = "Section 01 (West Deep Cut)",
+                chainage = "01+890 DOWN",
+                normalSpeedCap = 90,
+                ipAddress = "10.142.8.91:50054",
+                driverName = "Capt. L. Gomez",
+                obuType = "Bombardier EBI Cab 2000",
+                gpsCoords = "51°28'45.3\"N 0°11'04.2\"W",
+                liveSpeed = 78.0f
+            ),
+            LiveTrain(
+                id = "MOW-909",
+                name = "Track Patrol & Ultrasonic Tamper 909",
+                trainType = "Specialized Maintenance-of-Way",
+                corridorSection = "Section 14 (North Loop Patrol)",
+                chainage = "14+050 UP",
+                normalSpeedCap = 40,
+                ipAddress = "10.142.8.105:50055",
+                driverName = "Eng. D. Ross",
+                obuType = "Plasser Onboard Diagnostic",
+                gpsCoords = "51°30'11.8\"N 0°07'38.5\"W",
+                liveSpeed = 24.5f
+            )
         )
     }
 
-    val logListState = rememberLazyListState()
+    var selectedTrainIndex by remember { mutableIntStateOf(0) }
+    val activeTrain = trainFleet[selectedTrainIndex]
+
+    var isConnected by remember { mutableStateOf(true) }
+    var isStreamingLive by remember { mutableStateOf(true) }
+    var autoDispatchDefectsToTrain by remember { mutableStateOf(true) }
+    var packetCount by remember { mutableIntStateOf(14820) }
+    var currentTemp by remember { mutableFloatStateOf(28.4f) }
+    var alertBannerMessage by remember { mutableStateOf<String?>(null) }
+    var alertBannerTone by remember { mutableStateOf(Tone.CRITICAL) }
+
+    val liveLogEntries = remember {
+        mutableStateListOf(
+            "[14:32:14.200] LINK ESTABLISHED: 5G Train-to-Ground Radio Fleet Gateway",
+            "[14:32:14.450] ACTIVE ROSTER: 5 Connected Trains across 4 Corridor Sections",
+            "[14:32:15.102] SYNC TR-104: OBU Atlas 200 Handshake OK · Latency 12ms",
+            "[14:32:15.114] SYNC FR-802: Trainguard 200 Handshake OK · Latency 14ms",
+            "[14:32:15.820] TX -> TR-104: {\"gps\": [51.50394, -0.12856], \"spd\": 118.4, \"chainage\": \"14+320\"}",
+            "[14:32:15.832] RX <- TR-104: {\"ack\": true, \"cab_dmi\": \"TELEMETRY_LOCKED\"}"
+        )
+    }
+
+    // Function to trigger auto-send of detected defect to the specific matching train
+    fun autoDispatchDefectToTrain(defectId: String, defectName: String, sectionName: String, chainage: String, suggestedTsr: Int) {
+        val targetTrain = trainFleet.find { it.corridorSection.contains(sectionName.take(10)) } ?: activeTrain
+        val trainIdx = trainFleet.indexOf(targetTrain)
+
+        // Update train TSR and decelerate speed
+        targetTrain.activeTsr = suggestedTsr
+        targetTrain.lastAlertReceived = "AUTO-DISPATCH: $defectId $defectName · TSR $suggestedTsr km/h"
+        targetTrain.liveSpeed = suggestedTsr.toFloat()
+        if (trainIdx >= 0) {
+            trainFleet[trainIdx] = targetTrain
+        }
+
+        alertBannerTone = Tone.CRITICAL
+        alertBannerMessage = "AUTO-DISPATCH EXECUTED: Defect $defectId detected in $sectionName! Interlocked with ${targetTrain.id} (${targetTrain.name}) — Speed restricted to $suggestedTsr km/h. Driver ${targetTrain.driverName} acknowledged."
+
+        val ts = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+        liveLogEntries.add("[$ts] 🚨 [AUTO-DISPATCH] Defect $defectId detected at $chainage in $sectionName")
+        liveLogEntries.add("[$ts] TX -> ${targetTrain.id} OBU: {\"event\": \"EMERGENCY_INTERLOCK\", \"defect\": \"$defectId\", \"tsr_kmh\": $suggestedTsr, \"chainage\": \"$chainage\"}")
+        liveLogEntries.add("[$ts] RX <- ${targetTrain.id} CAB: {\"ack\": true, \"driver\": \"${targetTrain.driverName}\", \"service_brake\": \"APPLIED\", \"speed_target\": $suggestedTsr}")
+
+        // Switch active view to the targeted train if not currently viewed
+        selectedTrainIndex = trainIdx.coerceAtLeast(0)
+    }
 
     // Real-time live data streaming simulation loop
     LaunchedEffect(isStreamingLive, isConnected) {
         while (isStreamingLive && isConnected) {
             delay(1200)
             packetCount += 6
-            currentSpeed = (117.8f + (kotlin.random.Random.nextFloat() * 1.6f))
             currentTemp = (28.2f + (kotlin.random.Random.nextFloat() * 0.4f))
+
+            // Jitter current speeds based on active TSR
+            trainFleet.forEachIndexed { idx, tr ->
+                val base = tr.activeTsr?.toFloat() ?: tr.normalSpeedCap.toFloat()
+                val targetSpeed = base * 0.95f + (kotlin.random.Random.nextFloat() * 2.0f)
+                trainFleet[idx] = tr.copy(liveSpeed = targetSpeed)
+            }
+
             val ts = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
-            val newLog = "[$ts] TX -> TR-104: {\"gps\": [51.50394, -0.12856], \"spd\": ${String.format("%.1f", currentSpeed)}, \"vibe\": 0.041g, \"pkts\": $packetCount}"
+            val newLog = "[$ts] TX -> ${activeTrain.id}: {\"spd\": ${String.format("%.1f", activeTrain.liveSpeed)}, \"vibe\": 0.041g, \"tsr\": ${activeTrain.activeTsr ?: "NONE"}, \"pkts\": $packetCount}"
             liveLogEntries.add(newLog)
             if (liveLogEntries.size > 25) {
                 liveLogEntries.removeAt(0)
@@ -95,13 +215,106 @@ fun TrainConnectionScreen(
     ) {
         item {
             Header(
-                title = "Train Live Uplink",
-                subtitle = "Connected to Train TR-104 · Real-time bidirectional telemetry",
+                title = "Train Telemetry & Dispatch",
+                subtitle = "Multi-train ground-to-cab link with automatic defect dispatching",
                 onBack = onBack
             )
         }
 
-        // Connection Status Card
+        // Fleet Train Selector Ribbon
+        item {
+            SectionLabel(title = "CONNECTED TRAIN FLEET (SELECT ACTIVE CAB)")
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                trainFleet.forEachIndexed { idx, train ->
+                    val isSelected = selectedTrainIndex == idx
+                    val hasTsr = train.activeTsr != null
+
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) colorScheme.primary else if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+                        ),
+                        modifier = Modifier
+                            .width(170.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { selectedTrainIndex = idx }
+                            .border(
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = if (isSelected) colorScheme.primary else if (hasTsr) Color(0xFFEF4444) else colorScheme.outline.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = train.id,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (isSelected) colorScheme.onPrimary else colorScheme.onSurface
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(if (hasTsr) Color(0xFFDC2626) else Color(0xFF16A34A))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (hasTsr) "TSR ${train.activeTsr}" else "OK",
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = train.name,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                color = if (isSelected) colorScheme.onPrimary.copy(alpha = 0.9f) else colorScheme.onSurfaceVariant
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "${String.format("%.1f", train.liveSpeed)} km/h",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (isSelected) colorScheme.onPrimary else colorScheme.primary
+                                )
+                                Text(
+                                    text = train.corridorSection.take(10),
+                                    fontSize = 9.sp,
+                                    color = if (isSelected) colorScheme.onPrimary.copy(alpha = 0.8f) else colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // Active Selected Train Connection Status Card
         item {
             Card(
                 shape = RoundedCornerShape(12.dp),
@@ -125,7 +338,7 @@ fun TrainConnectionScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
+                                    .size(40.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(if (isConnected) Color(0xFF0284C7) else Color(0xFF64748B)),
                                 contentAlignment = Alignment.Center
@@ -134,20 +347,20 @@ fun TrainConnectionScreen(
                                     imageVector = Icons.Default.Train,
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "TRAIN TR-104 (LOCOMOTIVE OBU)",
+                                    text = "${activeTrain.id} · ${activeTrain.name.uppercase()}",
                                     color = Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    text = "IP: 10.142.8.50:50051 · 5G Ground Link",
+                                    text = "IP: ${activeTrain.ipAddress} · 5G Ground Link",
                                     color = Color(0xFF7DD3FC),
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace
@@ -189,7 +402,7 @@ fun TrainConnectionScreen(
                         ) {
                             Column {
                                 Text("LIVE SPEED", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("${String.format("%.1f", currentSpeed)} km/h", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("${String.format("%.1f", activeTrain.liveSpeed)} km/h", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
 
@@ -202,7 +415,7 @@ fun TrainConnectionScreen(
                         ) {
                             Column {
                                 Text("CHAINAGE", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("14+320 UP", color = Color(0xFF38BDF8), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text(activeTrain.chainage, color = Color(0xFF38BDF8), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
 
@@ -214,8 +427,14 @@ fun TrainConnectionScreen(
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("PACKETS SENT", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("$packetCount", color = Color(0xFF22C55E), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("ACTIVE TSR", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (activeTrain.activeTsr != null) "${activeTrain.activeTsr} km/h" else "CLEAR",
+                                    color = if (activeTrain.activeTsr != null) Color(0xFFEF4444) else Color(0xFF22C55E),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
                             }
                         }
                     }
@@ -230,12 +449,12 @@ fun TrainConnectionScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "Auto-Send Telemetry:",
+                                text = "Live 5G Uplink:",
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Switch(
                                 checked = isStreamingLive && isConnected,
                                 onCheckedChange = { isStreamingLive = it },
@@ -266,9 +485,136 @@ fun TrainConnectionScreen(
             Spacer(modifier = Modifier.height(14.dp))
         }
 
-        // Real-Time Sensor Telemetry Sent to Train
+        // AUTO-DISPATCH ON DEFECT DETECTION ENGINE
         item {
-            SectionLabel(title = "LIVE TELEMETRY STREAM SENT TO TRAIN")
+            SectionLabel(title = "AUTOMATIC DEFECT DETECTION → CAB DISPATCH")
+
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDark) Color(0xFF1E1E2E) else Color(0xFFEFF6FF)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "AUTO-TRANSMIT DEFECTS TO SPECIFIC TRAIN",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF3B82F6)
+                            )
+                            Text(
+                                text = "When defects are detected in a sector, real-time TSR and flaw coordinates auto-transmit to the train in that corridor sector.",
+                                fontSize = 10.sp,
+                                color = colorScheme.onSurfaceVariant,
+                                lineHeight = 14.sp
+                            )
+                        }
+
+                        Switch(
+                            checked = autoDispatchDefectsToTrain,
+                            onCheckedChange = { autoDispatchDefectsToTrain = it }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = colorScheme.outline.copy(alpha = 0.3f))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "TRIGGER REAL-TIME FIELD DEFECT DETECTION (TEST AUTO-SEND):",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val defectTriggers = listOf(
+                        Tuple5("CRK-2048", "Transverse Crack (46mm)", "Section 14 (North Loop)", "14+320 UP", 25),
+                        Tuple5("SQT-1092", "Squat Surface Spall (22mm)", "Section 08 (South Freight Yard)", "08+140 DOWN", 40),
+                        Tuple5("GAU-0301", "Dynamic Gauge Spread (+9.4mm)", "Section 03 (East High-Speed)", "03+450 UP", 60),
+                        Tuple5("BLT-0144", "Fishplate Web Fatigue Crack", "Section 01 (West Deep Cut)", "01+890 DOWN", 35)
+                    )
+
+                    defectTriggers.forEach { (defId, defName, sec, chn, tsr) ->
+                        OutlinedButton(
+                            onClick = {
+                                autoDispatchDefectToTrain(defId, defName, sec, chn, tsr)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Column {
+                                        Text(text = "$defId · $defName", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colorScheme.onSurface)
+                                        Text(text = "Target Sector: $sec ($chn)", fontSize = 9.sp, color = colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFFDC2626).copy(alpha = 0.15f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(text = "Auto-Send $tsr km/h", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // Dispatch Alert Banner (if any)
+        if (alertBannerMessage != null) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFDC2626).copy(alpha = 0.15f))
+                        .border(1.dp, Color(0xFFDC2626), RoundedCornerShape(8.dp))
+                        .padding(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = alertBannerMessage ?: "",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+        }
+
+        // Real-Time Sensor Telemetry Sent to Active Train
+        item {
+            SectionLabel(title = "LIVE TELEMETRY STREAM SENT TO ${activeTrain.id}")
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -299,7 +645,7 @@ fun TrainConnectionScreen(
             // Geolocation and Axle Telemetry Card
             RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                 Text(
-                    text = "TRAIN POSITION & AXLE SENSOR ARRAY",
+                    text = "${activeTrain.id} CAB & AXLE SENSOR ARRAY",
                     style = MaterialTheme.typography.labelSmall,
                     color = colorScheme.primary,
                     fontWeight = FontWeight.Bold
@@ -312,11 +658,11 @@ fun TrainConnectionScreen(
                 ) {
                     Column {
                         Text("LATITUDE / LONGITUDE:", color = colorScheme.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        Text("51°30'14.2\"N 0°07'42.8\"W", color = colorScheme.onSurface, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        Text(activeTrain.gpsCoords, color = colorScheme.onSurface, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                     }
                     Column {
-                        Text("GNSS RTK LOCK:", color = colorScheme.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        Text("±1.2 cm Precision", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("ASSIGNED DRIVER:", color = colorScheme.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text(activeTrain.driverName, color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -325,7 +671,8 @@ fun TrainConnectionScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Wheel Bearing Infrared Temperature Sensors:\n" +
+                    text = "Onboard Unit: ${activeTrain.obuType}\n" +
+                        "Assigned Corridor: ${activeTrain.corridorSection} · Chainage ${activeTrain.chainage}\n" +
                         "• Locomotive Axle 1 (Front Bogie): 31.8°C · Nominal\n" +
                         "• Locomotive Axle 2: 32.4°C · Nominal\n" +
                         "• Locomotive Axle 3 (Rear Bogie): 33.1°C · Nominal",
@@ -338,32 +685,9 @@ fun TrainConnectionScreen(
             Spacer(modifier = Modifier.height(14.dp))
         }
 
-        // Dispatch Alert Directly to Train Driver
+        // Manual Cab Dispatch Buttons
         item {
-            SectionLabel(title = "TRAIN CAB DISPATCH CONTROLS")
-
-            if (alertBannerMessage != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFDC2626).copy(alpha = 0.15f))
-                        .border(1.dp, Color(0xFFDC2626), RoundedCornerShape(8.dp))
-                        .padding(10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = alertBannerMessage ?: "",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-            }
+            SectionLabel(title = "MANUAL CAB OVERRIDE CONTROLS (${activeTrain.id})")
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -371,10 +695,12 @@ fun TrainConnectionScreen(
             ) {
                 Button(
                     onClick = {
-                        cabAlertDispatched = true
-                        alertBannerMessage = "SENT TO TR-104: 25 km/h Temporary Speed Restriction enforced on driver DMI screen!"
-                        liveLogEntries.add("[MANUAL] TX -> TR-104: {\"emergency_tsr\": 25, \"chainage\": \"14+320\", \"reason\": \"CRK-2048_46MM\"}")
-                        liveLogEntries.add("[MANUAL] RX <- TR-104: {\"cab_driver_ack\": true, \"speed_reduced_to\": 25}")
+                        activeTrain.activeTsr = 25
+                        activeTrain.liveSpeed = 25.0f
+                        alertBannerTone = Tone.CRITICAL
+                        alertBannerMessage = "SENT TO ${activeTrain.id}: 25 km/h Temporary Speed Restriction enforced on driver DMI screen!"
+                        liveLogEntries.add("[MANUAL] TX -> ${activeTrain.id}: {\"emergency_tsr\": 25, \"chainage\": \"${activeTrain.chainage}\", \"reason\": \"MANUAL_SAFETY_INTERLOCK\"}")
+                        liveLogEntries.add("[MANUAL] RX <- ${activeTrain.id}: {\"cab_driver_ack\": true, \"speed_reduced_to\": 25}")
                     },
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
@@ -382,22 +708,24 @@ fun TrainConnectionScreen(
                 ) {
                     Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Send 25 km/h TSR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Force 25 TSR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Button(
                     onClick = {
-                        alertBannerMessage = "SENT TO TR-104: Defect CRK-2048 coordinates & bounding box sent to cab computer."
-                        liveLogEntries.add("[MANUAL] TX -> TR-104: {\"defect_target\": \"CRK-2048\", \"lat\": 51.50394, \"lon\": -0.12856}")
-                        liveLogEntries.add("[MANUAL] RX <- TR-104: {\"map_pin_plotted\": true}")
+                        activeTrain.activeTsr = null
+                        alertBannerTone = Tone.HEALTHY
+                        alertBannerMessage = "SENT TO ${activeTrain.id}: Speed restriction cleared. Train authorized for line speed."
+                        liveLogEntries.add("[MANUAL] TX -> ${activeTrain.id}: {\"clear_tsr\": true, \"line_speed\": ${activeTrain.normalSpeedCap}}")
+                        liveLogEntries.add("[MANUAL] RX <- ${activeTrain.id}: {\"ack\": true, \"resuming_line_speed\": ${activeTrain.normalSpeedCap}}")
                     },
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
                     modifier = Modifier.weight(1f).height(46.dp)
                 ) {
-                    Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Send Defect Alert", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Clear TSR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -406,7 +734,7 @@ fun TrainConnectionScreen(
 
         // Live Outbound Telemetry Log Console
         item {
-            SectionLabel(title = "LIVE OUTBOUND PACKET CONSOLE (5G STREAM)")
+            SectionLabel(title = "LIVE OUTBOUND PACKET CONSOLE (5G FLEET STREAM)")
 
             Card(
                 shape = RoundedCornerShape(10.dp),
@@ -425,7 +753,7 @@ fun TrainConnectionScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "UDP PORT 50051 STREAM",
+                            text = "UDP 5G RADIO STREAM · ${activeTrain.id}",
                             color = Color(0xFF38BDF8),
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
@@ -441,10 +769,10 @@ fun TrainConnectionScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    liveLogEntries.takeLast(8).forEach { entry ->
+                    liveLogEntries.takeLast(10).forEach { entry ->
                         Text(
                             text = entry,
-                            color = if (entry.contains("TX")) Color(0xFF7DD3FC) else if (entry.contains("RX")) Color(0xFF86EFAC) else Color(0xFFFDE047),
+                            color = if (entry.contains("AUTO-DISPATCH")) Color(0xFFF87171) else if (entry.contains("TX")) Color(0xFF7DD3FC) else if (entry.contains("RX")) Color(0xFF86EFAC) else Color(0xFFFDE047),
                             fontSize = 9.sp,
                             lineHeight = 13.sp,
                             fontFamily = FontFamily.Monospace
@@ -456,3 +784,11 @@ fun TrainConnectionScreen(
         }
     }
 }
+
+data class Tuple5<A, B, C, D, E>(
+    val first: A,
+    val second: B,
+    val third: C,
+    val fourth: D,
+    val fifth: E
+)

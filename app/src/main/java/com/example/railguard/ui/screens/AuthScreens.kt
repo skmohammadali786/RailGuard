@@ -278,141 +278,153 @@ fun LoginScreen(
     var showPassword by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colorScheme.background)
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(20.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             modifier = Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(colorScheme.primary),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .widthIn(max = 440.dp)
+                .border(1.dp, colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
         ) {
-            Icon(
-                imageVector = Icons.Default.Shield,
-                contentDescription = null,
-                tint = colorScheme.onPrimary,
-                modifier = Modifier.size(30.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = settings.translate("welcome_back"),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = colorScheme.onBackground,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = settings.translate("welcome_back_sub"),
-            style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it; errorMessage = "" },
-            label = { Text("Work email") },
-            placeholder = { Text("inspector@railguard.field") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it; errorMessage = "" },
-            label = { Text("Password") },
-            singleLine = true,
-            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                IconButton(onClick = { showPassword = !showPassword }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
-                        imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = "Toggle password visibility"
+                        imageVector = Icons.Default.Shield,
+                        contentDescription = null,
+                        tint = colorScheme.onPrimary,
+                        modifier = Modifier.size(32.dp)
                     )
                 }
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
 
-        if (errorMessage.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+                Spacer(modifier = Modifier.height(16.dp))
 
-        Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = settings.translate("welcome_back"),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colorScheme.onBackground,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = settings.translate("welcome_back_sub"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            Text(
-                text = settings.translate("forgot_password"),
-                style = MaterialTheme.typography.labelMedium,
-                color = colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { onForgotPasswordClick() }
-            )
-        }
+                Spacer(modifier = Modifier.height(24.dp))
 
-        Spacer(modifier = Modifier.height(24.dp))
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it; errorMessage = "" },
+                    label = { Text("Work Email") },
+                    placeholder = { Text("inspector@railguard.field") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-        PrimaryButton(
-            title = settings.translate("sign_in"),
-            icon = Icons.AutoMirrored.Filled.ArrowForward,
-            onClick = {
-                if (!email.contains("@")) {
-                    errorMessage = "Enter a valid work email."
-                } else if (password.length < 4) {
-                    errorMessage = "Enter your passcode."
-                } else {
-                    onLoginSuccess()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it; errorMessage = "" },
+                    label = { Text("Password") },
+                    singleLine = true,
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showPassword = !showPassword }) {
+                            Icon(
+                                imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = "Toggle password visibility"
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (errorMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Text(
+                        text = settings.translate("forgot_password"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { onForgotPasswordClick() }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                PrimaryButton(
+                    title = settings.translate("sign_in"),
+                    icon = Icons.AutoMirrored.Filled.ArrowForward,
+                    onClick = {
+                        if (!email.contains("@")) {
+                            errorMessage = "Enter a valid work email."
+                        } else if (password.length < 4) {
+                            errorMessage = "Enter your passcode."
+                        } else {
+                            onLoginSuccess()
+                        }
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = settings.translate("new_to_railguard"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable { onRegisterClick() }
+                )
             }
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = settings.translate("new_to_railguard"),
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.clickable { onRegisterClick() }
-            )
         }
     }
 }
 
 @Composable
 fun RegistrationScreen(
-    onRegisterSuccess: () -> Unit,
+    onRegisterSuccess: (name: String, email: String) -> Unit,
     onLoginClick: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -423,139 +435,158 @@ fun RegistrationScreen(
     var acceptedTerms by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colorScheme.background)
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(20.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             modifier = Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(colorScheme.primary),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .widthIn(max = 440.dp)
+                .border(1.dp, colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
         ) {
-            Icon(
-                imageVector = Icons.Default.PersonAdd,
-                contentDescription = null,
-                tint = colorScheme.onPrimary,
-                modifier = Modifier.size(28.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = settings.translate("create_account"),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = colorScheme.onBackground,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = settings.translate("create_account_sub"),
-            style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        OutlinedTextField(
-            value = fullName,
-            onValueChange = { fullName = it; errorMessage = "" },
-            label = { Text("Full name") },
-            placeholder = { Text("e.g. E. Chen") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it; errorMessage = "" },
-            label = { Text("Work email") },
-            placeholder = { Text("name@railguard.field") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it; errorMessage = "" },
-            label = { Text("Password (min 8 chars)") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.clickable { acceptedTerms = !acceptedTerms }
-        ) {
-            Checkbox(
-                checked = acceptedTerms,
-                onCheckedChange = { acceptedTerms = it }
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = "I agree to the field safety and evidence terms.",
-                style = MaterialTheme.typography.bodySmall,
-                color = colorScheme.onSurfaceVariant
-            )
-        }
-
-        if (errorMessage.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        PrimaryButton(
-            title = settings.translate("create_account_btn"),
-            onClick = {
-                if (fullName.trim().length < 2) {
-                    errorMessage = "Enter your full name."
-                } else if (!email.contains("@")) {
-                    errorMessage = "Enter a valid work email."
-                } else if (password.length < 6) {
-                    errorMessage = "Password must be at least 6 characters."
-                } else if (!acceptedTerms) {
-                    errorMessage = "Accept the field safety terms to continue."
-                } else {
-                    onRegisterSuccess()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PersonAdd,
+                        contentDescription = null,
+                        tint = colorScheme.onPrimary,
+                        modifier = Modifier.size(30.dp)
+                    )
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = settings.translate("create_account"),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colorScheme.onBackground,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = settings.translate("create_account_sub"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                OutlinedTextField(
+                    value = fullName,
+                    onValueChange = { fullName = it; errorMessage = "" },
+                    label = { Text("Full Name (Inspector Name)") },
+                    placeholder = { Text("e.g. Alex Vance") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it; errorMessage = "" },
+                    label = { Text("Work Email") },
+                    placeholder = { Text("name@railguard.field") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it; errorMessage = "" },
+                    label = { Text("Password (min 6 chars)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { acceptedTerms = !acceptedTerms }
+                ) {
+                    Checkbox(
+                        checked = acceptedTerms,
+                        onCheckedChange = { acceptedTerms = it }
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "I agree to the field safety and evidence terms.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (errorMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                PrimaryButton(
+                    title = settings.translate("create_account_btn"),
+                    onClick = {
+                        if (fullName.trim().length < 2) {
+                            errorMessage = "Enter your full name."
+                        } else if (!email.contains("@")) {
+                            errorMessage = "Enter a valid work email."
+                        } else if (password.length < 6) {
+                            errorMessage = "Password must be at least 6 characters."
+                        } else if (!acceptedTerms) {
+                            errorMessage = "Accept the field safety terms to continue."
+                        } else {
+                            onRegisterSuccess(fullName.trim(), email.trim())
+                        }
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = settings.translate("already_registered"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable { onLoginClick() }
+                )
             }
-        )
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        Text(
-            text = settings.translate("already_registered"),
-            style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.clickable { onLoginClick() }
-        )
+        }
     }
 }
 
@@ -569,92 +600,109 @@ fun ForgotPasswordScreen(
     var email by remember { mutableStateOf("e.chen@railguard.field") }
     var errorMessage by remember { mutableStateOf("") }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colorScheme.background)
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(20.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             modifier = Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(colorScheme.primary),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .widthIn(max = 440.dp)
+                .border(1.dp, colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
         ) {
-            Icon(
-                imageVector = Icons.Default.LockReset,
-                contentDescription = null,
-                tint = colorScheme.onPrimary,
-                modifier = Modifier.size(28.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = settings.translate("recover_access"),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = colorScheme.onBackground,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = settings.translate("recover_access_sub"),
-            style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it; errorMessage = "" },
-            label = { Text("Work email") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        if (errorMessage.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        PrimaryButton(
-            title = settings.translate("send_code"),
-            onClick = {
-                if (!email.contains("@")) {
-                    errorMessage = "Enter the email associated with your account."
-                } else {
-                    onSendOtp()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LockReset,
+                        contentDescription = null,
+                        tint = colorScheme.onPrimary,
+                        modifier = Modifier.size(30.dp)
+                    )
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = settings.translate("recover_access"),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colorScheme.onBackground,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = settings.translate("recover_access_sub"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it; errorMessage = "" },
+                    label = { Text("Work Email") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (errorMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                PrimaryButton(
+                    title = settings.translate("send_code"),
+                    onClick = {
+                        if (!email.contains("@")) {
+                            errorMessage = "Enter the email associated with your account."
+                        } else {
+                            onSendOtp()
+                        }
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Back to sign in",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable { onBackToLogin() }
+                )
             }
-        )
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        Text(
-            text = "Back to sign in",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.clickable { onBackToLogin() }
-        )
+        }
     }
 }
 
@@ -849,5 +897,154 @@ fun ResetPasswordScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+fun PasscodeLockScreen(
+    expectedPin: String,
+    allowBiometric: Boolean,
+    onUnlock: () -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    var enteredPin by remember { mutableStateOf("") }
+    var errorMsg by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = "Locked",
+                tint = colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(32.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "Terminal Locked",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = colorScheme.onBackground,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Enter 4-digit security PIN or scan biometric",
+            style = MaterialTheme.typography.bodyMedium,
+            color = colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // PIN display dots
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(4) { idx ->
+                val filled = idx < enteredPin.length
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (filled) colorScheme.primary else colorScheme.outline.copy(alpha = 0.4f)
+                        )
+                )
+            }
+        }
+
+        if (errorMsg.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = errorMsg,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Keypad grid
+        val keys = listOf(
+            listOf("1", "2", "3"),
+            listOf("4", "5", "6"),
+            listOf("7", "8", "9"),
+            listOf("BIO", "0", "DEL")
+        )
+
+        keys.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(0.85f),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                row.forEach { key ->
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(
+                                colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                            )
+                            .clickable {
+                                when (key) {
+                                    "DEL" -> {
+                                        if (enteredPin.isNotEmpty()) {
+                                            enteredPin = enteredPin.dropLast(1)
+                                            errorMsg = ""
+                                        }
+                                    }
+                                    "BIO" -> {
+                                        if (allowBiometric) {
+                                            onUnlock()
+                                        } else {
+                                            errorMsg = "Biometrics disabled in settings"
+                                        }
+                                    }
+                                    else -> {
+                                        if (enteredPin.length < 4) {
+                                            val newPin = enteredPin + key
+                                            enteredPin = newPin
+                                            if (newPin.length == 4) {
+                                                if (newPin == expectedPin) {
+                                                    onUnlock()
+                                                } else {
+                                                    errorMsg = "Incorrect PIN. Try again."
+                                                    enteredPin = ""
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        when (key) {
+                            "DEL" -> Icon(Icons.Default.Backspace, contentDescription = "Delete", tint = colorScheme.onSurface)
+                            "BIO" -> Icon(Icons.Default.Fingerprint, contentDescription = "Biometric", tint = if (allowBiometric) colorScheme.primary else colorScheme.outline)
+                            else -> Text(key, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
     }
 }

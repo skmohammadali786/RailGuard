@@ -37,6 +37,7 @@ import com.example.railguard.theme.toneColor
 fun HomeScreen(
     defects: List<Defect>,
     tasks: List<MaintenanceTask>,
+    inspectorName: String = "E. Chen",
     onNavigate: (String) -> Unit,
     onDefectClick: (Defect) -> Unit,
     onTaskClick: (MaintenanceTask) -> Unit
@@ -54,7 +55,7 @@ fun HomeScreen(
         item {
             Header(
                 title = "North corridor patrol",
-                subtitle = "Shift 1 · E. Chen · On duty",
+                subtitle = "Shift 1 · $inspectorName · On duty",
                 isHome = true,
                 onNotificationClick = { onNavigate("notifications") }
             )

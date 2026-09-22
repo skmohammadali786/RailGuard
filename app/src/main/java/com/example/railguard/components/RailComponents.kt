@@ -499,13 +499,14 @@ fun RealTimeTrainLineMap(
     )
 
     val settings = LocalAppSettings.current
+    var isCompactView by remember(compact) { mutableStateOf(compact) }
     var selectedStationName by remember { mutableStateOf<String?>(null) }
     var selectedTrainId by remember { mutableStateOf<String?>(null) }
 
     val stations = listOf(
         Pair("West Cut", "01+200"),
         Pair("North Loop", "14+000"),
-        Pair("East Junction", "03+500"),
+        Pair("East Jct", "03+500"),
         Pair("South Yard", "08+800")
     )
 
@@ -515,7 +516,7 @@ fun RealTimeTrainLineMap(
             .clip(RoundedCornerShape(10.dp))
             .background(if (isDark) Color(0xFF0F1722) else Color(0xFF1E293B))
             .border(1.dp, colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-            .padding(if (compact) 6.dp else 14.dp)
+            .padding(if (isCompactView) 8.dp else 14.dp)
     ) {
         // Map HUD Header
         Row(
@@ -532,18 +533,36 @@ fun RealTimeTrainLineMap(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "REAL-TIME CORRIDOR LINE MAP",
+                    text = if (isCompactView) "CORRIDOR MAP (MINI)" else "REAL-TIME CORRIDOR LINE MAP",
                     color = Color.White,
-                    fontSize = if (compact) 9.5.sp else 11.sp,
+                    fontSize = if (isCompactView) 9.5.sp else 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 0.5.sp
                 )
             }
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // View Mode Toggle (Mini / Full)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isCompactView) Color(0xFF0284C7).copy(alpha = 0.25f) else Color(0xFF334155))
+                        .border(1.dp, if (isCompactView) Color(0xFF38BDF8) else Color(0xFF64748B), RoundedCornerShape(4.dp))
+                        .clickable { isCompactView = !isCompactView }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (isCompactView) "EXPAND" else "MINI",
+                        color = if (isCompactView) Color(0xFF38BDF8) else Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
@@ -553,24 +572,24 @@ fun RealTimeTrainLineMap(
                     Text(
                         text = "${settings.formatSpeed(25)} ZONE",
                         color = Color(0xFFFCA5A5),
-                        fontSize = 8.5.sp,
+                        fontSize = 8.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
-                Text("LIVE", color = Color(0xFF22C55E), fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                Text("LIVE", color = Color(0xFF22C55E), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
         }
 
-        Spacer(modifier = Modifier.height(if (compact) 4.dp else 10.dp))
+        Spacer(modifier = Modifier.height(if (isCompactView) 4.dp else 10.dp))
 
         // Schematic Canvas
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (compact) 76.dp else 190.dp)
+                .height(if (isCompactView) 96.dp else 190.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color(0xFF0B131E))
-                .padding(horizontal = 8.dp, vertical = if (compact) 2.dp else 8.dp)
+                .padding(horizontal = 8.dp, vertical = if (isCompactView) 4.dp else 8.dp)
         ) {
             // Speed restriction zone highlight band
             Box(
@@ -589,7 +608,7 @@ fun RealTimeTrainLineMap(
                     .fillMaxWidth()
                     .height(2.dp)
                     .align(Alignment.Center)
-                    .offset(y = if (compact) (-10).dp else (-18).dp)
+                    .offset(y = if (isCompactView) (-12).dp else (-18).dp)
                     .background(Color(0xFF38BDF8).copy(alpha = 0.8f))
             )
             // Down Line (Southbound)
@@ -598,7 +617,7 @@ fun RealTimeTrainLineMap(
                     .fillMaxWidth()
                     .height(2.dp)
                     .align(Alignment.Center)
-                    .offset(y = if (compact) 10.dp else 18.dp)
+                    .offset(y = if (isCompactView) 12.dp else 18.dp)
                     .background(Color(0xFF94A3B8).copy(alpha = 0.6f))
             )
 
@@ -613,7 +632,7 @@ fun RealTimeTrainLineMap(
                     Box(
                         modifier = Modifier
                             .width(2.5.dp)
-                            .height(if (compact) 28.dp else 46.dp)
+                            .height(if (isCompactView) 34.dp else 46.dp)
                             .background(Color.White.copy(alpha = 0.12f))
                     )
                 }
@@ -637,24 +656,26 @@ fun RealTimeTrainLineMap(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(11.dp)
+                                .size(if (isCompactView) 8.dp else 11.dp)
                                 .clip(CircleShape)
                                 .background(if (isSelected) Color(0xFFF59E0B) else Color.White)
-                                .border(2.dp, if (isSelected) Color.White else Color(0xFF0284C7), CircleShape)
+                                .border(if (isCompactView) 1.5.dp else 2.dp, if (isSelected) Color.White else Color(0xFF0284C7), CircleShape)
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(1.dp))
                         Text(
                             text = name,
-                            fontSize = 9.sp,
+                            fontSize = if (isCompactView) 8.sp else 9.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isSelected) Color(0xFFFCD34D) else Color.White.copy(alpha = 0.9f)
                         )
-                        Text(
-                            text = "km $chainage",
-                            fontSize = 8.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color.White.copy(alpha = 0.6f)
-                        )
+                        if (!isCompactView) {
+                            Text(
+                                text = "km $chainage",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                        }
                     }
                 }
             }
@@ -664,14 +685,14 @@ fun RealTimeTrainLineMap(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.Center)
-                    .offset(y = (-32).dp)
+                    .offset(y = if (isCompactView) (-24).dp else (-32).dp)
                     .padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 listOf(Color(0xFF22C55E), Color(0xFFF59E0B), Color(0xFF22C55E)).forEach { sigColor ->
                     Box(
                         modifier = Modifier
-                            .size(7.dp)
+                            .size(if (isCompactView) 5.dp else 7.dp)
                             .clip(CircleShape)
                             .background(sigColor)
                             .border(1.dp, Color.White.copy(alpha = 0.4f), CircleShape)
@@ -684,7 +705,7 @@ fun RealTimeTrainLineMap(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.Center)
-                    .offset(y = if (compact) (-10).dp else (-18).dp)
+                    .offset(y = if (isCompactView) (-12).dp else (-18).dp)
             ) {
                 val trainX = maxWidth * train1Progress - 20.dp
                 Box(
@@ -705,13 +726,13 @@ fun RealTimeTrainLineMap(
                             imageVector = Icons.Default.Train,
                             contentDescription = "TR-104",
                             tint = Color.White,
-                            modifier = Modifier.size(if (compact) 9.dp else 11.dp)
+                            modifier = Modifier.size(if (isCompactView) 9.dp else 11.dp)
                         )
                         Spacer(modifier = Modifier.width(2.dp))
                         Text(
                             text = "TR-104 ${settings.formatSpeed(118)}",
                             color = Color.White,
-                            fontSize = if (compact) 7.sp else 8.sp,
+                            fontSize = if (isCompactView) 7.sp else 8.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
@@ -724,7 +745,7 @@ fun RealTimeTrainLineMap(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.Center)
-                    .offset(y = if (compact) 10.dp else 18.dp)
+                    .offset(y = if (isCompactView) 12.dp else 18.dp)
             ) {
                 val train2X = maxWidth * train2Progress - 20.dp
                 Box(
@@ -745,13 +766,13 @@ fun RealTimeTrainLineMap(
                             imageVector = Icons.Default.DirectionsRailway,
                             contentDescription = "FR-802",
                             tint = Color.White,
-                            modifier = Modifier.size(if (compact) 9.dp else 11.dp)
+                            modifier = Modifier.size(if (isCompactView) 9.dp else 11.dp)
                         )
                         Spacer(modifier = Modifier.width(2.dp))
                         Text(
                             text = "FR-802 ${settings.formatSpeed(45)}",
                             color = Color.White,
-                            fontSize = if (compact) 7.sp else 8.sp,
+                            fontSize = if (isCompactView) 7.sp else 8.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
