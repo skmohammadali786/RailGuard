@@ -343,7 +343,7 @@ fun AppSettingsScreen(
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var autoSyncRtdb by remember { mutableStateOf(true) }
+    var autoSyncRtdb by remember { mutableStateOf(preferences.autoSync) }
     var esp32LinkActive by remember { mutableStateOf(true) }
     var highPrecisionAi by remember { mutableStateOf(true) }
     var tsrInterlockEnabled by remember { mutableStateOf(true) }
@@ -437,6 +437,7 @@ fun AppSettingsScreen(
                                     "updatedAt" to System.currentTimeMillis()
                                 )
                             )
+                            onUpdatePreferences(preferences.copy(autoSync = autoSyncRtdb))
                             syncFeedbackMsg = "✓ System preferences synchronized with Cloud Realtime DB"
                         }
                     }

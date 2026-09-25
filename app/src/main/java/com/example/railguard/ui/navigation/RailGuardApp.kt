@@ -94,8 +94,9 @@ data class NavigationTab(
 
 @Composable
 fun RailGuardApp() {
-    var isDarkMode by remember { mutableStateOf(false) }
-    var appPreferences by remember { mutableStateOf(AppPreferences()) }
+    val firebaseService = remember { RailGuardFirebaseService.instance }
+    var appPreferences by remember { mutableStateOf(firebaseService.loadAppPreferences()) }
+    var isDarkMode by remember { mutableStateOf(appPreferences.isDarkMode) }
     var isAppLocked by remember { mutableStateOf(false) }
     var currentRoute by remember { mutableStateOf<String>(Screen.Splash.route) }
     val backStack = remember { mutableStateListOf<String>() }
@@ -115,13 +116,37 @@ fun RailGuardApp() {
     var profileName by remember { mutableStateOf("E. Chen") }
     var profileEmail by remember { mutableStateOf("e.chen@railguard.field") }
     val scope = rememberCoroutineScope()
-    val firebaseService = remember { RailGuardFirebaseService.instance }
 
-    // Synchronize user session and fetch cloud data on launch
-    LaunchedEffect(Unit) {
+    fun updatePreferences(updated: AppPreferences) {
+        appPreferences = updated
+        isDarkMode = updated.isDarkMode
+        firebaseService.saveAppPreferences(updated)
+        scope.launch {
+            firebaseService.saveUserSettings(
+                mapOf(
+                    "language" to updated.language.code,
+                    "darkMode" to updated.isDarkMode,
+                    "passcodeEnabled" to updated.passcodeEnabled,
+                    "biometricEnabled" to updated.isBiometricEnabled,
+                    "metricUnits" to updated.isMetric,
+                    "autoSync" to updated.autoSync,
+                    "updatedAt" to System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    // Synchronize only after Firebase has an authenticated user. The local
+    // repository remains the offline fallback when the account has no records.
+    LaunchedEffect(firebaseService.currentUser?.localId) {
+        if (firebaseService.currentUser == null) return@LaunchedEffect
         firebaseService.currentUser?.let { user ->
             if (user.displayName.isNotBlank()) profileName = user.displayName
             if (user.email.isNotBlank()) profileEmail = user.email
+        }
+        firebaseService.pullUserSettings { remotePreferences ->
+            appPreferences = remotePreferences
+            isDarkMode = remotePreferences.isDarkMode
         }
         firebaseService.pullAllFromFirebase(
             onSuccess = { rDefects, rTasks, rInspections ->
@@ -317,7 +342,7 @@ fun RailGuardApp() {
                         )
                         Screen.Settings.route -> SettingsScreen(
                             isDarkMode = isDarkMode,
-                            onToggleDarkMode = { isDarkMode = it },
+                            onToggleDarkMode = { updatePreferences(appPreferences.copy(isDarkMode = it)) },
                             onNavigate = { navigateTo(it) },
                             onSignOut = {
                                 firebaseService.signOut()
@@ -348,7 +373,22 @@ fun RailGuardApp() {
                             onBack = { navigateBack() }
                         )
                         Screen.LiveInspection.route -> LiveInspectionScreen(
-                            onEndInspection = { navigateTo(Screen.InspectionSummary.route) },
+                            onEndInspection = {
+                                val completed = selectedInspection.copy(
+                                    status = "Completed · Pending Sign-off"
+                                )
+                                val idx = inspections.indexOfFirst { it.id == selectedInspection.id }
+                                if (idx >= 0) inspections[idx] = completed
+                                selectedInspection = completed
+                                scope.launch {
+                                    firebaseService.uploadInspectionToFirebase(completed)
+                                    firebaseService.logSafetyAuditEvent(
+                                        action = "PATROL_COMPLETED",
+                                        details = "Inspection ${completed.id} completed on ${completed.section}"
+                                    )
+                                }
+                                navigateTo(Screen.InspectionSummary.route)
+                            },
                             onDefectDetected = {
                                 selectedDefect = defects.first()
                                 navigateTo(Screen.DefectDetails.route)
@@ -453,6 +493,13 @@ fun RailGuardApp() {
                             onTaskCreated = { newTask: MaintenanceTask ->
                                 tasks.add(0, newTask)
                                 selectedTask = newTask
+                                scope.launch {
+                                    firebaseService.uploadTaskToFirebase(newTask)
+                                    firebaseService.logSafetyAuditEvent(
+                                        action = "MAINTENANCE_TASK_CREATED",
+                                        details = "Task ${newTask.id} dispatched for ${newTask.section} to ${newTask.assignee}"
+                                    )
+                                }
                                 navigateTo(Screen.TaskDetails.route)
                             },
                             onBack = { navigateBack() }
@@ -465,7 +512,23 @@ fun RailGuardApp() {
                         )
                         Screen.BeforeAfter.route -> BeforeAfterScreen(onBack = { navigateBack() })
                         Screen.MaintenanceVerification.route -> MaintenanceVerificationScreen(
-                            onVerified = { navigateBack() },
+                            onVerified = {
+                                scope.launch {
+                                    val verifiedTask = selectedTask.copy(
+                                        status = "Completed · Verified",
+                                        tone = Tone.HEALTHY
+                                    )
+                                    val idx = tasks.indexOfFirst { it.id == selectedTask.id }
+                                    if (idx >= 0) tasks[idx] = verifiedTask
+                                    selectedTask = verifiedTask
+                                    firebaseService.uploadTaskToFirebase(verifiedTask)
+                                    firebaseService.logSafetyAuditEvent(
+                                        action = "MAINTENANCE_VERIFIED",
+                                        details = "Task ${verifiedTask.id} completed and verified for ${verifiedTask.section}"
+                                    )
+                                }
+                                navigateBack()
+                            },
                             onBack = { navigateBack() }
                         )
                         Screen.MaintenanceAnalytics.route -> MaintenanceAnalyticsScreen(onBack = { navigateBack() })
@@ -520,23 +583,26 @@ fun RailGuardApp() {
                             onSave = { n, e ->
                                 profileName = n
                                 profileEmail = e
+                                scope.launch {
+                                    firebaseService.updateInspectorProfile(n, e)
+                                }
                             },
                             onBack = { navigateBack() }
                         )
                         Screen.AppSettings.route -> AppSettingsScreen(
                             preferences = appPreferences,
-                            onUpdatePreferences = { appPreferences = it },
+                            onUpdatePreferences = { updatePreferences(it) },
                             onBack = { navigateBack() }
                         )
                         Screen.Security.route -> SecurityScreen(
                             preferences = appPreferences,
-                            onUpdatePreferences = { appPreferences = it },
+                            onUpdatePreferences = { updatePreferences(it) },
                             onLockApp = { isAppLocked = true },
                             onBack = { navigateBack() }
                         )
                         Screen.Language.route -> LanguageScreen(
                             preferences = appPreferences,
-                            onUpdatePreferences = { appPreferences = it },
+                            onUpdatePreferences = { updatePreferences(it) },
                             onBack = { navigateBack() }
                         )
                         Screen.Help.route -> HelpCenterScreen(onBack = { navigateBack() })

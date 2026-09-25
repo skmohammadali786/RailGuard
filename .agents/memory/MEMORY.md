@@ -1,1 +1,2 @@
 - [RailGuard route resolution](railguard-routing.md) — use explicit Expo Router files for primary field workflow pages; the catch-all can fail in preview.
+- [Android build environment](android-build-environment.md) — native Android imports may have Gradle and Java but no Android SDK, so APK verification can remain environment-blocked.

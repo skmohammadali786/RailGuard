@@ -7,6 +7,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.example.railguard.model.Defect
+import com.example.railguard.model.AppLanguage
+import com.example.railguard.model.AppPreferences
 import com.example.railguard.model.InspectionRecord
 import com.example.railguard.model.MaintenanceTask
 import com.example.railguard.model.ObservationItem
@@ -31,7 +33,8 @@ data class FirebaseUser(
     val displayName: String = "",
     val idToken: String = "",
     val refreshToken: String = "",
-    val expiresIn: String = ""
+    val expiresIn: String = "",
+    val tokenExpiresAt: Long = 0L
 )
 
 sealed class AuthState {
@@ -76,6 +79,14 @@ class RailGuardFirebaseService private constructor() {
         private const val KEY_USER_NAME = "firebase_user_name"
         private const val KEY_ID_TOKEN = "firebase_id_token"
         private const val KEY_REFRESH_TOKEN = "firebase_refresh_token"
+        private const val KEY_TOKEN_EXPIRES_AT = "firebase_token_expires_at"
+        private const val KEY_APP_LANGUAGE = "app_language"
+        private const val KEY_DARK_MODE = "app_dark_mode"
+        private const val KEY_PASSCODE_ENABLED = "app_passcode_enabled"
+        private const val KEY_PASSCODE_PIN = "app_passcode_pin"
+        private const val KEY_BIOMETRIC_ENABLED = "app_biometric_enabled"
+        private const val KEY_METRIC_UNITS = "app_metric_units"
+        private const val KEY_AUTO_SYNC = "app_auto_sync"
 
         // Server-Side Pre-Configured Firebase Cloud Project Credentials
         const val DEFAULT_PROJECT_NAME = "railguard"
@@ -146,7 +157,8 @@ class RailGuardFirebaseService private constructor() {
                     email = savedEmail,
                     displayName = prefs.getString(KEY_USER_NAME, "") ?: "",
                     idToken = savedToken,
-                    refreshToken = prefs.getString(KEY_REFRESH_TOKEN, "") ?: ""
+                    refreshToken = prefs.getString(KEY_REFRESH_TOKEN, "") ?: "",
+                    tokenExpiresAt = prefs.getLong(KEY_TOKEN_EXPIRES_AT, 0L)
                 )
                 currentUser = user
                 authState = AuthState.Authenticated(user)
@@ -193,14 +205,146 @@ class RailGuardFirebaseService private constructor() {
                 putString(KEY_USER_NAME, user.displayName)
                 putString(KEY_ID_TOKEN, user.idToken)
                 putString(KEY_REFRESH_TOKEN, user.refreshToken)
+                putLong(KEY_TOKEN_EXPIRES_AT, user.tokenExpiresAt)
             } else {
                 remove(KEY_USER_ID)
                 remove(KEY_USER_EMAIL)
                 remove(KEY_USER_NAME)
                 remove(KEY_ID_TOKEN)
                 remove(KEY_REFRESH_TOKEN)
+                remove(KEY_TOKEN_EXPIRES_AT)
             }
             apply()
+        }
+    }
+
+    /**
+     * Returns the authenticated user's current ID token, refreshing it when the
+     * one issued by Firebase has expired or is close to expiry.
+     */
+    private suspend fun getValidIdToken(): String {
+        val user = currentUser ?: throw IllegalStateException("Sign in is required to sync cloud data.")
+        val now = System.currentTimeMillis()
+        if (user.idToken.isNotBlank() && user.tokenExpiresAt > now + 60_000L) {
+            return user.idToken
+        }
+
+        if (user.refreshToken.isBlank()) {
+            throw IllegalStateException("Your Firebase session has expired. Please sign in again.")
+        }
+
+        val endpoint = "https://securetoken.googleapis.com/v1/token?key=${getEffectiveApiKey()}"
+        val payload = "grant_type=refresh_token&refresh_token=${java.net.URLEncoder.encode(user.refreshToken, "UTF-8")}"
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 10000
+            readTimeout = 10000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+        }
+        OutputStreamWriter(connection.outputStream).use { it.write(payload) }
+
+        val responseCode = connection.responseCode
+        val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+            ?.bufferedReader()?.use { it.readText() }.orEmpty()
+        if (responseCode !in 200..299) {
+            throw IllegalStateException(parseFirebaseError(responseBody, responseCode))
+        }
+
+        val json = JSONObject(responseBody)
+        val refreshed = user.copy(
+            localId = json.optString("user_id", user.localId),
+            idToken = json.getString("id_token"),
+            refreshToken = json.optString("refresh_token", user.refreshToken),
+            expiresIn = json.optString("expires_in", "3600"),
+            tokenExpiresAt = now + json.optLong("expires_in", 3600L) * 1000L
+        )
+        withContext(Dispatchers.Main) {
+            currentUser = refreshed
+            authState = AuthState.Authenticated(refreshed)
+            persistUser(refreshed)
+            isConnectedToFirebase = true
+        }
+        return refreshed.idToken
+    }
+
+    private suspend fun authenticatedQueryParam(): String {
+        val token = getValidIdToken()
+        return "?auth=${java.net.URLEncoder.encode(token, "UTF-8")}"
+    }
+
+    private fun userDataRoot(): String {
+        val uid = currentUser?.localId
+        return if (!uid.isNullOrBlank()) "railguard/users/$uid" else "railguard"
+    }
+
+    fun loadAppPreferences(): AppPreferences {
+        val prefs = sharedPreferences ?: return AppPreferences()
+        val language = runCatching {
+            AppLanguage.valueOf(prefs.getString(KEY_APP_LANGUAGE, AppLanguage.EN_UK.name) ?: AppLanguage.EN_UK.name)
+        }.getOrDefault(AppLanguage.EN_UK)
+        return AppPreferences(
+            language = language,
+            isDarkMode = prefs.getBoolean(KEY_DARK_MODE, false),
+            passcodeEnabled = prefs.getBoolean(KEY_PASSCODE_ENABLED, true),
+            passcodePin = prefs.getString(KEY_PASSCODE_PIN, "1234") ?: "1234",
+            isBiometricEnabled = prefs.getBoolean(KEY_BIOMETRIC_ENABLED, true),
+            isMetric = prefs.getBoolean(KEY_METRIC_UNITS, true),
+            autoSync = prefs.getBoolean(KEY_AUTO_SYNC, true)
+        )
+    }
+
+    fun saveAppPreferences(preferences: AppPreferences) {
+        sharedPreferences?.edit()?.apply {
+            putString(KEY_APP_LANGUAGE, preferences.language.name)
+            putBoolean(KEY_DARK_MODE, preferences.isDarkMode)
+            putBoolean(KEY_PASSCODE_ENABLED, preferences.passcodeEnabled)
+            putString(KEY_PASSCODE_PIN, preferences.passcodePin)
+            putBoolean(KEY_BIOMETRIC_ENABLED, preferences.isBiometricEnabled)
+            putBoolean(KEY_METRIC_UNITS, preferences.isMetric)
+            putBoolean(KEY_AUTO_SYNC, preferences.autoSync)
+            apply()
+        }
+    }
+
+    suspend fun pullUserSettings(onSuccess: (AppPreferences) -> Unit) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/settings.json$authParam"
+                val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                }
+                val code = connection.responseCode
+                if (code !in 200..299) return@withContext
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                if (body.isBlank() || body == "null") return@withContext
+
+                val json = JSONObject(body)
+                val local = loadAppPreferences()
+                val remote = local.copy(
+                    language = runCatching {
+                        AppLanguage.valueOf(
+                            json.optString("language", local.language.name).uppercase()
+                        )
+                    }.getOrDefault(local.language),
+                    isDarkMode = json.optBoolean("darkMode", local.isDarkMode),
+                    passcodeEnabled = json.optBoolean("passcodeEnabled", local.passcodeEnabled),
+                    isBiometricEnabled = json.optBoolean("biometricEnabled", local.isBiometricEnabled),
+                    isMetric = json.optBoolean("metricUnits", local.isMetric),
+                    autoSync = json.optBoolean("autoSync", local.autoSync)
+                )
+                withContext(Dispatchers.Main) {
+                    saveAppPreferences(remote)
+                    onSuccess(remote)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Settings pull error: ${e.message}")
+            }
         }
     }
 
@@ -255,7 +399,8 @@ class RailGuardFirebaseService private constructor() {
                         displayName = json.optString("displayName", email.substringBefore("@")),
                         idToken = json.optString("idToken", ""),
                         refreshToken = json.optString("refreshToken", ""),
-                        expiresIn = json.optString("expiresIn", "3600")
+                        expiresIn = json.optString("expiresIn", "3600"),
+                        tokenExpiresAt = System.currentTimeMillis() + json.optLong("expiresIn", 3600L) * 1000L
                     )
 
                     // Background sync of inspector profile and audit log on service scope (independent of composable lifecycle)
@@ -284,27 +429,6 @@ class RailGuardFirebaseService private constructor() {
                         errReader.close()
                         text
                     } else ""
-
-                    // If account doesn't exist yet on Firebase, auto-register seamless session
-                    if (errStr.contains("INVALID_LOGIN_CREDENTIALS") || errStr.contains("EMAIL_NOT_FOUND")) {
-                        signUpWithEmailAndPassword(
-                            name = email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() },
-                            email = email,
-                            pass = pass,
-                            onSuccess = onSuccess,
-                            onError = { autoSignErr ->
-                                val finalMsg = if (autoSignErr.contains("already in use") || autoSignErr.contains("EMAIL_EXISTS")) {
-                                    "Incorrect password for registered account. Please check your credentials or reset password."
-                                } else {
-                                    autoSignErr
-                                }
-                                authState = AuthState.Error(finalMsg)
-                                syncStatusMessage = finalMsg
-                                onError(finalMsg)
-                            }
-                        )
-                        return@withContext
-                    }
 
                     val errorMsg = if (errStr.isNotBlank()) {
                         parseFirebaseError(errStr, responseCode)
@@ -389,7 +513,8 @@ class RailGuardFirebaseService private constructor() {
                         displayName = name.ifBlank { email.substringBefore("@") },
                         idToken = idToken,
                         refreshToken = json.optString("refreshToken", ""),
-                        expiresIn = json.optString("expiresIn", "3600")
+                        expiresIn = json.optString("expiresIn", "3600"),
+                        tokenExpiresAt = System.currentTimeMillis() + json.optLong("expiresIn", 3600L) * 1000L
                     )
 
                     // Background sync of inspector profile and audit log on service scope (independent of composable lifecycle)
@@ -465,11 +590,72 @@ class RailGuardFirebaseService private constructor() {
         }
     }
 
+    suspend fun updateInspectorProfile(name: String, email: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val user = currentUser ?: throw IllegalStateException("Sign in is required to update your profile.")
+                val token = getValidIdToken()
+                val endpoint = "https://identitytoolkit.googleapis.com/v1/accounts:update?key=${getEffectiveApiKey()}"
+                val payload = JSONObject().apply {
+                    put("idToken", token)
+                    put("displayName", name.trim())
+                    if (email.trim().isNotBlank() && email.trim() != user.email) {
+                        put("email", email.trim())
+                    }
+                    put("returnSecureToken", true)
+                }
+                val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 10000
+                    readTimeout = 10000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(connection.outputStream).use { it.write(payload.toString()) }
+                val code = connection.responseCode
+                val body = (if (code in 200..299) connection.inputStream else connection.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) {
+                    throw IllegalStateException(parseFirebaseError(body, code))
+                }
+
+                val json = JSONObject(body)
+                val updated = user.copy(
+                    displayName = json.optString("displayName", name.trim()),
+                    email = json.optString("email", user.email),
+                    idToken = json.optString("idToken", token),
+                    refreshToken = json.optString("refreshToken", user.refreshToken),
+                    expiresIn = json.optString("expiresIn", user.expiresIn),
+                    tokenExpiresAt = System.currentTimeMillis() + json.optLong("expiresIn", 3600L) * 1000L
+                )
+                withContext(Dispatchers.Main) {
+                    currentUser = updated
+                    authState = AuthState.Authenticated(updated)
+                    persistUser(updated)
+                }
+                saveInspectorProfileToFirebase(updated)
+                saveUserSettings(
+                    mapOf(
+                        "fullName" to name.trim(),
+                        "email" to email.trim(),
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                )
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Profile update error: ${e.message}")
+                false
+            }
+        }
+    }
+
     suspend fun saveInspectorProfileToFirebase(user: FirebaseUser, role: String = "Field Track Inspector") {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = user.idToken.let { if (it.isNotBlank()) "?auth=$it" else "" }
-                val endpoint = "${getEffectiveDbUrl()}/railguard/inspectors/${user.localId}.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/inspector_profile.json$authParam"
                 val json = JSONObject().apply {
                     put("id", user.localId)
                     put("name", user.displayName)
@@ -499,9 +685,9 @@ class RailGuardFirebaseService private constructor() {
     suspend fun logSafetyAuditEvent(action: String, details: String) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val authParam = authenticatedQueryParam()
                 val logId = "log_${System.currentTimeMillis()}"
-                val endpoint = "${getEffectiveDbUrl()}/railguard/audit_logs/$logId.json$authParam"
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/audit_logs/$logId.json$authParam"
                 val json = JSONObject().apply {
                     put("id", logId)
                     put("action", action)
@@ -535,8 +721,8 @@ class RailGuardFirebaseService private constructor() {
     suspend fun uploadInspectionToFirebase(inspection: InspectionRecord): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/inspections/${inspection.id}.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/inspections/${inspection.id}.json$authParam"
                 val json = JSONObject().apply {
                     put("id", inspection.id)
                     put("section", inspection.section)
@@ -572,6 +758,7 @@ class RailGuardFirebaseService private constructor() {
         currentUser = null
         authState = AuthState.Unauthenticated
         persistUser(null)
+        isConnectedToFirebase = false
         syncStatusMessage = "Signed out of safety cloud"
     }
 
@@ -608,7 +795,8 @@ class RailGuardFirebaseService private constructor() {
             val startTime = System.currentTimeMillis()
             try {
                 // Ping Realtime Database endpoint root or shallow query
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val authToken = if (currentUser != null) getValidIdToken() else null
+                val authParam = authToken?.let { "?auth=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: ""
                 val activeDbUrl = getEffectiveDbUrl()
                 val targetUrl = if (databaseType == DatabaseBackendType.REALTIME_DATABASE) {
                     "$activeDbUrl/.json$authParam"
@@ -620,8 +808,8 @@ class RailGuardFirebaseService private constructor() {
                     requestMethod = "GET"
                     connectTimeout = 8000
                     readTimeout = 8000
-                    if (databaseType == DatabaseBackendType.FIRESTORE && currentUser?.idToken?.isNotBlank() == true) {
-                        setRequestProperty("Authorization", "Bearer ${currentUser?.idToken}")
+                    if (databaseType == DatabaseBackendType.FIRESTORE && !authToken.isNullOrBlank()) {
+                        setRequestProperty("Authorization", "Bearer $authToken")
                     }
                 }
 
@@ -710,8 +898,8 @@ class RailGuardFirebaseService private constructor() {
 
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val dbEndpoint = "$activeDb/railguard.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val dbEndpoint = "$activeDb/${userDataRoot()}.json$authParam"
 
                 val payload = JSONObject().apply {
                     put("syncedAt", System.currentTimeMillis())
@@ -829,8 +1017,8 @@ class RailGuardFirebaseService private constructor() {
 
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val dbEndpoint = "$activeDb/railguard.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val dbEndpoint = "$activeDb/${userDataRoot()}.json$authParam"
 
                 val conn = (URL(dbEndpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
@@ -966,8 +1154,8 @@ class RailGuardFirebaseService private constructor() {
     suspend fun uploadDefectToFirebase(defect: Defect) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/defects/${defect.id}.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/defects/${defect.id}.json$authParam"
                 val json = JSONObject().apply {
                     put("id", defect.id)
                     put("title", defect.title)
@@ -1009,8 +1197,8 @@ class RailGuardFirebaseService private constructor() {
     suspend fun deleteDefectFromFirebase(defectId: String) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/defects/$defectId.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/defects/$defectId.json$authParam"
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "DELETE"
                     connectTimeout = 6000
@@ -1031,8 +1219,8 @@ class RailGuardFirebaseService private constructor() {
     suspend fun uploadTaskToFirebase(task: MaintenanceTask) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/tasks/${task.id}.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/tasks/${task.id}.json$authParam"
                 val json = JSONObject().apply {
                     put("id", task.id)
                     put("title", task.title)
@@ -1069,8 +1257,8 @@ class RailGuardFirebaseService private constructor() {
     suspend fun dispatchTsrToFirebase(trainId: String, tsrSpeedKmH: Int, reason: String) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/trains/$trainId/tsr.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/trains/$trainId/tsr.json$authParam"
                 val json = JSONObject().apply {
                     put("trainId", trainId)
                     put("activeTsrSpeedKmH", tsrSpeedKmH)
@@ -1111,8 +1299,8 @@ class RailGuardFirebaseService private constructor() {
     ) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/telemetry/live_gps.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/telemetry/live_gps.json$authParam"
                 val json = JSONObject().apply {
                     put("latitude", lat)
                     put("longitude", lng)
@@ -1154,8 +1342,8 @@ class RailGuardFirebaseService private constructor() {
     ) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/camera_captures/$captureId.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/camera_captures/$captureId.json$authParam"
                 val json = JSONObject().apply {
                     put("id", captureId)
                     put("section", section)
@@ -1194,9 +1382,9 @@ class RailGuardFirebaseService private constructor() {
     ) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val authParam = authenticatedQueryParam()
                 val timestamp = System.currentTimeMillis()
-                val endpoint = "${getEffectiveDbUrl()}/railguard/ai_analyses/$analysisType/$timestamp.json$authParam"
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/ai_analyses/$analysisType/$timestamp.json$authParam"
                 val json = JSONObject().apply {
                     put("type", analysisType)
                     put("timestamp", timestamp)
@@ -1227,9 +1415,8 @@ class RailGuardFirebaseService private constructor() {
     suspend fun saveUserSettings(settingsMap: Map<String, Any>) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val userKey = currentUser?.localId ?: "inspector_system_config"
-                val endpoint = "${getEffectiveDbUrl()}/railguard/settings/$userKey.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/settings.json$authParam"
                 val json = JSONObject().apply {
                     put("updatedAt", System.currentTimeMillis())
                     put("userEmail", currentUser?.email ?: "e.chen@railguard.field")
@@ -1259,9 +1446,9 @@ class RailGuardFirebaseService private constructor() {
     suspend fun saveComment(defectId: String, author: String, text: String) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val authParam = authenticatedQueryParam()
                 val commentId = "cmt_${System.currentTimeMillis()}"
-                val endpoint = "${getEffectiveDbUrl()}/railguard/comments/$defectId/$commentId.json$authParam"
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/comments/$defectId/$commentId.json$authParam"
                 val json = JSONObject().apply {
                     put("id", commentId)
                     put("defectId", defectId)
@@ -1293,8 +1480,8 @@ class RailGuardFirebaseService private constructor() {
     suspend fun saveObservation(obs: ObservationItem) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/observations/${obs.id}.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/observations/${obs.id}.json$authParam"
                 val json = JSONObject().apply {
                     put("id", obs.id)
                     put("title", obs.title)
@@ -1328,9 +1515,9 @@ class RailGuardFirebaseService private constructor() {
     suspend fun saveAiOracleQuery(model: String, query: String, response: String) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val authParam = authenticatedQueryParam()
                 val queryId = "ai_${System.currentTimeMillis()}"
-                val endpoint = "${getEffectiveDbUrl()}/railguard/ai_oracle_logs/$queryId.json$authParam"
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/ai_oracle_logs/$queryId.json$authParam"
                 val json = JSONObject().apply {
                     put("id", queryId)
                     put("model", model)
@@ -1363,8 +1550,8 @@ class RailGuardFirebaseService private constructor() {
     suspend fun saveReportPackage(reportId: String, title: String, section: String, inspector: String, status: String) {
         withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/reports/$reportId.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/reports/$reportId.json$authParam"
                 val json = JSONObject().apply {
                     put("id", reportId)
                     put("title", title)
@@ -1417,9 +1604,9 @@ class RailGuardFirebaseService private constructor() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/esp_sensors/$nodeId.json$authParam"
-                val liveEndpoint = "${getEffectiveDbUrl()}/railguard/live_sensors/telemetry.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/esp_sensors/$nodeId.json$authParam"
+                val liveEndpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/live_sensors/telemetry.json$authParam"
                 val json = JSONObject().apply {
                     put("nodeId", nodeId)
                     put("ultrasonicDepthMm", ultrasonicDepthMm.toDouble())
@@ -1470,8 +1657,8 @@ class RailGuardFirebaseService private constructor() {
     suspend fun sendEspCalibrationCommand(nodeId: String, command: String): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/esp_sensors/$nodeId/command.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/esp_sensors/$nodeId/command.json$authParam"
                 val json = JSONObject().apply {
                     put("command", command)
                     put("issuedAt", System.currentTimeMillis())
@@ -1507,8 +1694,8 @@ class RailGuardFirebaseService private constructor() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/live_inspection/$sessionId.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/live_inspection/$sessionId.json$authParam"
                 val json = JSONObject().apply {
                     put("sessionId", sessionId)
                     put("fps", fps)
@@ -1546,8 +1733,8 @@ class RailGuardFirebaseService private constructor() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/ai_evaluations/$evalId.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/ai_evaluations/$evalId.json$authParam"
                 val json = JSONObject().apply {
                     put("evalId", evalId)
                     put("type", type)
@@ -1589,8 +1776,8 @@ class RailGuardFirebaseService private constructor() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
-                val endpoint = "${getEffectiveDbUrl()}/railguard/trains/$trainId.json$authParam"
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/trains/$trainId.json$authParam"
                 val json = JSONObject().apply {
                     put("trainId", trainId)
                     put("name", name)
