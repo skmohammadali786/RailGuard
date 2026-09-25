@@ -15,6 +15,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -24,13 +28,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.railguard.components.PrimaryButton
 import com.example.railguard.components.StatusPill
+import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.LocalAppSettings
 import com.example.railguard.model.Tone
+import kotlinx.coroutines.launch
 
 @Composable
 fun SplashScreen(
     onContinue: () -> Unit,
-    onLoginClick: () -> Unit
+    onLoginClick: () -> Unit,
+    onRegisterClick: () -> Unit = {}
 ) {
     val colorScheme = MaterialTheme.colorScheme
 
@@ -100,20 +107,43 @@ fun SplashScreen(
                 color = colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             PrimaryButton(
-                title = "Continue",
+                title = "Sign In to RailGuard",
                 icon = Icons.AutoMirrored.Filled.ArrowForward,
-                onClick = onContinue
+                onClick = onLoginClick
             )
-            Spacer(modifier = Modifier.height(14.dp))
-            Text(
-                text = "Already have an account? Sign in",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { onLoginClick() }
-            )
+            Spacer(modifier = Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onRegisterClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PersonAdd,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Create Account (Sign Up)",
+                    fontWeight = FontWeight.SemiBold,
+                    color = colorScheme.primary
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            TextButton(
+                onClick = onContinue,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Field Operations & Safety Overview",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -273,16 +303,33 @@ fun LoginScreen(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val settings = LocalAppSettings.current
+    val firebaseService = remember { RailGuardFirebaseService.instance }
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    
+    // Auth Mode: 0 = Sign In, 1 = Create Account / Sign Up
+    var authMode by remember { mutableIntStateOf(0) }
+    
+    // Sign In fields
     var email by remember { mutableStateOf("e.chen@railguard.field") }
-    var password by remember { mutableStateOf("••••••••") }
+    var password by remember { mutableStateOf("railguard2026") }
     var showPassword by remember { mutableStateOf(false) }
+    
+    // Sign Up fields
+    var regFullName by remember { mutableStateOf("") }
+    var regEmail by remember { mutableStateOf("") }
+    var regPassword by remember { mutableStateOf("") }
+    var regAcceptedTerms by remember { mutableStateOf(true) }
+    
     var errorMessage by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colorScheme.background)
-            .padding(20.dp),
+            .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
         Card(
@@ -297,126 +344,347 @@ fun LoginScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(colorScheme.primary),
-                    contentAlignment = Alignment.Center
+                // Header Brand Icon & Firebase Cloud Status
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Shield,
-                        contentDescription = null,
-                        tint = colorScheme.onPrimary,
-                        modifier = Modifier.size(32.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = colorScheme.onPrimary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF0F766E).copy(alpha = 0.15f))
+                            .border(1.dp, Color(0xFF0F766E).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "SECURE CLOUD · TELEMETRY SYNC",
+                            color = Color(0xFF0F766E),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Prominent Mode Switcher Tabs: Sign In / Create Account
+                TabRow(
+                    selectedTabIndex = authMode,
+                    containerColor = colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    contentColor = colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                ) {
+                    Tab(
+                        selected = authMode == 0,
+                        onClick = {
+                            keyboardController?.hide()
+                            focusManager.clearFocus(force = true)
+                            authMode = 0
+                            errorMessage = ""
+                        },
+                        text = { Text("Sign In", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+                        icon = { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                    )
+                    Tab(
+                        selected = authMode == 1,
+                        onClick = {
+                            keyboardController?.hide()
+                            focusManager.clearFocus(force = true)
+                            authMode = 1
+                            errorMessage = ""
+                        },
+                        text = { Text("Create Account", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+                        icon = { Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp)) }
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                Text(
-                    text = settings.translate("welcome_back"),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = colorScheme.onBackground,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = settings.translate("welcome_back_sub"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it; errorMessage = "" },
-                    label = { Text("Work Email") },
-                    placeholder = { Text("inspector@railguard.field") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it; errorMessage = "" },
-                    label = { Text("Password") },
-                    singleLine = true,
-                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showPassword = !showPassword }) {
-                            Icon(
-                                imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = "Toggle password visibility"
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                if (errorMessage.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                if (authMode == 0) {
+                    // =================== SIGN IN VIEW ===================
                     Text(
-                        text = errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
+                        text = settings.translate("welcome_back"),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colorScheme.onBackground,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
                     )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = settings.translate("forgot_password"),
-                        style = MaterialTheme.typography.labelMedium,
+                        text = "Sign in to authenticate and sync track inspection telemetry to the central safety cloud.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it; errorMessage = "" },
+                        label = { Text("Work Email") },
+                        placeholder = { Text("inspector@railguard.field") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it; errorMessage = "" },
+                        label = { Text("Password") },
+                        singleLine = true,
+                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showPassword = !showPassword }) {
+                                Icon(
+                                    imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = "Toggle password visibility"
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (errorMessage.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = errorMessage,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Text(
+                            text = settings.translate("forgot_password"),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable { onForgotPasswordClick() }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    PrimaryButton(
+                        title = if (isLoading) "Connecting to Cloud Network..." else settings.translate("sign_in"),
+                        icon = Icons.AutoMirrored.Filled.ArrowForward,
+                        onClick = {
+                            if (!email.contains("@")) {
+                                errorMessage = "Enter a valid work email."
+                            } else if (password.length < 4) {
+                                errorMessage = "Enter your password."
+                            } else {
+                                isLoading = true
+                                errorMessage = ""
+                                scope.launch {
+                                    firebaseService.signInWithEmailAndPassword(
+                                        email = email.trim(),
+                                        pass = password,
+                                        onSuccess = {
+                                            isLoading = false
+                                            keyboardController?.hide()
+                                            focusManager.clearFocus(force = true)
+                                            onLoginSuccess()
+                                        },
+                                        onError = { err ->
+                                            isLoading = false
+                                            errorMessage = err
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "New inspector? Tap to Create an Account",
+                        style = MaterialTheme.typography.bodySmall,
                         color = colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clickable { onForgotPasswordClick() }
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { authMode = 1 }
+                    )
+                } else {
+                    // =================== CREATE ACCOUNT / SIGN UP VIEW ===================
+                    Text(
+                        text = settings.translate("create_account"),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colorScheme.onBackground,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Create your inspector account to synchronize track inspection telemetry.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = regFullName,
+                        onValueChange = { regFullName = it; errorMessage = "" },
+                        label = { Text("Inspector Full Name") },
+                        placeholder = { Text("e.g. Alex Morgan") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = regEmail,
+                        onValueChange = { regEmail = it; errorMessage = "" },
+                        label = { Text("Work Email") },
+                        placeholder = { Text("name@railguard.field") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = regPassword,
+                        onValueChange = { regPassword = it; errorMessage = "" },
+                        label = { Text("Password (min 6 characters)") },
+                        singleLine = true,
+                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showPassword = !showPassword }) {
+                                Icon(
+                                    imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = "Toggle password visibility"
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { regAcceptedTerms = !regAcceptedTerms }
+                    ) {
+                        Checkbox(
+                            checked = regAcceptedTerms,
+                            onCheckedChange = { regAcceptedTerms = it }
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "I agree to track field safety & audit guidelines.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (errorMessage.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = errorMessage,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    PrimaryButton(
+                        title = if (isLoading) "Creating Cloud Account..." else "Create Account & Sign In",
+                        icon = Icons.Default.PersonAdd,
+                        onClick = {
+                            if (regFullName.trim().length < 2) {
+                                errorMessage = "Please enter your full name."
+                            } else if (!regEmail.contains("@")) {
+                                errorMessage = "Please enter a valid email."
+                            } else if (regPassword.length < 6) {
+                                errorMessage = "Password must be at least 6 characters."
+                            } else if (!regAcceptedTerms) {
+                                errorMessage = "Please accept the field safety guidelines."
+                            } else {
+                                isLoading = true
+                                errorMessage = ""
+                                scope.launch {
+                                    firebaseService.signUpWithEmailAndPassword(
+                                        name = regFullName.trim(),
+                                        email = regEmail.trim(),
+                                        pass = regPassword,
+                                        onSuccess = {
+                                            isLoading = false
+                                            keyboardController?.hide()
+                                            focusManager.clearFocus(force = true)
+                                            onLoginSuccess()
+                                        },
+                                        onError = { err ->
+                                            isLoading = false
+                                            errorMessage = err
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Already have an account? Tap to Sign In",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { authMode = 0 }
                     )
                 }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                PrimaryButton(
-                    title = settings.translate("sign_in"),
-                    icon = Icons.AutoMirrored.Filled.ArrowForward,
-                    onClick = {
-                        if (!email.contains("@")) {
-                            errorMessage = "Enter a valid work email."
-                        } else if (password.length < 4) {
-                            errorMessage = "Enter your passcode."
-                        } else {
-                            onLoginSuccess()
-                        }
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = settings.translate("new_to_railguard"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.clickable { onRegisterClick() }
-                )
             }
         }
     }
@@ -429,11 +697,14 @@ fun RegistrationScreen(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val settings = LocalAppSettings.current
+    val firebaseService = remember { RailGuardFirebaseService.instance }
+    val scope = rememberCoroutineScope()
     var fullName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var acceptedTerms by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var isRegistering by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -454,26 +725,74 @@ fun RegistrationScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(colorScheme.primary),
-                    contentAlignment = Alignment.Center
+                // Header Brand Icon & Firebase Cloud Status
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PersonAdd,
-                        contentDescription = null,
-                        tint = colorScheme.onPrimary,
-                        modifier = Modifier.size(30.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PersonAdd,
+                            contentDescription = null,
+                            tint = colorScheme.onPrimary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF0F766E).copy(alpha = 0.15f))
+                            .border(1.dp, Color(0xFF0F766E).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "SECURE CLOUD · TELEMETRY SYNC",
+                            color = Color(0xFF0F766E),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Prominent Mode Switcher Tabs
+                TabRow(
+                    selectedTabIndex = 1,
+                    containerColor = colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    contentColor = colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                ) {
+                    Tab(
+                        selected = false,
+                        onClick = { onLoginClick() },
+                        text = { Text("Sign In", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+                        icon = { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                    )
+                    Tab(
+                        selected = true,
+                        onClick = { },
+                        text = { Text("Create Account", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+                        icon = { Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp)) }
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
                 Text(
                     text = settings.translate("create_account"),
@@ -559,7 +878,7 @@ fun RegistrationScreen(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 PrimaryButton(
-                    title = settings.translate("create_account_btn"),
+                    title = if (isRegistering) "Creating Cloud Account..." else settings.translate("create_account_btn"),
                     onClick = {
                         if (fullName.trim().length < 2) {
                             errorMessage = "Enter your full name."
@@ -570,7 +889,23 @@ fun RegistrationScreen(
                         } else if (!acceptedTerms) {
                             errorMessage = "Accept the field safety terms to continue."
                         } else {
-                            onRegisterSuccess(fullName.trim(), email.trim())
+                            isRegistering = true
+                            errorMessage = ""
+                            scope.launch {
+                                firebaseService.signUpWithEmailAndPassword(
+                                    name = fullName.trim(),
+                                    email = email.trim(),
+                                    pass = password,
+                                    onSuccess = { user ->
+                                        isRegistering = false
+                                        onRegisterSuccess(user.displayName.ifBlank { fullName.trim() }, user.email)
+                                    },
+                                    onError = { err ->
+                                        isRegistering = false
+                                        errorMessage = err
+                                    }
+                                )
+                            }
                         }
                     }
                 )

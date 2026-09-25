@@ -78,6 +78,10 @@ fun HomeScreen(
             TrainConnectionStatusBanner(
                 onOpenTrainConnection = { onNavigate("train_connection") }
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            FirebaseSyncBanner(
+                onOpenFirebaseSync = { onNavigate("firebase_sync") }
+            )
             Spacer(modifier = Modifier.height(10.dp))
         }
 
@@ -598,8 +602,8 @@ fun TrainConnectionStatusBanner(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(if (isDark) Color(0xFF0D231E) else Color(0xFFE6F4EA))
-            .border(1.dp, Color(0xFF10B981).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+            .background(if (isDark) Color(0xFF0F1E2E) else Color(0xFFE0F2FE))
+            .border(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
             .clickable { onOpenTrainConnection() }
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -608,13 +612,13 @@ fun TrainConnectionStatusBanner(
             modifier = Modifier
                 .size(34.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF10B981).copy(alpha = 0.2f)),
+                .background(Color(0xFF0284C7).copy(alpha = 0.2f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.Train,
+                imageVector = Icons.Default.DirectionsTransit,
                 contentDescription = null,
-                tint = Color(0xFF10B981),
+                tint = Color(0xFF0284C7),
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -627,32 +631,38 @@ fun TrainConnectionStatusBanner(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = "TRAIN TR-104 TELEMETRY",
+                    text = "TRAIN FLEET INTERLOCK",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    color = if (isDark) Color.White else Color(0xFF065F46)
+                    color = if (isDark) Color.White else Color(0xFF0369A1)
                 )
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(3.dp))
-                        .background(Color(0xFF10B981))
+                        .background(Color(0xFF16A34A))
                         .padding(horizontal = 4.dp, vertical = 1.dp)
                 ) {
-                    Text("LIVE 5G", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "4 ACTIVE CABS",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
             Text(
-                text = "118.4 km/h · 1.4 km to TSR 25 km/h restriction (Section 14)",
+                text = "TR-104 (118 km/h) · FR-802 · HS-301 · CR-512 | TSR Auto-Dispatch Ready",
                 fontSize = 10.sp,
-                color = if (isDark) Color(0xFFA7F3D0) else Color(0xFF047857)
+                fontFamily = FontFamily.Monospace,
+                color = if (isDark) Color(0xFF7DD3FC) else Color(0xFF0369A1)
             )
         }
 
         Icon(
             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = "Open Train Connection",
-            tint = Color(0xFF10B981),
+            contentDescription = "Open Train Fleet Interlock",
+            tint = Color(0xFF0284C7),
             modifier = Modifier.size(16.dp)
         )
     }
@@ -708,3 +718,80 @@ fun WorkspaceTile(
         )
     }
 }
+
+@Composable
+fun FirebaseSyncBanner(
+    onOpenFirebaseSync: () -> Unit
+) {
+    val isDark = LocalIsDark.current
+    val firebaseService = remember { com.example.railguard.data.RailGuardFirebaseService.instance }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
+            .border(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(10.dp))
+            .clickable { onOpenFirebaseSync() }
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFFFA000).copy(alpha = 0.2f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.CloudSync,
+                contentDescription = null,
+                tint = Color(0xFFFFA000),
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "CENTRAL SAFETY CLOUD SYNC",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(if (firebaseService.isConnectedToFirebase) Color(0xFF16A34A) else Color(0xFF64748B))
+                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                ) {
+                    Text(
+                        text = if (firebaseService.isConnectedToFirebase) "SYNCED" else "CLOUD READY",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Text(
+                text = "Central Realtime Database · Tap to view live cloud records",
+                fontSize = 10.sp,
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+            )
+        }
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = "Open Central Cloud Sync",
+            tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+            modifier = Modifier.size(16.dp)
+        )
+    }
+}
+

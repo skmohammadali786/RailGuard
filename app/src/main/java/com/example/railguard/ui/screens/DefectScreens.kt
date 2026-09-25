@@ -1,5 +1,6 @@
 package com.example.railguard.ui.screens
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,6 +10,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,13 +19,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.launch
+import com.example.railguard.data.RailGuardFirebaseService
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.railguard.components.*
 import com.example.railguard.model.Defect
-import com.example.railguard.model.Observation
+import com.example.railguard.model.ObservationItem
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
@@ -33,243 +42,221 @@ fun DefectsListScreen(
     onSelectDefect: (Defect) -> Unit,
     onViewObservations: () -> Unit,
     onOpenDefectMap: () -> Unit,
-    onOpenCrackGrowth: () -> Unit,
-    onBack: (() -> Unit)? = null
+    onOpenCrackGrowth: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val isDark = LocalIsDark.current
     var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableIntStateOf(0) }
-    val filters = listOf("All defects", "Critical only", "Warnings")
+    var selectedFilter by remember { mutableStateOf("All") }
 
-    val filtered = remember(searchQuery, selectedFilter, defects) {
-        defects.filter {
-            val matchesQuery = it.title.contains(searchQuery, ignoreCase = true) ||
-                    it.id.contains(searchQuery, ignoreCase = true) ||
-                    it.section.contains(searchQuery, ignoreCase = true)
-            val matchesFilter = when (selectedFilter) {
-                1 -> it.tone == Tone.CRITICAL
-                2 -> it.tone == Tone.WARNING
-                else -> true
-            }
-            matchesQuery && matchesFilter
+    val filteredDefects = defects.filter {
+        val matchesSearch = it.title.contains(searchQuery, ignoreCase = true) ||
+                it.section.contains(searchQuery, ignoreCase = true) ||
+                it.id.contains(searchQuery, ignoreCase = true)
+        val matchesFilter = when (selectedFilter) {
+            "Critical" -> it.tone == Tone.CRITICAL
+            "Warning" -> it.tone == Tone.WARNING
+            "Advisory" -> it.tone == Tone.INFO
+            else -> true
         }
+        matchesSearch && matchesFilter
     }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+        contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Header(
-                title = "Defect Register",
-                subtitle = "Prioritized AI findings across operational corridors",
-                onBack = onBack
+            ScreenHeader(
+                title = "Defect Registry",
+                subtitle = "${defects.size} active anomalies detected across corridors"
             )
-        }
-
-        // Dedicated Defect Workspaces (3 Dedicated actions requested by user)
-        item {
-            SectionLabel(title = "DEFECT WORKSPACES")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                WorkspaceTile(
-                    title = "Defect Map",
-                    subtitle = "Corridor GIS pins",
-                    icon = Icons.Default.Place,
-                    onClick = onOpenDefectMap,
-                    modifier = Modifier.weight(1f)
-                )
-                WorkspaceTile(
-                    title = "Observations",
-                    subtitle = "Raw AI bounding",
-                    icon = Icons.Default.Visibility,
-                    onClick = onViewObservations,
-                    modifier = Modifier.weight(1f)
-                )
-                WorkspaceTile(
-                    title = "Crack Gauge",
-                    subtitle = "Growth kinetics",
-                    icon = Icons.Default.ShowChart,
-                    onClick = onOpenCrackGrowth,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Spacer(modifier = Modifier.height(10.dp))
         }
 
         item {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search by ID, title, or chainage...") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = colorScheme.onSurfaceVariant
-                    )
-                },
-                singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp)
+                    .testTag("defect_search_input"),
+                placeholder = { Text("Search by ID, crack type, or chainage...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp)
             )
         }
 
         item {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                filters.forEachIndexed { index, label ->
-                    val isSelected = selectedFilter == index
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (isSelected) colorScheme.primary else colorScheme.surface)
-                            .border(1.dp, if (isSelected) colorScheme.primary else colorScheme.outline, RoundedCornerShape(20.dp))
-                            .clickable { selectedFilter = index }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) colorScheme.onPrimary else colorScheme.onSurfaceVariant
-                        )
-                    }
+                listOf("All", "Critical", "Warning", "Advisory").forEach { filter ->
+                    FilterChip(
+                        selected = selectedFilter == filter,
+                        onClick = { selectedFilter = filter },
+                        label = { Text(filter) },
+                        modifier = Modifier.testTag("filter_chip_$filter")
+                    )
                 }
             }
         }
 
         item {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "${filtered.size} FINDINGS LOGGED",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Raw observations →",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable { onViewObservations() }
-                )
+                Button(
+                    onClick = onOpenDefectMap,
+                    modifier = Modifier.weight(1f).testTag("defect_map_btn"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
+                        contentColor = if (isDark) Color.White else Color(0xFF0F172A)
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Geo-Plot", fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = onOpenCrackGrowth,
+                    modifier = Modifier.weight(1f).testTag("crack_growth_btn"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
+                        contentColor = if (isDark) Color.White else Color(0xFF0F172A)
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.TrendingUp, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Growth AI", fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = onViewObservations,
+                    modifier = Modifier.weight(1f).testTag("observations_btn"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
+                        contentColor = if (isDark) Color.White else Color(0xFF0F172A)
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Observations", fontSize = 12.sp)
+                }
             }
         }
 
-        items(filtered) { defect ->
-            val isDark = LocalIsDark.current
-            RailCard(
-                modifier = Modifier.padding(vertical = 4.dp),
-                onClick = { onSelectDefect(defect) }
+        items(filteredDefects, key = { it.id }) { defect ->
+            DefectListItem(defect = defect, onClick = { onSelectDefect(defect) })
+        }
+    }
+}
+
+@Composable
+fun DefectListItem(defect: Defect, onClick: () -> Unit) {
+    val isDark = LocalIsDark.current
+    val accentColor = toneColor(defect.tone, isDark)
+
+    RailCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .testTag("defect_item_${defect.id}")
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(accentColor.copy(alpha = 0.15f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = defect.id,
-                        style = MaterialTheme.typography.labelMedium,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = colorScheme.primary
+                        fontFamily = FontFamily.Monospace,
+                        color = accentColor
                     )
-                    StatusPill(
-                        label = "RISK ${defect.score}",
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Text(
+                    text = defect.section,
+                    fontSize = 12.sp,
+                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                    modifier = Modifier.weight(1f)
+                )
+
+                Text(
+                    text = defect.time,
+                    fontSize = 11.sp,
+                    color = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = defect.title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White else Color(0xFF0F172A)
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = defect.detail,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                maxLines = 2
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatusChip(
+                        title = "Length: ${defect.estimatedLength}",
+                        tone = Tone.NEUTRAL
+                    )
+                    StatusChip(
+                        title = "Risk: ${defect.riskScore}/100",
                         tone = defect.tone
                     )
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = defect.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = colorScheme.onSurface
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(16.dp)
                 )
-                Text(
-                    text = "${defect.section} · ${defect.trackSide}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Coordinates: ${defect.gpsCoordinates} · ${defect.tieSleeperNumber}",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = colorScheme.primary
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // AI Result Pill in defect list item
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(toneColor(defect.tone, isDark).copy(alpha = 0.10f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "AI Engine: ${defect.aiEngineModel.take(19)}",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = toneColor(defect.tone, isDark)
-                    )
-                    Text(
-                        text = "${defect.aiConfidencePercent}% Conf · Risk ${defect.aiDerailmentRiskIndex}",
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = toneColor(defect.tone, isDark)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = defect.detail,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant,
-                    maxLines = 2
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Length: ${defect.estimatedLength}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = toneColor(defect.tone, isDark)
-                    )
-                    Text(
-                        text = "Timestamp: ${defect.detectedTimestamp.take(16)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colorScheme.onSurfaceVariant
-                    )
-                }
             }
         }
     }
@@ -287,528 +274,366 @@ fun DefectDetailsScreen(
     onOpenComments: () -> Unit,
     onBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDark.current
+    val accentColor = toneColor(defect.tone, isDark)
+    val scope = rememberCoroutineScope()
+    var isSyncingToFirebase by remember { mutableStateOf(false) }
+    var firebaseSyncMessage by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+        contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Header(
-                title = defect.id,
-                subtitle = "${defect.title} · ${defect.section}",
-                onBack = onBack
-            )
-        }
-
-        // Top Status & Risk Card
-        item {
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    StatusPill(label = "ACTIVE DEFECT", tone = defect.tone)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                IconButton(onClick = onBack, modifier = Modifier.testTag("back_button")) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Detected ${defect.time}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colorScheme.onSurfaceVariant
+                        text = defect.id,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = accentColor
+                    )
+                    Text(
+                        text = defect.title,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color(0xFF0F172A)
                     )
                 }
+            }
+        }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Text(
-                    text = defect.title,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = colorScheme.onSurface
-                )
-                Text(
-                    text = "${defect.section} · ${defect.trackSide}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Risk Score Banner
+        // Firebase Cloud Sync Action
+        item {
+            Card(
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(toneColor(defect.tone, isDark).copy(alpha = 0.12f))
-                        .border(1.dp, toneColor(defect.tone, isDark).copy(alpha = 0.35f), RoundedCornerShape(8.dp))
                         .padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "AI RISK INDEX",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = toneColor(defect.tone, isDark)
-                        )
-                        Text(
-                            text = "${defect.score}/100 Criticality",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = toneColor(defect.tone, isDark)
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFFA000).copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color(0xFFFFA000), modifier = Modifier.size(16.dp))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Cloud Telemetry Sync", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(firebaseSyncMessage ?: "Replicate defect to central safety cloud", fontSize = 10.sp, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+                        }
                     }
+
+                    OutlinedButton(
+                        onClick = {
+                            isSyncingToFirebase = true
+                            scope.launch {
+                                RailGuardFirebaseService.instance.uploadDefectToFirebase(defect)
+                                isSyncingToFirebase = false
+                                firebaseSyncMessage = "Synchronized to Central Cloud!"
+                            }
+                        },
+                        enabled = !isSyncingToFirebase,
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Text(if (isSyncingToFirebase) "Pushing..." else "Sync Now", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
+        item {
+            RailCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Estimated: ${defect.estimatedLength}",
+                        text = "ANOMALY TELEMETRY & GPS",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    MetricRow(label = "Corridor Section", value = defect.section)
+                    MetricRow(label = "Chainage Marker", value = defect.chainageCoordinate)
+                    MetricRow(label = "GPS Coordinates", value = "${defect.latitude} N, ${defect.longitude} E")
+                    MetricRow(label = "Estimated Crack Size", value = defect.estimatedLength)
+                    MetricRow(label = "AI Confidence", value = "${defect.aiConfidencePercent}% Match")
+                    MetricRow(label = "Overall Risk Index", value = "${defect.riskScore} / 100")
+                }
+            }
+        }
+
+        item {
+            RailCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "AI PRESCRIBED MITIGATION",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF38BDF8)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = defect.aiPrescribedAction,
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = toneColor(defect.tone, isDark)
+                        lineHeight = 18.sp,
+                        color = if (isDark) Color.White else Color(0xFF0F172A)
                     )
                 }
+            }
+        }
 
-                Spacer(modifier = Modifier.height(12.dp))
+        item {
+            Text(
+                text = "ENGINEERING TOOLS & VERIFICATION",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        }
 
-                Text(
-                    text = defect.detail,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.onSurface
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ActionToolTile(
+                    title = "Crack Width & Depth Measurement",
+                    desc = "Computer vision calibrated optical gauge",
+                    icon = Icons.Default.SquareFoot,
+                    onClick = onOpenMeasurement
+                )
+                ActionToolTile(
+                    title = "Crack Growth Propagation Model",
+                    desc = "Finite element strain & cycle prediction",
+                    icon = Icons.Default.Timeline,
+                    onClick = onOpenGrowth
+                )
+                ActionToolTile(
+                    title = "Historical Image Comparison",
+                    desc = "Side-by-side time-lapse delta analysis",
+                    icon = Icons.Default.Compare,
+                    onClick = onOpenComparison
+                )
+                ActionToolTile(
+                    title = "Multi-Class Object Detection",
+                    desc = "Segmented rail, sleeper, clips & ballast",
+                    icon = Icons.Default.Layers,
+                    onClick = onOpenObjectDetection
+                )
+                ActionToolTile(
+                    title = "Track Alignment & Profile",
+                    desc = "Horizontal gauge & cross-level deviation",
+                    icon = Icons.Default.Tune,
+                    onClick = onOpenAlignment
+                )
+                ActionToolTile(
+                    title = "Field Inspector Comments",
+                    desc = "Add operational notes & dispatch tags",
+                    icon = Icons.Default.Comment,
+                    onClick = onOpenComments
                 )
             }
         }
 
-        // Operational Restriction Warning
         item {
-            RailCard(
-                modifier = Modifier.padding(vertical = 4.dp),
-                backgroundColor = toneColor(Tone.CRITICAL, isDark).copy(alpha = 0.08f),
-                borderColor = toneColor(Tone.CRITICAL, isDark).copy(alpha = 0.3f)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Speed,
-                        contentDescription = null,
-                        tint = toneColor(Tone.CRITICAL, isDark),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Speed Restriction Active: ${defect.aiRecommendedSpeedLimitKmH} km/h",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = toneColor(Tone.CRITICAL, isDark)
-                        )
-                        Text(
-                            text = "Mandatory limit applied to all Up Line freight and passenger traffic.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-
-        // Dedicated Card: Inspection Timestamps
-        item {
-            Spacer(modifier = Modifier.height(4.dp))
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "INSPECTION TIMESTAMPS & TIMELINE",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colorScheme.primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Icon(
-                        imageVector = Icons.Default.Schedule,
-                        contentDescription = null,
-                        tint = colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                DetailRow(label = "First Detected Timestamp", value = defect.detectedTimestamp)
-                DetailRow(label = "Latest Verification Audit", value = defect.lastAuditedTimestamp)
-                DetailRow(label = "Next Inspection Due", value = "Within 24 hours (Daily Mandatory Sweeps)")
-                DetailRow(label = "Auditor / Lead Inspector", value = "E. Chen · Certified Track Inspector (#TC-4091)")
-                DetailRow(label = "Digital Ledger Hash", value = "SHA-256: 7d49...a32e (Tamper-proof Logged)")
-            }
-        }
-
-        // Dedicated Card: Track Coordinates & Geolocation
-        item {
-            Spacer(modifier = Modifier.height(4.dp))
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "TRACK COORDINATES & GEOLOCATION",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colorScheme.primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Icon(
-                        imageVector = Icons.Default.Place,
-                        contentDescription = null,
-                        tint = colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                DetailRow(label = "LRS Track Chainage", value = defect.chainageCoordinate)
-                DetailRow(label = "Corridor & Line", value = "${defect.section} · ${defect.trackSide}")
-                DetailRow(label = "GPS Geolocation", value = defect.gpsCoordinates)
-                DetailRow(label = "Decimal Lat / Lon", value = "${defect.latitude}° N, ${defect.longitude}° W")
-                DetailRow(label = "Track Elevation (AMSL)", value = "${defect.altitudeMeters} meters")
-                DetailRow(label = "Tie / Sleeper ID", value = defect.tieSleeperNumber)
-                DetailRow(label = "Dynamic Track Gauge", value = "${defect.trackGaugeMm} mm (+3.2 mm tolerance)")
-                DetailRow(label = "GNSS RTK Fix", value = "±1.2m Accuracy · 14 Satellites Fixed")
-            }
-        }
-
-        // Dedicated Card: AI Analysis Engine Results
-        item {
-            Spacer(modifier = Modifier.height(4.dp))
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "AI ANALYSIS ENGINE RESULTS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colorScheme.primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                    StatusPill(
-                        label = "CONF: ${defect.aiConfidencePercent}%",
-                        tone = defect.tone
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                DetailRow(label = "AI Inference Model", value = defect.aiEngineModel)
-                DetailRow(label = "Detection Confidence", value = "${defect.aiConfidencePercent}% (Multi-spectral tensor pass)")
-                DetailRow(label = "Derailment Risk Index", value = "${defect.aiDerailmentRiskIndex} / 1.00 (Nadal Limit 0.80)")
-                DetailRow(label = "Crack Growth Velocity", value = "${defect.aiGrowthRateMmPerDay} mm/day (Warning: >0.15 mm/day)")
-                DetailRow(label = "Predicted Failure Horizon", value = "${defect.aiPredictedFailureDays} days to transverse rupture")
-                DetailRow(label = "Prescribed Speed Restriction", value = "Mandatory ${defect.aiRecommendedSpeedLimitKmH} km/h TSR active")
-                DetailRow(label = "Corrective Work Directive", value = defect.aiPrescribedAction)
-            }
-        }
-
-        // Analysis Modules
-        item {
-            SectionLabel(title = "DIAGNOSTIC & AUDIT WORKSPACE")
-
-            ListRow(
-                icon = Icons.Default.Straighten,
-                title = "Crack Measurement & Gauge",
-                subtitle = "Optical gauge: 46 mm · Reference calibrated",
-                trailing = "46 mm",
-                tone = Tone.CRITICAL,
-                onClick = onOpenMeasurement
-            )
-            ListRow(
-                icon = Icons.Default.Compare,
-                title = "Image Comparison",
-                subtitle = "12 Jun (31 mm) vs 18 Jun (46 mm)",
-                trailing = "+48%",
-                tone = Tone.WARNING,
-                onClick = onOpenComparison
-            )
-            ListRow(
-                icon = Icons.Default.ShowChart,
-                title = "Growth Progression Chart",
-                subtitle = "Propagation velocity: 15 mm over 37 days",
-                trailing = "Exceeds",
-                tone = Tone.CRITICAL,
-                onClick = onOpenGrowth
-            )
-            ListRow(
-                icon = Icons.Default.CameraAlt,
-                title = "Object Detection Breakdown",
-                subtitle = "Rail head anomaly, fasteners, concrete sleepers",
-                trailing = "Verified",
-                tone = Tone.INFO,
-                onClick = onOpenObjectDetection
-            )
-            ListRow(
-                icon = Icons.Default.Sensors,
-                title = "Alignment & Dynamic Vibration",
-                subtitle = "0.34g vertical acceleration peak at 14+320",
-                trailing = "0.34g",
-                tone = Tone.WARNING,
-                onClick = onOpenAlignment
-            )
-            ListRow(
-                icon = Icons.Default.VerifiedUser,
-                title = "Qualified Engineer Sign-Off",
-                subtitle = "Sign verification or authorize restriction release",
-                trailing = "Action",
-                tone = Tone.INFO,
-                onClick = onOpenVerify
-            )
-            ListRow(
-                icon = Icons.Default.Comment,
-                title = "Field Comments & Logs",
-                subtitle = "2 engineer notes recorded",
-                trailing = "2",
-                tone = Tone.NEUTRAL,
-                onClick = onOpenComments
+            Spacer(modifier = Modifier.height(6.dp))
+            PrimaryButton(
+                title = "Sign & Verify Defect Record",
+                onClick = onOpenVerify,
+                modifier = Modifier.testTag("verify_defect_action_btn")
             )
         }
     }
 }
 
 @Composable
-fun CrackMeasurementScreen(onBack: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
-    var measuredMm by remember { mutableFloatStateOf(46.0f) }
-    var isSaved by remember { mutableStateOf(false) }
+fun ActionToolTile(
+    title: String,
+    desc: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    val isDark = LocalIsDark.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
+            .border(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
+            .clickable { onClick() }
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF0284C7).copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(18.dp))
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White else Color(0xFF0F172A)
+            )
+            Text(
+                text = desc,
+                fontSize = 11.sp,
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = null,
+            tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+            modifier = Modifier.size(16.dp)
+        )
+    }
+}
 
-    LazyColumn(
+@Composable
+fun MetricRow(label: String, value: String) {
+    val isDark = LocalIsDark.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, fontSize = 12.sp, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+        Text(
+            text = value,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = if (isDark) Color.White else Color(0xFF0F172A)
+        )
+    }
+}
+
+@Composable
+fun CrackMeasurementScreen(onBack: () -> Unit) {
+    val isDark = LocalIsDark.current
+    val scope = rememberCoroutineScope()
+    var isTransmitting by remember { mutableStateOf(false) }
+    var transmitMsg by remember { mutableStateOf<String?>(null) }
+
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Crack Measurement",
-                subtitle = "CRK-2048 · Calibrated optical gauge verification",
-                onBack = onBack
-            )
-        }
+        SubScreenHeader(title = "Crack Width & Depth", subtitle = "Sub-millimeter optical measurement", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Optical Sensor Geometry", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+                MetricRow("Crack Surface Aperture", "2.42 mm (±0.05 mm)")
+                MetricRow("Estimated Depth Profile", "8.90 mm (Ultrasonic Verified)")
+                MetricRow("Crack Propagation Angle", "45° Oblique to Rail Web")
+                MetricRow("Stress Concentration K_t", "3.48")
 
-        item {
-            // Simulated Rail Head Surface Graphic with Crack Line
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF1E2630))
-                    .border(1.dp, colorScheme.outline, RoundedCornerShape(10.dp))
-                    .padding(16.dp)
-            ) {
-                Text(
-                    text = "OPTICAL SURFACE 10X ZOOM",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-
-                // Rail contour
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .align(Alignment.Center)
-                        .background(Color(0xFF2C3844))
-                )
-
-                // Crack fracture line
-                Box(
-                    modifier = Modifier
-                        .width((measuredMm * 4).dp)
-                        .height(6.dp)
-                        .align(Alignment.Center)
-                        .background(Color(0xFFE95D5D))
-                )
-
-                // Dimension callout
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Color.Black.copy(alpha = 0.75f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "GAUGE: ${String.format("%.1f", measuredMm)} mm (±0.4 mm)",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-            RailCard {
-                Text(
-                    text = "MANUAL CALIBRATION ADJUSTMENT",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { measuredMm = (measuredMm - 1f).coerceAtLeast(10f); isSaved = false },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(colorScheme.secondary)
-                    ) {
-                        Icon(imageVector = Icons.Default.Remove, contentDescription = "Decrease")
-                    }
-
-                    Text(
-                        text = "${String.format("%.1f", measuredMm)} mm",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = colorScheme.onSurface
-                    )
-
-                    IconButton(
-                        onClick = { measuredMm = (measuredMm + 1f).coerceAtMost(120f); isSaved = false },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(colorScheme.secondary)
-                    ) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = "Increase")
-                    }
+                Spacer(modifier = Modifier.height(14.dp))
+                if (transmitMsg != null) {
+                    Text(transmitMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-                Slider(
-                    value = measuredMm,
-                    onValueChange = { measuredMm = it; isSaved = false },
-                    valueRange = 10f..100f
+                PrimaryButton(
+                    title = if (isTransmitting) "Uploading Analysis..." else "Sync Measurement to Cloud DB",
+                    icon = Icons.Default.CloudUpload,
+                    onClick = {
+                        isTransmitting = true
+                        scope.launch {
+                            RailGuardFirebaseService.instance.recordAiAnalysis(
+                                "CRACK_MEASUREMENT",
+                                mapOf("apertureMm" to 2.42, "depthMm" to 8.90, "propagationAngle" to "45 deg", "kt" to 3.48)
+                            )
+                            isTransmitting = false
+                            transmitMsg = "Measurement synced to Cloud Telemetry ✓"
+                        }
+                    }
                 )
             }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-            PrimaryButton(
-                title = if (isSaved) "Measurement Saved ✓" else "Save Calibrated Measurement",
-                icon = Icons.Default.Check,
-                onClick = { isSaved = true }
-            )
         }
     }
 }
 
 @Composable
 fun GrowthAnalysisScreen(onBack: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
-    val history = listOf(
-        Triple("12 May", "18 mm", Tone.HEALTHY),
-        Triple("28 May", "31 mm", Tone.WARNING),
-        Triple("18 Jun", "46 mm", Tone.CRITICAL)
-    )
+    val scope = rememberCoroutineScope()
+    var isTransmitting by remember { mutableStateOf(false) }
+    var transmitMsg by remember { mutableStateOf<String?>(null) }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Crack Growth Analysis",
-                subtitle = "CRK-2048 · Propagation telemetry & rate threshold",
-                onBack = onBack
-            )
-        }
-
-        item {
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(
-                    text = "CRITICAL GROWTH ACCELERATION",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = toneColor(Tone.CRITICAL, LocalIsDark.current),
-                    fontWeight = FontWeight.Bold
-                )
+        SubScreenHeader(title = "Growth Dynamics", subtitle = "Paris law fatigue crack propagation", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Simulated Cycles To Critical Limit", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(8.dp))
+                Text("Under 25-ton axle load, estimated critical threshold reached in 1,200 freight cycles (~14 operational days).", fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+                MetricRow("Delta-K Stress Intensity", "24.6 MPa·m^(1/2)")
+                MetricRow("Fatigue Life Remaining", "14 Days at Current Tonnage")
+                MetricRow("Speed Restriction Required", "Yes (Max 30 km/h)")
 
-                Text(
-                    text = "+48% Growth in 21 Days",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = colorScheme.onSurface
-                )
-                Text(
-                    text = "Rate: 0.71 mm/day · Standard threshold is 0.15 mm/day.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.onSurfaceVariant
-                )
+                Spacer(modifier = Modifier.height(14.dp))
+                if (transmitMsg != null) {
+                    Text(transmitMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Visual progression steps
-                history.forEach { (date, length, tone) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = date,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = length,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = toneColor(tone, LocalIsDark.current)
+                PrimaryButton(
+                    title = if (isTransmitting) "Syncing..." else "Sync Fatigue Profile to Cloud",
+                    icon = Icons.Default.CloudUpload,
+                    onClick = {
+                        isTransmitting = true
+                        scope.launch {
+                            RailGuardFirebaseService.instance.recordAiAnalysis(
+                                "FATIGUE_GROWTH_PREDICTION",
+                                mapOf("deltaK" to 24.6, "remainingDays" to 14, "speedLimit" to 30)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            StatusPill(label = tone.name, tone = tone)
+                            isTransmitting = false
+                            transmitMsg = "Fatigue simulation archived in Cloud DB ✓"
                         }
                     }
-                }
-            }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(10.dp))
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(
-                    text = "PREDICTIVE ACTION TRIGGER",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Based on cyclic axle loading, crack will breach the 55 mm transverse failure risk limit within 11 days. Immediate rail replacement recommended.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -817,90 +642,43 @@ fun GrowthAnalysisScreen(onBack: () -> Unit) {
 
 @Composable
 fun ImageComparisonScreen(onBack: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+    var isTransmitting by remember { mutableStateOf(false) }
+    var transmitMsg by remember { mutableStateOf<String?>(null) }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Image Comparison",
-                subtitle = "Side-by-side surface progression review",
-                onBack = onBack
-            )
-        }
+        SubScreenHeader(title = "Historical Comparison", subtitle = "30-Day image delta comparison", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Visual Delta Detection", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Crack has extended by +4.2 mm since previous patrol on 24 August 2026.", fontSize = 12.sp)
 
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf("Current (18 Jun · 46mm)", "Previous (12 Jun · 31mm)").forEachIndexed { index, title ->
-                    val isSelected = selectedTab == index
-                    Button(
-                        onClick = { selectedTab = index },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isSelected) colorScheme.primary else colorScheme.surface,
-                            contentColor = if (isSelected) colorScheme.onPrimary else colorScheme.onSurface
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .border(1.dp, colorScheme.outline, RoundedCornerShape(8.dp))
-                    ) {
-                        Text(text = title, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                    }
+                Spacer(modifier = Modifier.height(14.dp))
+                if (transmitMsg != null) {
+                    Text(transmitMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
-            }
-        }
 
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(240.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF141C24))
-                    .border(1.dp, colorScheme.outline, RoundedCornerShape(10.dp))
-                    .padding(16.dp)
-            ) {
-                Text(
-                    text = if (selectedTab == 0) "CAPTURE 2024-06-18 · 46 MM" else "CAPTURE 2024-06-12 · 31 MM",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-
-                // Rail silhouette
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.7f)
-                        .height(90.dp)
-                        .align(Alignment.Center)
-                        .background(Color(0xFF23303E))
-                )
-
-                // Defect marker in image
-                Box(
-                    modifier = Modifier
-                        .width(if (selectedTab == 0) 120.dp else 75.dp)
-                        .height(8.dp)
-                        .align(Alignment.Center)
-                        .background(if (selectedTab == 0) Color(0xFFE95D5D) else Color(0xFFE3A336))
-                )
-
-                Text(
-                    text = if (selectedTab == 0) "Severe longitudinal growth (+15mm)" else "Initial baseline inspection",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    modifier = Modifier.align(Alignment.BottomStart)
+                PrimaryButton(
+                    title = if (isTransmitting) "Syncing..." else "Upload Delta Comparison to Cloud",
+                    icon = Icons.Default.CloudUpload,
+                    onClick = {
+                        isTransmitting = true
+                        scope.launch {
+                            RailGuardFirebaseService.instance.recordAiAnalysis(
+                                "IMAGE_DELTA_COMPARISON",
+                                mapOf("extensionMm" to 4.2, "baselineDate" to "2026-08-24")
+                            )
+                            isTransmitting = false
+                            transmitMsg = "Visual delta synced to Cloud DB ✓"
+                        }
+                    }
                 )
             }
         }
@@ -909,252 +687,302 @@ fun ImageComparisonScreen(onBack: () -> Unit) {
 
 @Composable
 fun ObjectDetectionScreen(onBack: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var isTransmitting by remember { mutableStateOf(false) }
+    var transmitMsg by remember { mutableStateOf<String?>(null) }
 
-    val detections = listOf(
-        Triple("Rail Head Surface", "Gauge corner longitudinal crack (46mm)", Tone.CRITICAL),
-        Triple("Fastener Clip #1", "E-clip tension nominal at 220 Nm", Tone.HEALTHY),
-        Triple("Fastener Clip #2", "E-clip loose / slight displacement", Tone.WARNING),
-        Triple("Concrete Sleeper #14", "Prestressed concrete - No cracks detected", Tone.HEALTHY),
-        Triple("Ballast Profile", "Clean shoulder, proper drainage angle", Tone.HEALTHY)
-    )
-
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Object Detection",
-                subtitle = "Multimodal rail component segmentation",
-                onBack = onBack
-            )
-        }
+        SubScreenHeader(title = "AI Object Segmentation", subtitle = "Multi-class track components", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                MetricRow("Rail Head & Web", "Detected (99% conf)")
+                MetricRow("Sleeper Concrete Block", "Detected (96% conf)")
+                MetricRow("Pandrol Fastener Clips", "1 Present, 1 Loose")
+                MetricRow("Ballast Bed Level", "Normal Clearance")
 
-        items(detections) { (comp, status, tone) ->
-            ListRow(
-                icon = when (tone) {
-                    Tone.CRITICAL -> Icons.Default.Warning
-                    Tone.WARNING -> Icons.Default.PriorityHigh
-                    else -> Icons.Default.CheckCircle
-                },
-                title = comp,
-                subtitle = status,
-                trailing = tone.name,
-                tone = tone
-            )
+                Spacer(modifier = Modifier.height(14.dp))
+                if (transmitMsg != null) {
+                    Text(transmitMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                PrimaryButton(
+                    title = if (isTransmitting) "Syncing..." else "Push AI Segmentation to Cloud",
+                    icon = Icons.Default.CloudUpload,
+                    onClick = {
+                        isTransmitting = true
+                        scope.launch {
+                            RailGuardFirebaseService.instance.recordAiAnalysis(
+                                "AI_OBJECT_SEGMENTATION",
+                                mapOf("railheadConf" to 0.99, "sleeperConf" to 0.96, "fastenerState" to "Loose")
+                            )
+                            isTransmitting = false
+                            transmitMsg = "Segmentation telemetry saved to Cloud ✓"
+                        }
+                    }
+                )
+            }
         }
     }
 }
 
 @Composable
 fun AlignmentAnalysisScreen(onBack: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var isTransmitting by remember { mutableStateOf(false) }
+    var transmitMsg by remember { mutableStateOf<String?>(null) }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Alignment & Dynamics",
-                subtitle = "Inertial telemetry at chainage 14+320",
-                onBack = onBack
-            )
-        }
+        SubScreenHeader(title = "Track Alignment", subtitle = "Gauge & cant geometric evaluation", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                MetricRow("Standard Track Gauge", "1435.0 mm")
+                MetricRow("Current Measured Gauge", "1438.2 mm (+3.2 mm)")
+                MetricRow("Cross-Level Cant", "2.1 mm (Within Tolerance)")
+                MetricRow("Twist over 3m Base", "1.4 mm/m")
 
-        item {
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(
-                    text = "TRACK GEOMETRY TOLERANCES",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.Bold
+                Spacer(modifier = Modifier.height(14.dp))
+                if (transmitMsg != null) {
+                    Text(transmitMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                PrimaryButton(
+                    title = if (isTransmitting) "Syncing..." else "Upload Track Geometry to Cloud",
+                    icon = Icons.Default.CloudUpload,
+                    onClick = {
+                        isTransmitting = true
+                        scope.launch {
+                            RailGuardFirebaseService.instance.recordAiAnalysis(
+                                "TRACK_ALIGNMENT_GEOMETRY",
+                                mapOf("gauge" to 1438.2, "cant" to 2.1, "twist" to 1.4)
+                            )
+                            isTransmitting = false
+                            transmitMsg = "Track geometry saved to Cloud DB ✓"
+                        }
+                    }
                 )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                DetailRow(label = "Nominal Track Gauge", value = "1,435.0 mm")
-                DetailRow(label = "Measured Gauge", value = "1,438.2 mm (+3.2 mm)")
-                DetailRow(label = "Horizontal Alignment", value = "±1.8 mm (Pass)")
-                DetailRow(label = "Vertical Cross-Level", value = "2.1 mm (Pass)")
-                DetailRow(label = "Peak Vertical Accel", value = "0.34g (Elevated)")
-                DetailRow(label = "Lateral Jerk Index", value = "0.08 m/s³ (Nominal)")
             }
         }
     }
 }
 
 @Composable
-fun EngineerVerificationScreen(
-    onSigned: () -> Unit,
-    onBack: () -> Unit
-) {
-    val colorScheme = MaterialTheme.colorScheme
-    var isSigned by remember { mutableStateOf(false) }
+fun EngineerVerificationScreen(onSigned: () -> Unit, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var engineerNotes by remember { mutableStateOf("") }
+    var signedBy by remember { mutableStateOf("E. Chen, Lead Track Inspector #4092") }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Engineer Sign-Off",
-                subtitle = "Qualified safety endorsement & audit logging",
-                onBack = onBack
-            )
-        }
-
-        item {
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(
-                    text = "SAFETY ENDORSEMENT",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                DetailRow(label = "Inspector", value = "E. Chen (Safety Lead)")
-                DetailRow(label = "Engineering License", value = "IRSE-UK #849201")
-                DetailRow(label = "Target Defect", value = "CRK-2048 (Gauge crack)")
-                DetailRow(label = "Action Decision", value = "Impose 25 km/h limit")
-                DetailRow(label = "Sign-Off Status", value = if (isSigned) "Digitally Signed" else "Pending Signature")
+        SubScreenHeader(
+            title = "Engineer Sign-Off",
+            subtitle = "Official safety audit certificate",
+            onBack = {
+                keyboardController?.hide()
+                focusManager.clearFocus(force = true)
+                onBack()
             }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-            PrimaryButton(
-                title = if (isSigned) "Sign-Off Confirmed ✓" else "Sign with Digital Certificate",
-                icon = Icons.Default.VerifiedUser,
-                onClick = {
-                    isSigned = true
-                    onSigned()
-                }
-            )
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Verification Authority", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = signedBy,
+                    onValueChange = { signedBy = it },
+                    label = { Text("Inspector Name & ID") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = engineerNotes,
+                    onValueChange = { engineerNotes = it },
+                    label = { Text("Engineering Audit Notes") },
+                    placeholder = { Text("e.g. Verified with gauge caliper. Immediate weld scheduled.") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                PrimaryButton(
+                    title = "Apply Cryptographic Field Signature",
+                    onClick = {
+                        keyboardController?.hide()
+                        focusManager.clearFocus(force = true)
+                        scope.launch {
+                            RailGuardFirebaseService.instance.logSafetyAuditEvent(
+                                "ENGINEER_SIGNOFF",
+                                mapOf("signedBy" to signedBy, "notes" to engineerNotes, "timestamp" to System.currentTimeMillis())
+                            )
+                        }
+                        onSigned()
+                    }
+                )
+            }
         }
     }
 }
 
 @Composable
 fun CommentsScreen(onBack: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var newComment by remember { mutableStateOf("") }
     val comments = remember {
         mutableStateListOf(
-            Pair("E. Chen · 12 min ago", "Surface crack confirmed during patrol. 25 km/h restriction notice dispatched to control center."),
-            Pair("M. Alvarez · 35 min ago", "Maintenance crew MT-881 scheduled for clip replacement and rail head grinding.")
+            "Shift 1: Noticed light ballast vibration during 08:30 express train passage.",
+            "Shift 2: Dispatch gang #3 notified for speed restriction flag installation."
         )
     }
-    var newComment by remember { mutableStateOf("") }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Engineering Notes",
-                subtitle = "Field notes & dispatcher instructions",
-                onBack = onBack
-            )
-        }
-
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = newComment,
-                    onValueChange = { newComment = it },
-                    placeholder = { Text("Add field engineering note...") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = {
-                        if (newComment.isNotBlank()) {
-                            comments.add(0, Pair("E. Chen · Just now", newComment.trim()))
-                            newComment = ""
+        SubScreenHeader(
+            title = "Inspector Log Notes",
+            subtitle = "Field observations & remarks",
+            onBack = {
+                keyboardController?.hide()
+                focusManager.clearFocus(force = true)
+                onBack()
+            }
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        OutlinedTextField(
+            value = newComment,
+            onValueChange = { newComment = it },
+            placeholder = { Text("Add comment or field observation...") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            trailingIcon = {
+                IconButton(onClick = {
+                    if (newComment.isNotBlank()) {
+                        val textToSave = newComment
+                        keyboardController?.hide()
+                        focusManager.clearFocus(force = true)
+                        comments.add(0, textToSave)
+                        newComment = ""
+                        scope.launch {
+                            val author = RailGuardFirebaseService.instance.currentUser?.email ?: "Lead Inspector"
+                            RailGuardFirebaseService.instance.saveComment("DEF-2048", author, textToSave)
                         }
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(colorScheme.primary)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Send,
-                        contentDescription = "Send",
-                        tint = colorScheme.onPrimary
-                    )
+                    }
+                }) {
+                    Icon(Icons.Default.Send, contentDescription = "Add")
                 }
             }
-        }
-
-        items(comments) { (author, text) ->
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(
-                    text = author,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.onSurface
-                )
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(comments) { comment ->
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Text(text = comment, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+                }
             }
         }
     }
 }
 
 @Composable
-fun AllObservationsScreen(
-    observations: List<Observation>,
-    onBack: () -> Unit
-) {
-    val colorScheme = MaterialTheme.colorScheme
+fun AllObservationsScreen(observations: List<ObservationItem>, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var isSyncingObs by remember { mutableStateOf(false) }
+    var syncObsMsg by remember { mutableStateOf<String?>(null) }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "All Observations",
-                subtitle = "Complete sensor and visual finding history",
-                onBack = onBack
-            )
+        SubScreenHeader(title = "All Observations", subtitle = "${observations.size} logged field observations", onBack = onBack)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (syncObsMsg != null) {
+            Text(syncObsMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
         }
 
-        items(observations) { obs ->
-            ListRow(
-                icon = Icons.Default.Visibility,
-                title = obs.title,
-                subtitle = obs.meta,
-                trailing = obs.length.ifEmpty { obs.date },
-                tone = obs.tone
+        OutlinedButton(
+            onClick = {
+                isSyncingObs = true
+                scope.launch {
+                    observations.forEach { obs ->
+                        RailGuardFirebaseService.instance.saveObservation(obs)
+                    }
+                    isSyncingObs = false
+                    syncObsMsg = "All observations pushed to Cloud DB ✓"
+                }
+            },
+            enabled = !isSyncingObs,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(if (isSyncingObs) "Syncing..." else "Sync Observations to Cloud Telemetry", fontSize = 12.sp)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(observations, key = { it.id }) { obs ->
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = obs.title, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(text = "${obs.chainage} · ${obs.time}", fontSize = 11.sp, color = Color.Gray)
+                        }
+                        StatusChip(title = obs.severity, tone = obs.tone)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SubScreenHeader(title: String, subtitle: String, onBack: () -> Unit) {
+    val isDark = LocalIsDark.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+        }
+        Column {
+            Text(
+                text = title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White else Color(0xFF0F172A)
+            )
+            Text(
+                text = subtitle,
+                fontSize = 12.sp,
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
             )
         }
     }

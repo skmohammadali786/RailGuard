@@ -1,0 +1,1620 @@
+package com.example.railguard.data
+
+import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.example.railguard.model.Defect
+import com.example.railguard.model.InspectionRecord
+import com.example.railguard.model.MaintenanceTask
+import com.example.railguard.model.ObservationItem
+import com.example.railguard.model.Tone
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+
+data class FirebaseUser(
+    val localId: String,
+    val email: String,
+    val displayName: String = "",
+    val idToken: String = "",
+    val refreshToken: String = "",
+    val expiresIn: String = ""
+)
+
+sealed class AuthState {
+    object Unauthenticated : AuthState()
+    object Authenticating : AuthState()
+    data class Authenticated(val user: FirebaseUser) : AuthState()
+    data class Error(val message: String) : AuthState()
+}
+
+data class ConnectionTestResult(
+    val isSuccess: Boolean,
+    val httpCode: Int,
+    val latencyMs: Long,
+    val message: String,
+    val rawResponse: String = ""
+)
+
+enum class DatabaseBackendType {
+    REALTIME_DATABASE,
+    FIRESTORE
+}
+
+/**
+ * RailGuardFirebaseService:
+ * Real Firebase backend integration connected directly to Firebase Cloud REST APIs:
+ * - Firebase Authentication (Identity Toolkit v1 API)
+ * - Firebase Realtime Database & Cloud Firestore REST endpoints
+ * - Permanent credential persistence via Android SharedPreferences
+ * - Direct live responses from production cloud servers
+ */
+class RailGuardFirebaseService private constructor() {
+
+    companion object {
+        val instance by lazy { RailGuardFirebaseService() }
+        private const val PREFS_NAME = "railguard_firebase_prefs"
+        private const val KEY_PROJECT_ID = "firebase_project_id"
+        private const val KEY_WEB_API_KEY = "firebase_web_api_key"
+        private const val KEY_DB_URL = "firebase_database_url"
+        private const val KEY_DB_TYPE = "firebase_database_type"
+        private const val KEY_USER_ID = "firebase_user_id"
+        private const val KEY_USER_EMAIL = "firebase_user_email"
+        private const val KEY_USER_NAME = "firebase_user_name"
+        private const val KEY_ID_TOKEN = "firebase_id_token"
+        private const val KEY_REFRESH_TOKEN = "firebase_refresh_token"
+
+        // Server-Side Pre-Configured Firebase Cloud Project Credentials
+        const val DEFAULT_PROJECT_NAME = "railguard"
+        const val DEFAULT_PROJECT_ID = "railguard-72a70"
+        const val DEFAULT_PROJECT_NUMBER = "590063963377"
+        const val DEFAULT_APP_ID = "1:590063963377:android:4c81408ab31a67469e6d50"
+        const val DEFAULT_WEB_API_KEY = "AIzaSyDzM8_dgvY9DHUWh9ZZJI-BQ8uwl4OX1uA"
+        const val DEFAULT_DB_URL = "https://railguard-72a70-default-rtdb.asia-southeast1.firebasedatabase.app"
+        const val DEFAULT_STORAGE_BUCKET = "railguard-72a70.firebasestorage.app"
+    }
+
+    private var sharedPreferences: SharedPreferences? = null
+
+    // Server-Side Pre-Configured Firebase Backend
+    var projectId by mutableStateOf(DEFAULT_PROJECT_ID)
+    var webApiKey by mutableStateOf(DEFAULT_WEB_API_KEY)
+    var databaseUrl by mutableStateOf(DEFAULT_DB_URL)
+    var databaseType by mutableStateOf(DatabaseBackendType.REALTIME_DATABASE)
+
+    var authState by mutableStateOf<AuthState>(AuthState.Unauthenticated)
+    var currentUser by mutableStateOf<FirebaseUser?>(null)
+
+    var isSyncing by mutableStateOf(false)
+    var isTestingConnection by mutableStateOf(false)
+    var lastSyncTimestamp by mutableStateOf("Never synced")
+    var syncStatusMessage by mutableStateOf("Ready to connect with central safety cloud database")
+    var isConnectedToFirebase by mutableStateOf(false)
+    var lastTestResult by mutableStateOf<ConnectionTestResult?>(null)
+
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    fun initialize(context: Context) {
+        if (sharedPreferences != null) return
+        sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+        sharedPreferences?.let { prefs ->
+            val savedProjectId = prefs.getString(KEY_PROJECT_ID, null)
+            val savedApiKey = prefs.getString(KEY_WEB_API_KEY, null)
+            val savedDbUrl = prefs.getString(KEY_DB_URL, null)
+
+            // Ensure server-configured credentials are used
+            projectId = if (!savedProjectId.isNullOrBlank() && savedProjectId != "railguard-official") savedProjectId else DEFAULT_PROJECT_ID
+            webApiKey = if (!savedApiKey.isNullOrBlank()) savedApiKey else DEFAULT_WEB_API_KEY
+            databaseUrl = if (!savedDbUrl.isNullOrBlank() && !savedDbUrl.contains("railguard-official") && !savedDbUrl.endsWith(".firebaseio.com")) savedDbUrl else DEFAULT_DB_URL
+
+            // Auto-persist valid server-side credentials
+            prefs.edit().apply {
+                putString(KEY_PROJECT_ID, projectId)
+                putString(KEY_WEB_API_KEY, webApiKey)
+                putString(KEY_DB_URL, databaseUrl)
+                apply()
+            }
+
+            val savedType = prefs.getString(KEY_DB_TYPE, DatabaseBackendType.REALTIME_DATABASE.name)
+            databaseType = try {
+                DatabaseBackendType.valueOf(savedType ?: DatabaseBackendType.REALTIME_DATABASE.name)
+            } catch (e: Exception) {
+                DatabaseBackendType.REALTIME_DATABASE
+            }
+
+            // Restore user session if saved
+            val savedUserId = prefs.getString(KEY_USER_ID, null)
+            val savedEmail = prefs.getString(KEY_USER_EMAIL, null)
+            val savedToken = prefs.getString(KEY_ID_TOKEN, null)
+            if (!savedUserId.isNullOrEmpty() && !savedEmail.isNullOrEmpty() && !savedToken.isNullOrEmpty()) {
+                val user = FirebaseUser(
+                    localId = savedUserId,
+                    email = savedEmail,
+                    displayName = prefs.getString(KEY_USER_NAME, "") ?: "",
+                    idToken = savedToken,
+                    refreshToken = prefs.getString(KEY_REFRESH_TOKEN, "") ?: ""
+                )
+                currentUser = user
+                authState = AuthState.Authenticated(user)
+                isConnectedToFirebase = true
+                syncStatusMessage = "Session restored: ${user.email}"
+            }
+        }
+    }
+
+    fun getEffectiveDbUrl(): String {
+        return if (databaseUrl.isBlank() || databaseUrl.contains("railguard-official") || databaseUrl.endsWith(".firebaseio.com")) {
+            DEFAULT_DB_URL
+        } else {
+            databaseUrl
+        }
+    }
+
+    fun getEffectiveApiKey(): String {
+        return if (webApiKey.isBlank()) DEFAULT_WEB_API_KEY else webApiKey
+    }
+
+    fun saveConfig(newProjectId: String, newApiKey: String, newDbUrl: String, newType: DatabaseBackendType) {
+        projectId = newProjectId.trim()
+        webApiKey = newApiKey.trim()
+        databaseUrl = newDbUrl.trim().removeSuffix("/")
+        databaseType = newType
+
+        sharedPreferences?.edit()?.apply {
+            putString(KEY_PROJECT_ID, projectId)
+            putString(KEY_WEB_API_KEY, webApiKey)
+            putString(KEY_DB_URL, databaseUrl)
+            putString(KEY_DB_TYPE, databaseType.name)
+            apply()
+        }
+
+        syncStatusMessage = "Cloud configuration updated for $projectId"
+    }
+
+    private fun persistUser(user: FirebaseUser?) {
+        sharedPreferences?.edit()?.apply {
+            if (user != null) {
+                putString(KEY_USER_ID, user.localId)
+                putString(KEY_USER_EMAIL, user.email)
+                putString(KEY_USER_NAME, user.displayName)
+                putString(KEY_ID_TOKEN, user.idToken)
+                putString(KEY_REFRESH_TOKEN, user.refreshToken)
+            } else {
+                remove(KEY_USER_ID)
+                remove(KEY_USER_EMAIL)
+                remove(KEY_USER_NAME)
+                remove(KEY_ID_TOKEN)
+                remove(KEY_REFRESH_TOKEN)
+            }
+            apply()
+        }
+    }
+
+    // ==========================================
+    // 1. FIREBASE AUTHENTICATION (Real REST API)
+    // ==========================================
+
+    suspend fun signInWithEmailAndPassword(
+        email: String,
+        pass: String,
+        onSuccess: (FirebaseUser) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val apiKey = getEffectiveApiKey()
+        webApiKey = apiKey
+
+        authState = AuthState.Authenticating
+        syncStatusMessage = "Authenticating with secure cloud identity service..."
+
+        withContext(Dispatchers.IO) {
+            try {
+                val endpoint = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$apiKey"
+                val jsonPayload = JSONObject().apply {
+                    put("email", email.trim())
+                    put("password", pass)
+                    put("returnSecureToken", true)
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 10000
+                    readTimeout = 10000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+
+                OutputStreamWriter(conn.outputStream).use { writer ->
+                    writer.write(jsonPayload.toString())
+                    writer.flush()
+                }
+
+                val responseCode = conn.responseCode
+                if (responseCode == 200) {
+                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                    val responseStr = reader.readText()
+                    reader.close()
+
+                    val json = JSONObject(responseStr)
+                    val user = FirebaseUser(
+                        localId = json.getString("localId"),
+                        email = json.optString("email", email),
+                        displayName = json.optString("displayName", email.substringBefore("@")),
+                        idToken = json.optString("idToken", ""),
+                        refreshToken = json.optString("refreshToken", ""),
+                        expiresIn = json.optString("expiresIn", "3600")
+                    )
+
+                    // Background sync of inspector profile and audit log on service scope (independent of composable lifecycle)
+                    this@RailGuardFirebaseService.scope.launch {
+                        try {
+                            saveInspectorProfileToFirebase(user)
+                            logSafetyAuditEvent("USER_SIGN_IN", "Inspector ${user.email} signed in successfully")
+                        } catch (e: Exception) {
+                            Log.w("RailGuardFirebase", "Failed to sync profile on login: ${e.message}")
+                        }
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        currentUser = user
+                        authState = AuthState.Authenticated(user)
+                        persistUser(user)
+                        isConnectedToFirebase = true
+                        syncStatusMessage = "Successfully authenticated: ${user.email}"
+                        onSuccess(user)
+                    }
+                } else {
+                    val errorStream = conn.errorStream
+                    val errStr = if (errorStream != null) {
+                        val errReader = BufferedReader(InputStreamReader(errorStream))
+                        val text = errReader.readText()
+                        errReader.close()
+                        text
+                    } else ""
+
+                    // If account doesn't exist yet on Firebase, auto-register seamless session
+                    if (errStr.contains("INVALID_LOGIN_CREDENTIALS") || errStr.contains("EMAIL_NOT_FOUND")) {
+                        signUpWithEmailAndPassword(
+                            name = email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() },
+                            email = email,
+                            pass = pass,
+                            onSuccess = onSuccess,
+                            onError = { autoSignErr ->
+                                val finalMsg = if (autoSignErr.contains("already in use") || autoSignErr.contains("EMAIL_EXISTS")) {
+                                    "Incorrect password for registered account. Please check your credentials or reset password."
+                                } else {
+                                    autoSignErr
+                                }
+                                authState = AuthState.Error(finalMsg)
+                                syncStatusMessage = finalMsg
+                                onError(finalMsg)
+                            }
+                        )
+                        return@withContext
+                    }
+
+                    val errorMsg = if (errStr.isNotBlank()) {
+                        parseFirebaseError(errStr, responseCode)
+                    } else {
+                        "Firebase Auth error: HTTP $responseCode"
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        authState = AuthState.Error(errorMsg)
+                        syncStatusMessage = errorMsg
+                        onError(errorMsg)
+                    }
+                }
+            } catch (e: CancellationException) {
+                // Do not catch or log cancellation exceptions as errors
+                throw e
+            } catch (e: Exception) {
+                val errorMsg = "Network connection failed: ${e.localizedMessage ?: e.message}"
+                Log.e("RailGuardFirebase", "Sign in error", e)
+                withContext(Dispatchers.Main) {
+                    authState = AuthState.Error(errorMsg)
+                    syncStatusMessage = errorMsg
+                    onError(errorMsg)
+                }
+            }
+        }
+    }
+
+    suspend fun signUpWithEmailAndPassword(
+        name: String,
+        email: String,
+        pass: String,
+        onSuccess: (FirebaseUser) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val apiKey = getEffectiveApiKey()
+        webApiKey = apiKey
+
+        authState = AuthState.Authenticating
+        syncStatusMessage = "Creating user account in safety cloud..."
+
+        withContext(Dispatchers.IO) {
+            try {
+                val endpoint = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey"
+                val jsonPayload = JSONObject().apply {
+                    put("email", email.trim())
+                    put("password", pass)
+                    put("returnSecureToken", true)
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 10000
+                    readTimeout = 10000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+
+                OutputStreamWriter(conn.outputStream).use { writer ->
+                    writer.write(jsonPayload.toString())
+                    writer.flush()
+                }
+
+                val responseCode = conn.responseCode
+                if (responseCode == 200) {
+                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                    val responseStr = reader.readText()
+                    reader.close()
+
+                    val json = JSONObject(responseStr)
+                    val idToken = json.optString("idToken", "")
+                    val localId = json.getString("localId")
+
+                    // Update displayName in Firebase
+                    if (name.isNotBlank() && idToken.isNotBlank()) {
+                        updateProfileDisplayName(idToken, name)
+                    }
+
+                    val user = FirebaseUser(
+                        localId = localId,
+                        email = json.optString("email", email),
+                        displayName = name.ifBlank { email.substringBefore("@") },
+                        idToken = idToken,
+                        refreshToken = json.optString("refreshToken", ""),
+                        expiresIn = json.optString("expiresIn", "3600")
+                    )
+
+                    // Background sync of inspector profile and audit log on service scope (independent of composable lifecycle)
+                    this@RailGuardFirebaseService.scope.launch {
+                        try {
+                            saveInspectorProfileToFirebase(user)
+                            logSafetyAuditEvent("USER_REGISTER", "New inspector registered: ${user.email} ($name)")
+                        } catch (e: Exception) {
+                            Log.w("RailGuardFirebase", "Failed to sync profile on register: ${e.message}")
+                        }
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        currentUser = user
+                        authState = AuthState.Authenticated(user)
+                        persistUser(user)
+                        isConnectedToFirebase = true
+                        syncStatusMessage = "Firebase account registered: ${user.email}"
+                        onSuccess(user)
+                    }
+                } else {
+                    val errorStream = conn.errorStream
+                    val errorMsg = if (errorStream != null) {
+                        val errReader = BufferedReader(InputStreamReader(errorStream))
+                        val errStr = errReader.readText()
+                        errReader.close()
+                        parseFirebaseError(errStr, responseCode)
+                    } else {
+                        "Firebase Registration error: HTTP $responseCode"
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        authState = AuthState.Error(errorMsg)
+                        syncStatusMessage = errorMsg
+                        onError(errorMsg)
+                    }
+                }
+            } catch (e: CancellationException) {
+                // Do not catch or log cancellation exceptions as errors
+                throw e
+            } catch (e: Exception) {
+                val errorMsg = "Registration failed: ${e.localizedMessage ?: e.message}"
+                Log.e("RailGuardFirebase", "Sign up error", e)
+                withContext(Dispatchers.Main) {
+                    authState = AuthState.Error(errorMsg)
+                    syncStatusMessage = errorMsg
+                    onError(errorMsg)
+                }
+            }
+        }
+    }
+
+    private fun updateProfileDisplayName(idToken: String, displayName: String) {
+        try {
+            val apiKey = getEffectiveApiKey()
+            val endpoint = "https://identitytoolkit.googleapis.com/v1/accounts:update?key=$apiKey"
+            val payload = JSONObject().apply {
+                put("idToken", idToken)
+                put("displayName", displayName)
+                put("returnSecureToken", false)
+            }
+            val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 5000
+                readTimeout = 5000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            }
+            OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
+            conn.responseCode
+        } catch (e: Exception) {
+            Log.w("RailGuardFirebase", "Could not update display name: ${e.message}")
+        }
+    }
+
+    suspend fun saveInspectorProfileToFirebase(user: FirebaseUser, role: String = "Field Track Inspector") {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = user.idToken.let { if (it.isNotBlank()) "?auth=$it" else "" }
+                val endpoint = "${getEffectiveDbUrl()}/railguard/inspectors/${user.localId}.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", user.localId)
+                    put("name", user.displayName)
+                    put("email", user.email)
+                    put("role", role)
+                    put("registeredAt", System.currentTimeMillis())
+                    put("lastActiveAt", System.currentTimeMillis())
+                    put("status", "ACTIVE")
+                }
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Could not sync inspector profile to RTDB: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun logSafetyAuditEvent(action: String, details: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val logId = "log_${System.currentTimeMillis()}"
+                val endpoint = "${getEffectiveDbUrl()}/railguard/audit_logs/$logId.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", logId)
+                    put("action", action)
+                    put("details", details)
+                    put("timestamp", System.currentTimeMillis())
+                    put("actorEmail", currentUser?.email ?: "e.chen@railguard.field")
+                    put("actorName", currentUser?.displayName ?: "Field Inspector")
+                }
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Could not write audit log: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun logSafetyAuditEvent(action: String, details: Map<String, Any?>) {
+        val detailsStr = JSONObject(details).toString()
+        logSafetyAuditEvent(action, detailsStr)
+    }
+
+    suspend fun uploadInspectionToFirebase(inspection: InspectionRecord): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/inspections/${inspection.id}.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", inspection.id)
+                    put("section", inspection.section)
+                    put("date", inspection.date)
+                    put("inspector", inspection.inspector)
+                    put("status", inspection.status)
+                    put("framesCount", inspection.framesCount)
+                    put("detectionsCount", inspection.detectionsCount)
+                    put("detectedCrackTitle", inspection.detectedCrackTitle)
+                    put("recommendedMaintenanceAction", inspection.recommendedMaintenanceAction)
+                    put("syncedAt", System.currentTimeMillis())
+                }
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                val code = conn.responseCode
+                code in 200..299
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("RailGuardFirebase", "Failed to upload inspection: ${e.message}")
+                false
+            }
+        }
+    }
+
+    fun signOut() {
+        currentUser = null
+        authState = AuthState.Unauthenticated
+        persistUser(null)
+        syncStatusMessage = "Signed out of safety cloud"
+    }
+
+    private fun parseFirebaseError(rawJson: String, defaultCode: Int): String {
+        return try {
+            val json = JSONObject(rawJson)
+            val errObj = json.optJSONObject("error")
+            val message = errObj?.optString("message", "") ?: ""
+            when {
+                message.contains("EMAIL_NOT_FOUND") -> "No user found with this email address."
+                message.contains("INVALID_PASSWORD") -> "Incorrect password entered."
+                message.contains("INVALID_LOGIN_CREDENTIALS") -> "Invalid email or password credentials."
+                message.contains("USER_DISABLED") -> "This account has been disabled by the administrator."
+                message.contains("EMAIL_EXISTS") -> "This email address is already in use by another account."
+                message.contains("OPERATION_NOT_ALLOWED") -> "Password sign-in is disabled in Cloud Console."
+                message.contains("TOO_MANY_ATTEMPTS_TRY_LATER") -> "Too many failed attempts. Please try again later."
+                message.contains("API_KEY_INVALID") -> "Invalid Web API Key. Check Settings → Cloud Sync."
+                message.contains("CONFIGURATION_NOT_FOUND") -> "Cloud project configuration not found."
+                message.isNotBlank() -> "Cloud Error: $message"
+                else -> "HTTP $defaultCode: Operation failed"
+            }
+        } catch (e: Exception) {
+            "HTTP $defaultCode: $rawJson"
+        }
+    }
+
+    // ==========================================
+    // 2. CONNECTION HEALTHCHECK & TEST (Real Network Call)
+    // ==========================================
+
+    suspend fun testFirebaseConnection(onComplete: (ConnectionTestResult) -> Unit) {
+        isTestingConnection = true
+        withContext(Dispatchers.IO) {
+            val startTime = System.currentTimeMillis()
+            try {
+                // Ping Realtime Database endpoint root or shallow query
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val activeDbUrl = getEffectiveDbUrl()
+                val targetUrl = if (databaseType == DatabaseBackendType.REALTIME_DATABASE) {
+                    "$activeDbUrl/.json$authParam"
+                } else {
+                    "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents"
+                }
+
+                val conn = (URL(targetUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                    if (databaseType == DatabaseBackendType.FIRESTORE && currentUser?.idToken?.isNotBlank() == true) {
+                        setRequestProperty("Authorization", "Bearer ${currentUser?.idToken}")
+                    }
+                }
+
+                val code = conn.responseCode
+                val latency = System.currentTimeMillis() - startTime
+
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val responseBody = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                val result = when (code) {
+                    200 -> ConnectionTestResult(
+                        isSuccess = true,
+                        httpCode = code,
+                        latencyMs = latency,
+                        message = "Connected to Central Cloud ($latency ms). Database is live and responsive.",
+                        rawResponse = responseBody.take(200)
+                    )
+                    401, 403 -> ConnectionTestResult(
+                        isSuccess = true, // Network reached, security rules enforce auth
+                        httpCode = code,
+                        latencyMs = latency,
+                        message = "Connected to Central Cloud ($latency ms). Real-time database is online (Rules require authentication).",
+                        rawResponse = responseBody.take(200)
+                    )
+                    404 -> ConnectionTestResult(
+                        isSuccess = false,
+                        httpCode = code,
+                        latencyMs = latency,
+                        message = "Database endpoint not found (HTTP 404). Verify your Database URL.",
+                        rawResponse = responseBody.take(200)
+                    )
+                    else -> ConnectionTestResult(
+                        isSuccess = false,
+                        httpCode = code,
+                        latencyMs = latency,
+                        message = "Central Cloud responded with HTTP $code in $latency ms.",
+                        rawResponse = responseBody.take(200)
+                    )
+                }
+
+                withContext(Dispatchers.Main) {
+                    isTestingConnection = false
+                    lastTestResult = result
+                    isConnectedToFirebase = result.isSuccess
+                    syncStatusMessage = result.message
+                    onComplete(result)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val latency = System.currentTimeMillis() - startTime
+                val result = ConnectionTestResult(
+                    isSuccess = false,
+                    httpCode = -1,
+                    latencyMs = latency,
+                    message = "Connection failed: ${e.localizedMessage ?: e.message}"
+                )
+                withContext(Dispatchers.Main) {
+                    isTestingConnection = false
+                    lastTestResult = result
+                    isConnectedToFirebase = false
+                    syncStatusMessage = result.message
+                    onComplete(result)
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // 3. DATABASE SYNC & PERSISTENCE (Real REST API)
+    // ==========================================
+
+    /**
+     * Pushes current local defects, tasks, and inspections to Firebase Realtime Database
+     */
+    suspend fun syncAllToFirebase(
+        defects: List<Defect>,
+        tasks: List<MaintenanceTask>,
+        inspections: List<InspectionRecord>,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val activeDb = getEffectiveDbUrl()
+        isSyncing = true
+        syncStatusMessage = "Syncing ${defects.size} defects & ${tasks.size} tasks to cloud database..."
+
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val dbEndpoint = "$activeDb/railguard.json$authParam"
+
+                val payload = JSONObject().apply {
+                    put("syncedAt", System.currentTimeMillis())
+                    put("syncedBy", currentUser?.email ?: "field-inspector@railguard.io")
+                    put("appVersion", "1.0.0")
+
+                    // Serialize defects
+                    val defectsObj = JSONObject()
+                    defects.forEach { defect ->
+                        defectsObj.put(defect.id, JSONObject().apply {
+                            put("id", defect.id)
+                            put("title", defect.title)
+                            put("section", defect.section)
+                            put("score", defect.score)
+                            put("tone", defect.tone.name)
+                            put("time", defect.time)
+                            put("detail", defect.detail)
+                            put("estimatedLength", defect.estimatedLength)
+                            put("latitude", defect.latitude)
+                            put("longitude", defect.longitude)
+                            put("riskScore", defect.riskScore)
+                            put("chainageCoordinate", defect.chainageCoordinate)
+                            put("aiConfidencePercent", defect.aiConfidencePercent)
+                            put("aiPrescribedAction", defect.aiPrescribedAction)
+                        })
+                    }
+                    put("defects", defectsObj)
+
+                    // Serialize tasks
+                    val tasksObj = JSONObject()
+                    tasks.forEach { task ->
+                        tasksObj.put(task.id, JSONObject().apply {
+                            put("id", task.id)
+                            put("title", task.title)
+                            put("section", task.section)
+                            put("due", task.due)
+                            put("tone", task.tone.name)
+                            put("assignee", task.assignee)
+                            put("status", task.status)
+                            put("torque", task.torque)
+                        })
+                    }
+                    put("tasks", tasksObj)
+
+                    // Serialize inspections
+                    val inspObj = JSONObject()
+                    inspections.forEach { insp ->
+                        inspObj.put(insp.id, JSONObject().apply {
+                            put("id", insp.id)
+                            put("section", insp.section)
+                            put("inspector", insp.inspector)
+                            put("status", insp.status)
+                            put("framesCount", insp.framesCount)
+                            put("detectionsCount", insp.detectionsCount)
+                            put("detectedCrackTitle", insp.detectedCrackTitle)
+                            put("recommendedMaintenanceAction", insp.recommendedMaintenanceAction)
+                        })
+                    }
+                    put("inspections", inspObj)
+                }
+
+                val conn = (URL(dbEndpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 12000
+                    readTimeout = 12000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+
+                OutputStreamWriter(conn.outputStream).use { writer ->
+                    writer.write(payload.toString())
+                    writer.flush()
+                }
+
+                val code = conn.responseCode
+                val timestampStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+
+                withContext(Dispatchers.Main) {
+                    isSyncing = false
+                    lastSyncTimestamp = timestampStr
+                    if (code in 200..299) {
+                        isConnectedToFirebase = true
+                        syncStatusMessage = "Successfully uploaded ${defects.size} defects, ${tasks.size} tasks to cloud database (HTTP $code)"
+                        onSuccess()
+                    } else {
+                        val errMsg = "Cloud sync failed with HTTP $code. Check database security rules."
+                        syncStatusMessage = errMsg
+                        onError(errMsg)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val errMsg = "Network error during sync: ${e.localizedMessage ?: e.message}"
+                Log.e("RailGuardFirebase", "Sync error", e)
+                withContext(Dispatchers.Main) {
+                    isSyncing = false
+                    syncStatusMessage = errMsg
+                    onError(errMsg)
+                }
+            }
+        }
+    }
+
+    /**
+     * Pulls latest defects, tasks, and inspections from Central Realtime Database
+     */
+    suspend fun pullAllFromFirebase(
+        onSuccess: (List<Defect>, List<MaintenanceTask>, List<InspectionRecord>) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val activeDb = getEffectiveDbUrl()
+        isSyncing = true
+        syncStatusMessage = "Fetching data from cloud database..."
+
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val dbEndpoint = "$activeDb/railguard.json$authParam"
+
+                val conn = (URL(dbEndpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 12000
+                    readTimeout = 12000
+                }
+
+                val code = conn.responseCode
+                if (code in 200..299) {
+                    val stream = conn.inputStream
+                    val content = stream.bufferedReader().use { it.readText() }
+
+                    if (content.isBlank() || content == "null") {
+                        withContext(Dispatchers.Main) {
+                            isSyncing = false
+                            syncStatusMessage = "Cloud database is currently empty. Run Push to upload initial data."
+                            onError("Cloud database has no railguard records yet.")
+                        }
+                        return@withContext
+                    }
+
+                    val json = JSONObject(content)
+                    val defectsList = mutableListOf<Defect>()
+                    val tasksList = mutableListOf<MaintenanceTask>()
+                    val inspectionsList = mutableListOf<InspectionRecord>()
+
+                    // Parse defects
+                    val defectsObj = json.optJSONObject("defects")
+                    if (defectsObj != null) {
+                        val keys = defectsObj.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            val item = defectsObj.getJSONObject(key)
+                            defectsList.add(
+                                Defect(
+                                    id = item.optString("id", key),
+                                    title = item.optString("title", "Track Defect"),
+                                    section = item.optString("section", "Mainline"),
+                                    score = item.optString("score", "Warning"),
+                                    tone = try { Tone.valueOf(item.optString("tone", "WARNING")) } catch (e: Exception) { Tone.WARNING },
+                                    time = item.optString("time", "Just now"),
+                                    detail = item.optString("detail", ""),
+                                    estimatedLength = item.optString("estimatedLength", "10 mm"),
+                                    latitude = item.optDouble("latitude", 28.6142),
+                                    longitude = item.optDouble("longitude", 77.2085),
+                                    riskScore = item.optInt("riskScore", 70),
+                                    chainageCoordinate = item.optString("chainageCoordinate", "KM 42+000"),
+                                    aiConfidencePercent = item.optInt("aiConfidencePercent", 90),
+                                    aiPrescribedAction = item.optString("aiPrescribedAction", "Inspect track.")
+                                )
+                            )
+                        }
+                    }
+
+                    // Parse tasks
+                    val tasksObj = json.optJSONObject("tasks")
+                    if (tasksObj != null) {
+                        val keys = tasksObj.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            val item = tasksObj.getJSONObject(key)
+                            tasksList.add(
+                                MaintenanceTask(
+                                    id = item.optString("id", key),
+                                    title = item.optString("title", "Maintenance Task"),
+                                    section = item.optString("section", "Mainline"),
+                                    due = item.optString("due", "Today"),
+                                    tone = try { Tone.valueOf(item.optString("tone", "INFO")) } catch (e: Exception) { Tone.INFO },
+                                    assignee = item.optString("assignee", "Field Gang"),
+                                    status = item.optString("status", "Pending"),
+                                    torque = item.optString("torque", "Nominal")
+                                )
+                            )
+                        }
+                    }
+
+                    // Parse inspections
+                    val inspObj = json.optJSONObject("inspections")
+                    if (inspObj != null) {
+                        val keys = inspObj.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            val item = inspObj.getJSONObject(key)
+                            inspectionsList.add(
+                                InspectionRecord(
+                                    id = item.optString("id", key),
+                                    section = item.optString("section", "Corridor"),
+                                    date = item.optString("date", "Today"),
+                                    inspector = item.optString("inspector", "Inspector"),
+                                    status = item.optString("status", "Completed"),
+                                    framesCount = item.optInt("framesCount", 100),
+                                    detectionsCount = item.optInt("detectionsCount", 0),
+                                    detectedCrackTitle = item.optString("detectedCrackTitle", "None"),
+                                    recommendedMaintenanceAction = item.optString("recommendedMaintenanceAction", "Routine inspection")
+                                )
+                            )
+                        }
+                    }
+
+                    val timestampStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+                    withContext(Dispatchers.Main) {
+                        isSyncing = false
+                        lastSyncTimestamp = timestampStr
+                        isConnectedToFirebase = true
+                        syncStatusMessage = "Pulled ${defectsList.size} defects, ${tasksList.size} tasks & ${inspectionsList.size} inspections from cloud database"
+                        onSuccess(defectsList, tasksList, inspectionsList)
+                    }
+                } else {
+                    val errMsg = "Failed to pull from cloud database: HTTP $code"
+                    withContext(Dispatchers.Main) {
+                        isSyncing = false
+                        syncStatusMessage = errMsg
+                        onError(errMsg)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val errMsg = "Network error: ${e.localizedMessage ?: e.message}"
+                Log.e("RailGuardFirebase", "Pull error", e)
+                withContext(Dispatchers.Main) {
+                    isSyncing = false
+                    syncStatusMessage = errMsg
+                    onError(errMsg)
+                }
+            }
+        }
+    }
+
+    /**
+     * Uploads a single defect immediately to Firebase
+     */
+    suspend fun uploadDefectToFirebase(defect: Defect) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/defects/${defect.id}.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", defect.id)
+                    put("title", defect.title)
+                    put("section", defect.section)
+                    put("score", defect.score)
+                    put("tone", defect.tone.name)
+                    put("detail", defect.detail)
+                    put("estimatedLength", defect.estimatedLength)
+                    put("latitude", defect.latitude)
+                    put("longitude", defect.longitude)
+                    put("riskScore", defect.riskScore)
+                    put("chainageCoordinate", defect.chainageCoordinate)
+                    put("aiConfidencePercent", defect.aiConfidencePercent)
+                    put("aiPrescribedAction", defect.aiPrescribedAction)
+                    put("updatedAt", System.currentTimeMillis())
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Defect upload error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Deletes a defect from Firebase
+     */
+    suspend fun deleteDefectFromFirebase(defectId: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/defects/$defectId.json$authParam"
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "DELETE"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Defect delete error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Uploads a newly updated or created maintenance task to Firebase
+     */
+    suspend fun uploadTaskToFirebase(task: MaintenanceTask) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/tasks/${task.id}.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", task.id)
+                    put("title", task.title)
+                    put("section", task.section)
+                    put("due", task.due)
+                    put("tone", task.tone.name)
+                    put("assignee", task.assignee)
+                    put("status", task.status)
+                    put("torque", task.torque)
+                    put("updatedAt", System.currentTimeMillis())
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Task upload error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Dispatches temporary speed restriction (TSR) live to Firebase for train cab signaling
+     */
+    suspend fun dispatchTsrToFirebase(trainId: String, tsrSpeedKmH: Int, reason: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/trains/$trainId/tsr.json$authParam"
+                val json = JSONObject().apply {
+                    put("trainId", trainId)
+                    put("activeTsrSpeedKmH", tsrSpeedKmH)
+                    put("reason", reason)
+                    put("issuedAt", System.currentTimeMillis())
+                    put("issuedBy", currentUser?.email ?: "ground-safety-controller")
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "TSR dispatch error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Broadcasts GNSS / GPS telemetry live to Realtime Database
+     */
+    suspend fun recordGpsTelemetry(
+        lat: Double,
+        lng: Double,
+        speedKmh: Double,
+        heading: Double,
+        accuracyM: Float,
+        satellites: Int,
+        chainage: String
+    ) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/telemetry/live_gps.json$authParam"
+                val json = JSONObject().apply {
+                    put("latitude", lat)
+                    put("longitude", lng)
+                    put("speedKmh", speedKmh)
+                    put("heading", heading)
+                    put("accuracyMeters", accuracyM)
+                    put("satellitesTracked", satellites)
+                    put("chainage", chainage)
+                    put("timestamp", System.currentTimeMillis())
+                    put("inspector", currentUser?.email ?: "e.chen@railguard.field")
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "GPS telemetry sync error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Uploads camera frame captures and crack detections to the cloud database
+     */
+    suspend fun uploadCameraCapture(
+        captureId: String,
+        section: String,
+        detectionCount: Int,
+        defectDetected: Boolean,
+        notes: String
+    ) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/camera_captures/$captureId.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", captureId)
+                    put("section", section)
+                    put("detectionCount", detectionCount)
+                    put("defectDetected", defectDetected)
+                    put("notes", notes)
+                    put("capturedAt", System.currentTimeMillis())
+                    put("inspector", currentUser?.email ?: "field-inspector")
+                    put("resolution", "4K-HDR (3840x2160)")
+                    put("exposureMode", "Ultra-High Frequency Rail Shutter")
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Camera capture sync error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Records AI analytics and model inferences to cloud database
+     */
+    suspend fun recordAiAnalysis(
+        analysisType: String,
+        metrics: Map<String, Any>
+    ) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val timestamp = System.currentTimeMillis()
+                val endpoint = "${getEffectiveDbUrl()}/railguard/ai_analyses/$analysisType/$timestamp.json$authParam"
+                val json = JSONObject().apply {
+                    put("type", analysisType)
+                    put("timestamp", timestamp)
+                    put("operator", currentUser?.email ?: "ai-operator")
+                    metrics.forEach { (k, v) -> put(k, v) }
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "AI analysis sync error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Persists user and app configuration settings to cloud database
+     */
+    suspend fun saveUserSettings(settingsMap: Map<String, Any>) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val userKey = currentUser?.localId ?: "inspector_system_config"
+                val endpoint = "${getEffectiveDbUrl()}/railguard/settings/$userKey.json$authParam"
+                val json = JSONObject().apply {
+                    put("updatedAt", System.currentTimeMillis())
+                    put("userEmail", currentUser?.email ?: "e.chen@railguard.field")
+                    settingsMap.forEach { (k, v) -> put(k, v) }
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Settings sync error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Persists inspector field notes & comments to cloud database
+     */
+    suspend fun saveComment(defectId: String, author: String, text: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val commentId = "cmt_${System.currentTimeMillis()}"
+                val endpoint = "${getEffectiveDbUrl()}/railguard/comments/$defectId/$commentId.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", commentId)
+                    put("defectId", defectId)
+                    put("author", author)
+                    put("text", text)
+                    put("timestamp", System.currentTimeMillis())
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Comment sync error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Uploads track observation item to cloud database
+     */
+    suspend fun saveObservation(obs: ObservationItem) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/observations/${obs.id}.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", obs.id)
+                    put("title", obs.title)
+                    put("chainage", obs.chainage)
+                    put("time", obs.time)
+                    put("severity", obs.severity)
+                    put("tone", obs.tone.name)
+                    put("syncedAt", System.currentTimeMillis())
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Observation sync error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Uploads AI Oracle reasoning and query log to cloud database
+     */
+    suspend fun saveAiOracleQuery(model: String, query: String, response: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val queryId = "ai_${System.currentTimeMillis()}"
+                val endpoint = "${getEffectiveDbUrl()}/railguard/ai_oracle_logs/$queryId.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", queryId)
+                    put("model", model)
+                    put("query", query)
+                    put("response", response)
+                    put("timestamp", System.currentTimeMillis())
+                    put("user", currentUser?.email ?: "rail-engineer")
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "AI Oracle log error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Uploads formal safety report package to cloud database
+     */
+    suspend fun saveReportPackage(reportId: String, title: String, section: String, inspector: String, status: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/reports/$reportId.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", reportId)
+                    put("title", title)
+                    put("section", section)
+                    put("inspector", inspector)
+                    put("status", status)
+                    put("generatedAt", System.currentTimeMillis())
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Report package sync error: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun saveReportPackage(title: String, hash: String, details: Map<String, Any?>) {
+        val repId = "REP-${System.currentTimeMillis() % 100000}"
+        val userDisplay = currentUser?.displayName ?: "E. Chen (Senior Permanent Way)"
+        saveReportPackage(
+            reportId = repId,
+            title = title,
+            section = "Section 14 North Loop",
+            inspector = userDisplay,
+            status = "Signed & Sealed (Hash: ${hash.take(8)}...)"
+        )
+    }
+
+    /**
+     * Uploads live ESP32 hardware & sensor telemetry to cloud database
+     */
+    suspend fun uploadEspSensorData(
+        nodeId: String,
+        ultrasonicDepthMm: Float,
+        vibrationG: Float,
+        railTempC: Float,
+        axleSpeedKmh: Float,
+        chainage: String,
+        status: String = "ACTIVE_TRACK_SCAN"
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/esp_sensors/$nodeId.json$authParam"
+                val liveEndpoint = "${getEffectiveDbUrl()}/railguard/live_sensors/telemetry.json$authParam"
+                val json = JSONObject().apply {
+                    put("nodeId", nodeId)
+                    put("ultrasonicDepthMm", ultrasonicDepthMm.toDouble())
+                    put("vibrationG", vibrationG.toDouble())
+                    put("railTempC", railTempC.toDouble())
+                    put("axleSpeedKmh", axleSpeedKmh.toDouble())
+                    put("chainage", chainage)
+                    put("status", status)
+                    put("hardware", "ESP32-WROOM-32 / Piezo UT / ADXL345 / PT100")
+                    put("timestamp", System.currentTimeMillis())
+                }
+
+                // Update node endpoint
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                val code = conn.responseCode
+
+                // Update live sensor stream endpoint
+                val connLive = (URL(liveEndpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(connLive.outputStream).use { it.write(json.toString()) }
+                connLive.responseCode
+
+                code in 200..299
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "ESP sensor sync error: ${e.message}")
+                false
+            }
+        }
+    }
+
+    /**
+     * Transmits zero-calibration command to ESP32 node via cloud RTDB
+     */
+    suspend fun sendEspCalibrationCommand(nodeId: String, command: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/esp_sensors/$nodeId/command.json$authParam"
+                val json = JSONObject().apply {
+                    put("command", command)
+                    put("issuedAt", System.currentTimeMillis())
+                    put("operator", currentUser?.displayName ?: "E. Chen")
+                }
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode in 200..299
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "ESP calibration error: ${e.message}")
+                false
+            }
+        }
+    }
+
+    /**
+     * Streams live camera inspection frame & detection telemetry to cloud
+     */
+    suspend fun uploadLiveInspectionStream(
+        sessionId: String,
+        fps: Int,
+        defectCount: Int,
+        currentChainage: String,
+        alertActive: Boolean
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/live_inspection/$sessionId.json$authParam"
+                val json = JSONObject().apply {
+                    put("sessionId", sessionId)
+                    put("fps", fps)
+                    put("defectCount", defectCount)
+                    put("chainage", currentChainage)
+                    put("alertActive", alertActive)
+                    put("timestamp", System.currentTimeMillis())
+                }
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode in 200..299
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
+    /**
+     * Records AI physics evaluations (Paris law, Nadal derailment, Thermal SFT, Multi-Tensor)
+     */
+    suspend fun recordAiEvaluation(
+        evalId: String,
+        type: String,
+        resultSummary: String,
+        confidence: Float,
+        telemetryInputs: Map<String, Any?>
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/ai_evaluations/$evalId.json$authParam"
+                val json = JSONObject().apply {
+                    put("evalId", evalId)
+                    put("type", type)
+                    put("summary", resultSummary)
+                    put("confidence", confidence.toDouble())
+                    put("inputs", JSONObject(telemetryInputs))
+                    put("evaluatedAt", System.currentTimeMillis())
+                    put("evaluator", currentUser?.displayName ?: "RailVision-DeepTrack Neural Core")
+                }
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode in 200..299
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "AI evaluation sync error: ${e.message}")
+                false
+            }
+        }
+    }
+
+    /**
+     * Syncs train fleet status and cab speed interlocks to cloud database
+     */
+    suspend fun saveTrainTelemetry(
+        trainId: String,
+        name: String,
+        speed: Float,
+        tsr: Int?,
+        section: String,
+        chainage: String,
+        status: String
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val authParam = currentUser?.idToken?.let { "?auth=$it" } ?: ""
+                val endpoint = "${getEffectiveDbUrl()}/railguard/trains/$trainId.json$authParam"
+                val json = JSONObject().apply {
+                    put("trainId", trainId)
+                    put("name", name)
+                    put("speed", speed.toDouble())
+                    if (tsr != null) put("activeTsr", tsr) else put("activeTsr", JSONObject.NULL)
+                    put("section", section)
+                    put("chainage", chainage)
+                    put("status", status)
+                    put("lastPing", System.currentTimeMillis())
+                }
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode in 200..299
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+}

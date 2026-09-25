@@ -11,9 +11,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.*
 import com.example.railguard.theme.RailGuardTheme
 import com.example.railguard.ui.screens.*
+import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String) {
     object Splash : Screen("splash")
@@ -79,6 +83,7 @@ sealed class Screen(val route: String) {
     object Notifications : Screen("notifications")
     object AiOracle : Screen("ai_oracle")
     object TrainConnection : Screen("train_connection")
+    object FirebaseSync : Screen("firebase_sync")
 }
 
 data class NavigationTab(
@@ -109,8 +114,46 @@ fun RailGuardApp() {
 
     var profileName by remember { mutableStateOf("E. Chen") }
     var profileEmail by remember { mutableStateOf("e.chen@railguard.field") }
+    val scope = rememberCoroutineScope()
+    val firebaseService = remember { RailGuardFirebaseService.instance }
+
+    // Synchronize user session and fetch cloud data on launch
+    LaunchedEffect(Unit) {
+        firebaseService.currentUser?.let { user ->
+            if (user.displayName.isNotBlank()) profileName = user.displayName
+            if (user.email.isNotBlank()) profileEmail = user.email
+        }
+        firebaseService.pullAllFromFirebase(
+            onSuccess = { rDefects, rTasks, rInspections ->
+                if (rDefects.isNotEmpty()) {
+                    rDefects.forEach { rd ->
+                        val idx = defects.indexOfFirst { it.id == rd.id }
+                        if (idx >= 0) defects[idx] = rd else defects.add(0, rd)
+                    }
+                }
+                if (rTasks.isNotEmpty()) {
+                    rTasks.forEach { rt ->
+                        val idx = tasks.indexOfFirst { it.id == rt.id }
+                        if (idx >= 0) tasks[idx] = rt else tasks.add(0, rt)
+                    }
+                }
+                if (rInspections.isNotEmpty()) {
+                    rInspections.forEach { ri ->
+                        val idx = inspections.indexOfFirst { it.id == ri.id }
+                        if (idx >= 0) inspections[idx] = ri else inspections.add(0, ri)
+                    }
+                }
+            },
+            onError = { /* fallback to local repository silently */ }
+        )
+    }
+
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     fun navigateTo(route: String) {
+        keyboardController?.hide()
+        focusManager.clearFocus(force = true)
         if (currentRoute != route) {
             backStack.add(currentRoute)
             currentRoute = route
@@ -118,12 +161,16 @@ fun RailGuardApp() {
     }
 
     fun navigateBack() {
+        keyboardController?.hide()
+        focusManager.clearFocus(force = true)
         if (backStack.isNotEmpty()) {
             currentRoute = backStack.removeAt(backStack.size - 1)
         }
     }
 
     BackHandler(enabled = backStack.isNotEmpty()) {
+        keyboardController?.hide()
+        focusManager.clearFocus(force = true)
         navigateBack()
     }
 
@@ -137,7 +184,9 @@ fun RailGuardApp() {
 
     val isTabScreen = currentRoute in tabs.map { it.route }
 
-    CompositionLocalProvider(LocalAppSettings provides appPreferences) {
+    CompositionLocalProvider(
+        LocalAppSettings provides appPreferences
+    ) {
         RailGuardTheme(darkTheme = isDarkMode) {
             androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
                 Scaffold(
@@ -183,7 +232,8 @@ fun RailGuardApp() {
                             when (targetRoute) {
                                 Screen.Splash.route -> SplashScreen(
                                     onContinue = { navigateTo(Screen.Onboarding.route) },
-                                    onLoginClick = { navigateTo(Screen.Login.route) }
+                                    onLoginClick = { navigateTo(Screen.Login.route) },
+                                    onRegisterClick = { navigateTo(Screen.Register.route) }
                                 )
                                 Screen.Onboarding.route -> OnboardingScreen(
                                     onFinish = {
@@ -270,6 +320,7 @@ fun RailGuardApp() {
                             onToggleDarkMode = { isDarkMode = it },
                             onNavigate = { navigateTo(it) },
                             onSignOut = {
+                                firebaseService.signOut()
                                 backStack.clear()
                                 navigateTo(Screen.Login.route)
                             },
@@ -281,6 +332,13 @@ fun RailGuardApp() {
                             onStartPatrol = { newRecord, isLive ->
                                 inspections.add(0, newRecord)
                                 selectedInspection = newRecord
+                                scope.launch {
+                                    firebaseService.uploadInspectionToFirebase(newRecord)
+                                    firebaseService.logSafetyAuditEvent(
+                                        action = "PATROL_LAUNCH",
+                                        details = "Inspection patrol ${newRecord.id} started on section ${newRecord.section} by ${newRecord.inspector}"
+                                    )
+                                }
                                 if (isLive) {
                                     navigateTo(Screen.LiveInspection.route)
                                 } else {
@@ -340,7 +398,24 @@ fun RailGuardApp() {
                         Screen.ObjectDetection.route -> ObjectDetectionScreen(onBack = { navigateBack() })
                         Screen.Alignment.route -> AlignmentAnalysisScreen(onBack = { navigateBack() })
                         Screen.EngineerVerification.route -> EngineerVerificationScreen(
-                            onSigned = { navigateBack() },
+                            onSigned = {
+                                scope.launch {
+                                    val verified = selectedDefect.copy(
+                                        score = "Verified (100%)",
+                                        tone = Tone.HEALTHY,
+                                        aiPrescribedAction = "Verified & signed off by Lead Engineer ($profileName)"
+                                    )
+                                    val idx = defects.indexOfFirst { it.id == selectedDefect.id }
+                                    if (idx >= 0) defects[idx] = verified
+                                    selectedDefect = verified
+                                    firebaseService.uploadDefectToFirebase(verified)
+                                    firebaseService.logSafetyAuditEvent(
+                                        action = "ENGINEER_VERIFICATION",
+                                        details = "Defect ${verified.id} (${verified.title}) verified and signed by $profileName"
+                                    )
+                                }
+                                navigateBack()
+                            },
                             onBack = { navigateBack() }
                         )
                         Screen.Comments.route -> CommentsScreen(onBack = { navigateBack() })
@@ -505,6 +580,24 @@ fun RailGuardApp() {
                         Screen.TrainConnection.route -> TrainConnectionScreen(
                             onNavigateLiveScan = { navigateTo(Screen.LiveInspection.route) },
                             onNavigateMap = { navigateTo(Screen.Map.route) },
+                            onBack = { navigateBack() }
+                        )
+                        Screen.FirebaseSync.route -> FirebaseSyncScreen(
+                            defects = defects,
+                            tasks = tasks,
+                            inspections = inspections,
+                            onDefectsUpdated = { newDefects ->
+                                defects.clear()
+                                defects.addAll(newDefects)
+                            },
+                            onTasksUpdated = { newTasks ->
+                                tasks.clear()
+                                tasks.addAll(newTasks)
+                            },
+                            onInspectionsUpdated = { newInspections ->
+                                inspections.clear()
+                                inspections.addAll(newInspections)
+                            },
                             onBack = { navigateBack() }
                         )
                     }

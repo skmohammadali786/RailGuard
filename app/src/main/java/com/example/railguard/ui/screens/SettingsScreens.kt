@@ -1,5 +1,6 @@
 package com.example.railguard.ui.screens
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,7 +10,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -17,18 +19,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.railguard.components.*
-import com.example.railguard.model.AppLanguage
+import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.AppPreferences
-import com.example.railguard.model.LocalAppSettings
 import com.example.railguard.model.NotificationItem
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(
@@ -36,210 +43,207 @@ fun SettingsScreen(
     onToggleDarkMode: (Boolean) -> Unit,
     onNavigate: (String) -> Unit,
     onSignOut: () -> Unit,
-    profileName: String = "E. Chen",
-    onLockApp: (() -> Unit)? = null,
-    onBack: (() -> Unit)? = null
+    onLockApp: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-    val settings = LocalAppSettings.current
-    val initials = profileName.split(" ")
-        .mapNotNull { it.firstOrNull()?.toString() }
-        .take(2)
-        .joinToString("")
-        .uppercase()
-        .ifEmpty { "EC" }
+    val isDark = LocalIsDark.current
+    val firebaseService = remember { RailGuardFirebaseService.instance }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+        contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Header(
-                title = settings.translate("control_settings"),
-                subtitle = "Inspector credentials, device preferences, and security",
-                onBack = onBack
+            ScreenHeader(
+                title = "Settings & Cloud Control",
+                subtitle = "Central safety cloud backend, train fleet signaling & system security"
             )
         }
 
-        // Profile Badge Card
         item {
-            RailCard(
-                modifier = Modifier.padding(vertical = 4.dp),
-                onClick = { onNavigate("profile") }
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
+            RailCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "BACKEND & FLEET GATEWAY",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF0284C7)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    SettingsRowTile(
+                        icon = Icons.Default.CloudSync,
+                        title = "Central Safety Cloud Backend",
+                        subtitle = if (firebaseService.isConnectedToFirebase) "Connected: Active Cloud Telemetry" else "Ready for Cloud Realtime DB & Auth",
+                        onClick = { onNavigate("firebase_sync") }
+                    )
+
+                    SettingsRowTile(
+                        icon = Icons.Default.Train,
+                        title = "Train Fleet Interlock & Cab Link",
+                        subtitle = "Ground-to-cab telemetry, ETCS speed caps & TSR dispatch",
+                        onClick = { onNavigate("train_connection") }
+                    )
+                }
+            }
+        }
+
+        item {
+            RailCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "FIELD INSPECTOR PROFILE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    SettingsRowTile(
+                        icon = Icons.Default.Person,
+                        title = "Inspector Profile & Badges",
+                        subtitle = firebaseService.currentUser?.email ?: "e.chen@railguard.field",
+                        onClick = { onNavigate("profile") }
+                    )
+
+                    SettingsRowTile(
+                        icon = Icons.Default.Notifications,
+                        title = "Notifications & Dispatch Alerts",
+                        subtitle = "Vibration, acoustic & derailment warnings",
+                        onClick = { onNavigate("notifications") }
+                    )
+                }
+            }
+        }
+
+        item {
+            RailCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "PREFERENCES & SYSTEM",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
                         modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
-                            .background(colorScheme.primary),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = initials,
-                            color = colorScheme.onPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = profileName,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                imageVector = Icons.Default.Verified,
-                                contentDescription = "Verified",
-                                tint = colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            Icon(Icons.Default.DarkMode, contentDescription = null, tint = Color(0xFF38BDF8))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Dark Mission Control Theme", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         }
-                        Text(
-                            text = "Lead Safety Inspector · IRSE #849201",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant
-                        )
+                        Switch(checked = isDarkMode, onCheckedChange = onToggleDarkMode)
                     }
 
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = null,
-                        tint = colorScheme.onSurfaceVariant
+                    SettingsRowTile(
+                        icon = Icons.Default.Security,
+                        title = "Security & PIN Lock",
+                        subtitle = "Passcode, biometric & session lock",
+                        onClick = { onNavigate("security") }
+                    )
+
+                    SettingsRowTile(
+                        icon = Icons.Default.Language,
+                        title = "Language & Locale",
+                        subtitle = "English, Spanish, Hindi, German",
+                        onClick = { onNavigate("language") }
+                    )
+
+                    SettingsRowTile(
+                        icon = Icons.Default.Info,
+                        title = "About RailGuard Platform",
+                        subtitle = "v2.4.0 High-Speed Track AI Engine",
+                        onClick = { onNavigate("about") }
                     )
                 }
             }
         }
 
-        // Quick Toggles
         item {
-            SectionLabel(title = "INTERFACE PREFERENCES")
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onLockApp,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
+                        contentColor = if (isDark) Color.White else Color(0xFF0F172A)
+                    )
                 ) {
-                    Column {
-                        Text(
-                            text = "Dark Mode",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "High-contrast theme for nighttime inspection",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = isDarkMode,
-                        onCheckedChange = onToggleDarkMode
-                    )
+                    Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Lock Terminal", fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = {
+                        firebaseService.signOut()
+                        onSignOut()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Sign Out", fontSize = 12.sp)
                 }
             }
         }
+    }
+}
 
-        // Settings Navigation Rows
-        item {
-            SectionLabel(title = "SYSTEM MODULES")
-
-            ListRow(
-                icon = Icons.Default.Train,
-                title = settings.translate("train_telemetry"),
-                subtitle = "Live ETCS Level 2 train connection, speed & dispatch",
-                trailing = "Live",
-                tone = Tone.HEALTHY,
-                onClick = { onNavigate("train_connection") }
-            )
-            ListRow(
-                icon = Icons.Default.Psychology,
-                title = settings.translate("ai_oracle_title"),
-                subtitle = "Tensor crack kinetics, derailment risk & Paris law",
-                trailing = "92.4%",
-                tone = Tone.INFO,
-                onClick = { onNavigate("ai_oracle") }
-            )
-            ListRow(
-                icon = Icons.Default.PriorityHigh,
-                title = settings.translate("attention_required"),
-                subtitle = "Active restrictions and open priority tasks",
-                trailing = "5",
-                tone = Tone.CRITICAL,
-                onClick = { onNavigate("attention") }
-            )
-            ListRow(
-                icon = Icons.Default.Notifications,
-                title = settings.translate("notifications"),
-                subtitle = "Shift alerts, defect alerts, and system notices",
-                trailing = "4",
-                tone = Tone.INFO,
-                onClick = { onNavigate("notifications") }
-            )
-            ListRow(
-                icon = Icons.Default.Security,
-                title = settings.translate("security_audit"),
-                subtitle = if (settings.passcodeEnabled) "PIN Active (${settings.passcodePin}) · Biometric Active" else "Protection Disabled",
-                trailing = if (settings.passcodeEnabled) "ON" else "OFF",
-                tone = if (settings.passcodeEnabled) Tone.HEALTHY else Tone.WARNING,
-                onClick = { onNavigate("security") }
-            )
-            ListRow(
-                icon = Icons.Default.Lock,
-                title = settings.translate("lock_app_now"),
-                subtitle = "Require PIN (${settings.passcodePin}) or Biometric to unlock",
-                trailing = "Lock",
-                tone = Tone.WARNING,
-                onClick = { onLockApp?.invoke() }
-            )
-            ListRow(
-                icon = Icons.Default.Tune,
-                title = settings.translate("app_settings"),
-                subtitle = if (settings.isMetric) "Metric units (mm, km/h) · Auto-Sync On" else "Imperial units (in, mph) · Auto-Sync On",
-                trailing = if (settings.isMetric) "Metric" else "Imperial",
-                onClick = { onNavigate("app_settings") }
-            )
-            ListRow(
-                icon = Icons.Default.Translate,
-                title = settings.translate("language_standards"),
-                subtitle = settings.language.displayName,
-                trailing = settings.language.code.uppercase(),
-                tone = Tone.INFO,
-                onClick = { onNavigate("language") }
-            )
-            ListRow(
-                icon = Icons.Default.Help,
-                title = settings.translate("field_engineering"),
-                subtitle = "Track tolerances, crack codes, and camera guidance",
-                onClick = { onNavigate("help") }
-            )
-            ListRow(
-                icon = Icons.Default.Info,
-                title = settings.translate("about_railguard"),
-                subtitle = "Version 1.0.0 · SHA-256 integrity active",
-                onClick = { onNavigate("about") }
-            )
+@Composable
+fun SettingsRowTile(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    val isDark = LocalIsDark.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF0284C7).copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(18.dp))
         }
 
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-            PrimaryButton(
-                title = settings.translate("sign_out"),
-                icon = Icons.AutoMirrored.Filled.Logout,
-                secondary = true,
-                onClick = onSignOut
-            )
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text(subtitle, fontSize = 11.sp, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
         }
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = null,
+            tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+            modifier = Modifier.size(16.dp)
+        )
     }
 }
 
@@ -250,65 +254,84 @@ fun ProfileScreen(
     onSave: (String, String) -> Unit,
     onBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var editName by remember { mutableStateOf(name) }
     var editEmail by remember { mutableStateOf(email) }
-    var saved by remember { mutableStateOf(false) }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Inspector Profile",
-                subtitle = "Operational credentials & engineering license",
-                onBack = onBack
-            )
-        }
-
-        item {
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
+        SubScreenHeader(
+            title = "Inspector Profile",
+            subtitle = "Field credentials & authority",
+            onBack = {
+                keyboardController?.hide()
+                focusManager.clearFocus(force = true)
+                onBack()
+            }
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 OutlinedTextField(
                     value = editName,
-                    onValueChange = { editName = it; saved = false },
-                    label = { Text("Inspector Name") },
+                    onValueChange = { editName = it },
+                    label = { Text("Full Name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
+                Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
                     value = editEmail,
-                    onValueChange = { editEmail = it; saved = false },
+                    onValueChange = { editEmail = it },
                     label = { Text("Official Email") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                DetailRow(label = "Role", value = "Lead Safety Inspector")
-                DetailRow(label = "Engineering License", value = "IRSE-UK #849201")
-                DetailRow(label = "Assigned Division", value = "North Corridor (Sec 01-16)")
-                DetailRow(label = "Certification Validity", value = "Valid until Dec 2026")
-            }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-            PrimaryButton(
-                title = if (saved) "Profile Saved ✓" else "Update Credentials",
-                icon = Icons.Default.Check,
-                onClick = {
+                Spacer(modifier = Modifier.height(16.dp))
+                PrimaryButton(title = "Save Inspector Credentials", onClick = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus(force = true)
                     onSave(editName, editEmail)
-                    saved = true
-                }
-            )
+                    scope.launch {
+                        RailGuardFirebaseService.instance.saveUserSettings(
+                            mapOf("fullName" to editName, "email" to editEmail, "updatedAt" to System.currentTimeMillis())
+                        )
+                    }
+                    onBack()
+                })
+
+                val firebaseService = RailGuardFirebaseService.instance
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "CENTRAL CLOUD IDENTITY & ACCESS",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF0284C7)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Cloud Inspector UID: ${firebaseService.currentUser?.localId ?: "Local Session"}",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Network Status: Authenticated & Linked",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -319,72 +342,105 @@ fun AppSettingsScreen(
     onUpdatePreferences: (AppPreferences) -> Unit,
     onBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var autoSyncRtdb by remember { mutableStateOf(true) }
+    var esp32LinkActive by remember { mutableStateOf(true) }
+    var highPrecisionAi by remember { mutableStateOf(true) }
+    var tsrInterlockEnabled by remember { mutableStateOf(true) }
+    var syncFeedbackMsg by remember { mutableStateOf<String?>(null) }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = preferences.translate("app_settings"),
-                subtitle = "Field units and local caching configuration",
-                onBack = onBack
-            )
-        }
-
-        item {
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = preferences.translate("metric_units"),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = if (preferences.isMetric) "Using mm for crack width & km/h for speeds" else "Using inches for crack width & mph for speeds",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = preferences.isMetric,
-                        onCheckedChange = { onUpdatePreferences(preferences.copy(isMetric = it)) }
-                    )
-                }
-
+        SubScreenHeader(title = "System & Sensor Configurations", subtitle = "ESP32, RTDB & Safety Directives", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Operational Mode: Rail Safety Standards EN 13848-1", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = preferences.translate("auto_sync"),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = preferences.translate("auto_sync_sub"),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant
-                        )
+                        Text("Auto-Sync Cloud RTDB", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Continuous 5Hz sensor stream to cloud database", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(
-                        checked = preferences.autoSync,
-                        onCheckedChange = { onUpdatePreferences(preferences.copy(autoSync = it)) }
-                    )
+                    Switch(checked = autoSyncRtdb, onCheckedChange = { autoSyncRtdb = it })
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("ESP32 Sensor Hardware Hub", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Link ultrasonic UT, accelerometer & thermal sensors", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = esp32LinkActive, onCheckedChange = { esp32LinkActive = it })
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Multi-Tensor High-Precision AI", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Level 4 sub-millimeter flaw kinetics & Nadal ratio", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = highPrecisionAi, onCheckedChange = { highPrecisionAi = it })
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Auto-TSR Fleet Interlock", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Direct cab speed enforcement on verified critical cracks", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = tsrInterlockEnabled, onCheckedChange = { tsrInterlockEnabled = it })
+                }
+
+                if (syncFeedbackMsg != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(syncFeedbackMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                PrimaryButton(
+                    title = "Save & Push to Cloud RTDB",
+                    icon = Icons.Default.CloudSync,
+                    onClick = {
+                        scope.launch {
+                            RailGuardFirebaseService.instance.saveUserSettings(
+                                mapOf(
+                                    "autoSyncRtdb" to autoSyncRtdb,
+                                    "esp32LinkActive" to esp32LinkActive,
+                                    "highPrecisionAi" to highPrecisionAi,
+                                    "tsrInterlockEnabled" to tsrInterlockEnabled,
+                                    "operationalStandard" to "EN 13848-1",
+                                    "updatedAt" to System.currentTimeMillis()
+                                )
+                            )
+                            syncFeedbackMsg = "✓ System preferences synchronized with Cloud Realtime DB"
+                        }
+                    }
+                )
             }
         }
     }
@@ -397,135 +453,52 @@ fun SecurityScreen(
     onLockApp: () -> Unit,
     onBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-    var currentPinInput by remember { mutableStateOf(preferences.passcodePin) }
-    var saveStatusMsg by remember { mutableStateOf<String?>(null) }
+    var passcodeEnabled by remember { mutableStateOf(preferences.passcodeEnabled) }
+    var pin by remember { mutableStateOf(preferences.passcodePin) }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = preferences.translate("security_audit"),
-                subtitle = "Cryptographic protection for restriction releases & terminal locking",
-                onBack = onBack
-            )
-        }
-
-        if (saveStatusMsg != null) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF16A34A).copy(alpha = 0.15f))
-                        .border(1.dp, Color(0xFF16A34A), RoundedCornerShape(8.dp))
-                        .padding(12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = saveStatusMsg ?: "",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF16A34A)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-        }
-
-        item {
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
+        SubScreenHeader(title = "Security & Terminal Lock", subtitle = "Mission-critical authorization", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(preferences.translate("passcode_pin_protection"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("Mandatory 4-digit PIN before releasing speed limits or leaving idle", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
-                    }
+                    Text("Enable Passcode Lock", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     Switch(
-                        checked = preferences.passcodeEnabled,
+                        checked = passcodeEnabled,
                         onCheckedChange = {
+                            passcodeEnabled = it
                             onUpdatePreferences(preferences.copy(passcodeEnabled = it))
-                            saveStatusMsg = if (it) "Passcode PIN protection enabled" else "Passcode PIN protection disabled"
                         }
                     )
                 }
 
-                if (preferences.passcodeEnabled) {
-                    Spacer(modifier = Modifier.height(14.dp))
+                if (passcodeEnabled) {
+                    Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
-                        value = currentPinInput,
+                        value = pin,
                         onValueChange = {
-                            if (it.length <= 4 && it.all { ch -> ch.isDigit() }) {
-                                currentPinInput = it
+                            if (it.length <= 4) {
+                                pin = it
+                                onUpdatePreferences(preferences.copy(passcodePin = it))
                             }
                         },
-                        label = { Text("4-Digit Passcode PIN (Active: ${preferences.passcodePin})") },
-                        placeholder = { Text("e.g. 1234") },
-                        singleLine = true,
+                        label = { Text("4-Digit PIN") },
+                        visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth()
                     )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Button(
-                        onClick = {
-                            if (currentPinInput.length == 4) {
-                                onUpdatePreferences(preferences.copy(passcodePin = currentPinInput))
-                                saveStatusMsg = "Passcode PIN updated to $currentPinInput"
-                            } else {
-                                saveStatusMsg = "PIN must be exactly 4 digits"
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(preferences.translate("save_passcode"), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(preferences.translate("biometric_authentication"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("Fingerprint / Face unlock for rapid field HUD resumption", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
-                    }
-                    Switch(
-                        checked = preferences.isBiometricEnabled,
-                        onCheckedChange = {
-                            onUpdatePreferences(preferences.copy(isBiometricEnabled = it))
-                            saveStatusMsg = if (it) "Biometric authentication enabled" else "Biometric authentication disabled"
-                        }
-                    )
-                }
+                Spacer(modifier = Modifier.height(16.dp))
+                PrimaryButton(title = "Lock Terminal Now", onClick = onLockApp)
             }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-            PrimaryButton(
-                title = preferences.translate("lock_app_now"),
-                icon = Icons.Default.Lock,
-                onClick = onLockApp
-            )
         }
     }
 }
@@ -536,54 +509,40 @@ fun LanguageScreen(
     onUpdatePreferences: (AppPreferences) -> Unit,
     onBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val languages = listOf(
+        com.example.railguard.model.AppLanguage.EN_UK,
+        com.example.railguard.model.AppLanguage.EN_US,
+        com.example.railguard.model.AppLanguage.HI,
+        com.example.railguard.model.AppLanguage.ES
+    )
+    var selectedLang by remember { mutableStateOf(preferences.language) }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = preferences.translate("language_standards"),
-                subtitle = "Select operational vocabulary and engineering terminology",
-                onBack = onBack
-            )
-        }
-
-        items(AppLanguage.entries.toList()) { lang ->
-            val isSelected = preferences.language == lang
-            RailCard(
-                modifier = Modifier.padding(vertical = 4.dp),
-                onClick = { onUpdatePreferences(preferences.copy(language = lang)) },
-                backgroundColor = if (isSelected) colorScheme.primary.copy(alpha = 0.08f) else colorScheme.surface,
-                borderColor = if (isSelected) colorScheme.primary else colorScheme.outline
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        SubScreenHeader(title = "Language & Regionalization", subtitle = "Select terminal language", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(languages) { lang ->
+                RailCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedLang = lang
+                            onUpdatePreferences(preferences.copy(language = lang))
+                        }
                 ) {
-                    Column {
-                        Text(
-                            text = lang.displayName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                        )
-                        Text(
-                            text = "Regional profile · ${lang.code.uppercase()}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-                    if (isSelected) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Selected",
-                            tint = colorScheme.primary
-                        )
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(lang.displayName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        if (selectedLang == lang) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF16A34A))
+                        }
                     }
                 }
             }
@@ -593,43 +552,22 @@ fun LanguageScreen(
 
 @Composable
 fun HelpCenterScreen(onBack: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
-
-    val faqs = listOf(
-        Pair("How is the AI Risk Score calculated?", "Scores range from 0 to 100 based on crack length, orientation (transverse vs longitudinal), track curvature, and axle-load cycles."),
-        Pair("What triggers an immediate speed restriction?", "Any gauge corner crack exceeding 35 mm or propagating at >0.3 mm/day mandates an automated 25 km/h restriction notice."),
-        Pair("How to calibrate the optical gauge?", "Hold camera perpendicular to rail head at 40 cm distance. The HUD uses standard 60E1 rail width (72 mm rail head) as reference.")
-    )
-
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Field Engineering Guides",
-                subtitle = "Standard procedures, tolerances, and HUD calibration",
-                onBack = onBack
-            )
-        }
-
-        items(faqs) { (q, a) ->
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(
-                    text = q,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = colorScheme.onSurface
-                )
+        SubScreenHeader(title = "Field Assistance & Manual", subtitle = "Operating procedures", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Ultrasonic Gauge Calibration", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = a,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant
-                )
+                Text("Place sensor cart exactly 14.5 cm perpendicular to rail crown. Gauge should read 1435 mm (Standard).", fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Emergency Slow Orders", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("For transverse fissures exceeding 20 mm length, immediately dispatch speed restriction flag and contact Central Dispatch.", fontSize = 12.sp)
             }
         }
     }
@@ -637,60 +575,20 @@ fun HelpCenterScreen(onBack: () -> Unit) {
 
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
-
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "About RailGuard",
-                subtitle = "Platform architecture & integrity certificate",
-                onBack = onBack
-            )
-        }
-
-        item {
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(colorScheme.primary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Shield,
-                        contentDescription = null,
-                        tint = colorScheme.onPrimary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Text(
-                    text = "RailGuard Control Edition",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "AI-Powered Railway Crack Detection & Safety Platform",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                DetailRow(label = "Version", value = "1.0.0 (Build 2026.09)")
-                DetailRow(label = "Framework", value = "Android Jetpack Compose")
-                DetailRow(label = "Neural Engine", value = "Railway Multimodal Vision v3")
-                DetailRow(label = "Encryption", value = "AES-256 / SHA-256 Immutable Trace")
-                DetailRow(label = "Compliance", value = "EN 50128 / CENELEC SIL-2 Ready")
+        SubScreenHeader(title = "About RailGuard", subtitle = "Track integrity platform", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("RailGuard Autonomous Track AI", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0284C7))
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("Version 2.4.0 (Enterprise Hardware Build)", fontSize = 12.sp, color = Color.Gray)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Integrated with Central Safety Cloud Database, dual GPS telemetry fusion, computer vision crack estimation, and real-time prototype actuator control.", fontSize = 12.sp)
             }
         }
     }
@@ -708,114 +606,28 @@ fun AttentionScreen(
     onRiskHeatmap: () -> Unit,
     onBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-
-    val attentionItems = listOf(
-        Triple("CRK-2048: 46 mm Gauge Crack", "North Loop 14+320 · Speed restriction 25 km/h active", Tone.CRITICAL),
-        Triple("MT-881: Replace Rail Clip Pair", "North Loop 14+320 · Work window due 18:00 today", Tone.CRITICAL),
-        Triple("CRK-2044: Head Check Wear (28 mm)", "North Loop 14+108 · 2nd cycle monitor warning", Tone.WARNING),
-        Triple("MT-878: Grind Head Check", "East Junction 03+660 · Due in 4 days", Tone.WARNING),
-        Triple("Sensor Calibration Due", "Inertial unit accelerometer recalibration in 48h", Tone.INFO)
-    )
-
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Requires Attention",
-                subtitle = "Shift critical actions, diagnostic workspaces, and risk interventions",
-                onBack = onBack
-            )
-        }
-
-        // Dedicated Actions Hub
-        item {
-            SectionLabel(title = "CRITICAL WORKSPACES & INTERVENTIONS")
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                WorkspaceTile(
-                    title = "Create Task",
-                    subtitle = "Work order dispatch",
-                    icon = Icons.Default.AddCircle,
-                    onClick = onCreateTask,
-                    modifier = Modifier.weight(1f)
-                )
-                WorkspaceTile(
-                    title = "Compare Images",
-                    subtitle = "Crack growth audit",
-                    icon = Icons.Default.Compare,
-                    onClick = onCompareImages,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                WorkspaceTile(
-                    title = "All Observations",
-                    subtitle = "Raw sensor findings",
-                    icon = Icons.Default.Visibility,
-                    onClick = onAllObservations,
-                    modifier = Modifier.weight(1f)
-                )
-                WorkspaceTile(
-                    title = "Review Detection",
-                    subtitle = "Vision AI models",
-                    icon = Icons.Default.CameraAlt,
-                    onClick = onReviewDetection,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                WorkspaceTile(
-                    title = "Evidence Pack",
-                    subtitle = "Cryptographic PDF",
-                    icon = Icons.Default.AddModerator,
-                    onClick = onBuildEvidencePackage,
-                    modifier = Modifier.weight(1f)
-                )
-                WorkspaceTile(
-                    title = "Risk Heatmap",
-                    subtitle = "Corridor density",
-                    icon = Icons.Default.Layers,
-                    onClick = onRiskHeatmap,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-            SectionLabel(title = "HIGH PRIORITY FIELD FINDINGS")
-        }
-
-        items(attentionItems) { (title, subtitle, tone) ->
-            ListRow(
-                icon = Icons.Default.PriorityHigh,
-                title = title,
-                subtitle = subtitle,
-                trailing = tone.name,
-                tone = tone,
-                onClick = {
-                    if (title.startsWith("CRK")) onNavigateDefect() else onNavigateTask()
+        SubScreenHeader(title = "Urgent Action Required", subtitle = "High severity alerts", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Critical Sector 4B Alert", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.Red)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("Transverse crack growth rate accelerated. Derailment risk score 92/100.", fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onNavigateDefect, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
+                        Text("View Defect")
+                    }
+                    Button(onClick = onCreateTask) {
+                        Text("Dispatch Gang")
+                    }
                 }
-            )
+            }
         }
     }
 }
@@ -825,49 +637,39 @@ fun NotificationsScreen(
     notifications: List<NotificationItem>,
     onBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val isDark = LocalIsDark.current
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 90.dp)
+            .padding(16.dp)
     ) {
-        item {
-            Header(
-                title = "Notification Center",
-                subtitle = "Dispatcher orders, defect alerts, and shift logs",
-                onBack = onBack
-            )
-        }
-
-        items(notifications) { notif ->
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = notif.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    StatusPill(label = notif.tone.name, tone = notif.tone)
+        SubScreenHeader(title = "Dispatch & System Alerts", subtitle = "${notifications.size} notifications", onBack = onBack)
+        Spacer(modifier = Modifier.height(16.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(notifications, key = { it.id }) { notif ->
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(toneColor(notif.tone, isDark).copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Notifications, contentDescription = null, tint = toneColor(notif.tone, isDark), modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(notif.title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(notif.message, fontSize = 11.sp, color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569))
+                            Text(notif.time, fontSize = 10.sp, color = Color.Gray)
+                        }
+                    }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = notif.message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = notif.time,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.primary
-                )
             }
         }
     }

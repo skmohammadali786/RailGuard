@@ -139,10 +139,12 @@ fun Header(
 
 @Composable
 fun StatusPill(
-    label: String,
+    label: String = "",
+    title: String = label,
     tone: Tone = Tone.NEUTRAL,
     modifier: Modifier = Modifier
 ) {
+    val displayLabel = if (title.isNotEmpty()) title else label
     val isDark = LocalIsDark.current
     val color = toneColor(tone, isDark)
     Row(
@@ -161,7 +163,7 @@ fun StatusPill(
                 .background(color)
         )
         Text(
-            text = label,
+            text = displayLabel,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             color = color
@@ -847,3 +849,80 @@ fun RealTimeTrainLineMap(
         }
     }
 }
+
+@Composable
+fun DetailRow(label: String, value: String, modifier: Modifier = Modifier) {
+    val colorScheme = MaterialTheme.colorScheme
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+fun SecondaryButton(
+    title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth().height(48.dp),
+        enabled = enabled,
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun ScreenHeader(
+    title: String,
+    subtitle: String? = null,
+    onBack: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    Header(
+        title = title,
+        subtitle = subtitle,
+        onBack = onBack,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun StatusChip(
+    label: String = "",
+    title: String = label,
+    tone: Tone = Tone.INFO,
+    modifier: Modifier = Modifier
+) {
+    StatusPill(
+        label = label,
+        title = title,
+        tone = tone,
+        modifier = modifier
+    )
+}
+

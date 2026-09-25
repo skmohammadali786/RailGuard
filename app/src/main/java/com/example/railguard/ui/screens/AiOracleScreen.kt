@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
@@ -25,17 +27,23 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.railguard.components.*
 import com.example.railguard.model.Defect
 import com.example.railguard.model.MaintenanceTask
 import com.example.railguard.model.Tone
+import kotlinx.coroutines.launch
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import com.example.railguard.data.RailGuardFirebaseService
 
 data class AiChatMessage(
     val sender: String,
@@ -56,6 +64,9 @@ fun AiOracleScreen(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDark.current
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     // Active Neural Model
     var activeModelIndex by remember { mutableIntStateOf(0) }
@@ -138,6 +149,15 @@ fun AiOracleScreen(
                 2 -> "Nadal-KinematicEngine: Y/Q ratio = 0.68 · Wheel climb envelope safe at 25 km/h · Derailment probability 12.4%"
                 else -> "ThermalBuckle-SFT: Neutral SFT 27.0°C · Rail temp +11.4°C · Axial stress +68.4 MPa · Buckle margin safe"
             }
+            RailGuardFirebaseService.instance.recordAiAnalysis(
+                "AI_TENSOR_SCAN",
+                mapOf(
+                    "model" to models[activeModelIndex],
+                    "summary" to lastTensorScanResult,
+                    "nadalRatio" to 0.68,
+                    "confidence" to 0.992
+                )
+            )
         }
     }
 
@@ -905,6 +925,8 @@ fun AiOracleScreen(
                                     .background(colorScheme.primary.copy(alpha = 0.12f))
                                     .border(1.dp, colorScheme.primary.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                                     .clickable {
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus(force = true)
                                         chatMessages.add(AiChatMessage("user", suggestion))
                                         val (replyText, actType, actLabel) = when {
                                             suggestion.contains("speed", ignoreCase = true) -> Triple(
@@ -940,6 +962,13 @@ fun AiOracleScreen(
                                             )
                                         }
                                         chatMessages.add(AiChatMessage("assistant", replyText, actType, actLabel))
+                                        scope.launch {
+                                            RailGuardFirebaseService.instance.saveAiOracleQuery(
+                                                query = suggestion,
+                                                response = replyText,
+                                                model = models[activeModelIndex]
+                                            )
+                                        }
                                     }
                                     .padding(horizontal = 9.dp, vertical = 5.dp)
                             ) {
@@ -955,6 +984,29 @@ fun AiOracleScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    val doSend = {
+                        if (queryText.isNotBlank()) {
+                            val userMsg = queryText
+                            keyboardController?.hide()
+                            focusManager.clearFocus(force = true)
+                            chatMessages.add(AiChatMessage("user", userMsg))
+                            queryText = ""
+                            val reply = "🤖 RailVision-DeepTrack Analysis for '$userMsg':\n\n" +
+                                "• Sector 14 track integrity verified at 94.2% nominal.\n" +
+                                "• Critical defect CRK-2048 (46.2mm at Chainage 14+320) is continuously monitored by acoustic emission sensors.\n" +
+                                "• Multi-Tensor inference confidence: 99.2%.\n" +
+                                "• Safety Directive: Mandatory 25 km/h TSR remains active on Train TR-104."
+                            chatMessages.add(AiChatMessage("assistant", reply, "TSR", "Verify Cab Interlock"))
+                            scope.launch {
+                                RailGuardFirebaseService.instance.saveAiOracleQuery(
+                                    query = userMsg,
+                                    response = reply,
+                                    model = models[activeModelIndex]
+                                )
+                            }
+                        }
+                    }
+
                     // Input Box
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -965,6 +1017,8 @@ fun AiOracleScreen(
                             onValueChange = { queryText = it },
                             placeholder = { Text("Ask RailGuard AI (e.g., crack kinetics, speed, thermal)...", fontSize = 11.sp) },
                             singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { doSend() }),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .weight(1f)
@@ -972,19 +1026,7 @@ fun AiOracleScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         IconButton(
-                            onClick = {
-                                if (queryText.isNotBlank()) {
-                                    val userMsg = queryText
-                                    chatMessages.add(AiChatMessage("user", userMsg))
-                                    queryText = ""
-                                    val reply = "🤖 RailVision-DeepTrack Analysis for '$userMsg':\n\n" +
-                                        "• Sector 14 track integrity verified at 94.2% nominal.\n" +
-                                        "• Critical defect CRK-2048 (46.2mm at Chainage 14+320) is continuously monitored by acoustic emission sensors.\n" +
-                                        "• Multi-Tensor inference confidence: 99.2%.\n" +
-                                        "• Safety Directive: Mandatory 25 km/h TSR remains active on Train TR-104."
-                                    chatMessages.add(AiChatMessage("assistant", reply, "TSR", "Verify Cab Interlock"))
-                                }
-                            },
+                            onClick = { doSend() },
                             modifier = Modifier
                                 .size(46.dp)
                                 .clip(RoundedCornerShape(8.dp))

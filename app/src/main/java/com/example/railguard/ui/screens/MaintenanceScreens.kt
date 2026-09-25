@@ -14,9 +14,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.example.railguard.components.*
 import com.example.railguard.model.MaintenanceTask
 import com.example.railguard.model.Tone
@@ -259,6 +261,9 @@ fun TaskDetailsScreen(
     onBack: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var isSyncingToFirebase by remember { mutableStateOf(false) }
+    var firebaseSyncMsg by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(
         modifier = Modifier
@@ -273,6 +278,59 @@ fun TaskDetailsScreen(
                 subtitle = task.title,
                 onBack = onBack
             )
+        }
+
+        // Firebase Cloud Sync Action
+        item {
+            Card(
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(Color(0xFFFFA000).copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color(0xFFFFA000), modifier = Modifier.size(16.dp))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Cloud Work Order Sync", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(firebaseSyncMsg ?: "Replicate task state to central cloud", fontSize = 10.sp, color = colorScheme.onSurfaceVariant)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            isSyncingToFirebase = true
+                            scope.launch {
+                                com.example.railguard.data.RailGuardFirebaseService.instance.uploadTaskToFirebase(task)
+                                isSyncingToFirebase = false
+                                firebaseSyncMsg = "Synchronized to Central Cloud!"
+                            }
+                        },
+                        enabled = !isSyncingToFirebase,
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Text(if (isSyncingToFirebase) "Pushing..." else "Sync Now", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
         }
 
         item {
@@ -398,6 +456,7 @@ fun MaintenanceVerificationScreen(
     onBack: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
     var restrictionReleased by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -440,6 +499,13 @@ fun MaintenanceVerificationScreen(
                 icon = Icons.Default.CheckCircle,
                 onClick = {
                     restrictionReleased = true
+                    scope.launch {
+                        com.example.railguard.data.RailGuardFirebaseService.instance.dispatchTsrToFirebase("FLEET-ALL", 120, "Speed restriction lifted by E. Chen")
+                        com.example.railguard.data.RailGuardFirebaseService.instance.logSafetyAuditEvent(
+                            "LINE_SPEED_RESTORED",
+                            mapOf("corridor" to "North Loop (Section 14)", "speedKmh" to 120, "authorizedBy" to "E. Chen")
+                        )
+                    }
                     onVerified()
                 }
             )
@@ -450,6 +516,9 @@ fun MaintenanceVerificationScreen(
 @Composable
 fun MaintenanceAnalyticsScreen(onBack: () -> Unit) {
     val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var isSyncingKpi by remember { mutableStateOf(false) }
+    var kpiSyncMsg by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(
         modifier = Modifier
@@ -506,6 +575,28 @@ fun MaintenanceAnalyticsScreen(onBack: () -> Unit) {
                 DetailRow(label = "Critical (Immediate/4h)", value = "100% adherence (2 of 2)")
                 DetailRow(label = "High (24h SLA)", value = "94% adherence (16 of 17)")
                 DetailRow(label = "Routine (7-day SLA)", value = "89% adherence (17 of 19)")
+
+                Spacer(modifier = Modifier.height(14.dp))
+                if (kpiSyncMsg != null) {
+                    Text(kpiSyncMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                PrimaryButton(
+                    title = if (isSyncingKpi) "Syncing..." else "Transmit Maintenance KPIs to Cloud",
+                    icon = Icons.Default.CloudUpload,
+                    onClick = {
+                        isSyncingKpi = true
+                        scope.launch {
+                            com.example.railguard.data.RailGuardFirebaseService.instance.recordAiAnalysis(
+                                "MAINTENANCE_KPIS",
+                                mapOf("meanFixTimeHours" to 18.4, "closedInSla" to 0.91, "monthlyTickets" to 38)
+                            )
+                            isSyncingKpi = false
+                            kpiSyncMsg = "KPI metrics persisted to Cloud DB ✓"
+                        }
+                    }
+                )
             }
         }
     }

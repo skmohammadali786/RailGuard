@@ -28,6 +28,7 @@ import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
 import com.example.railguard.util.PdfExporter
+import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
@@ -220,6 +221,7 @@ fun BuildEvidencePackageScreen(
     onBack: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
     var includeFrames by remember { mutableStateOf(true) }
     var includeGps by remember { mutableStateOf(true) }
     var includeAiScores by remember { mutableStateOf(true) }
@@ -283,7 +285,22 @@ fun BuildEvidencePackageScreen(
             PrimaryButton(
                 title = "Compile & Sign Evidence Pack",
                 icon = Icons.Default.Lock,
-                onClick = onGenerated
+                onClick = {
+                    scope.launch {
+                        com.example.railguard.data.RailGuardFirebaseService.instance.saveReportPackage(
+                            title = "Evidence Pack - Sector 14",
+                            hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                            details = mapOf(
+                                "includeFrames" to includeFrames,
+                                "includeGps" to includeGps,
+                                "includeAiScores" to includeAiScores,
+                                "includeDynamics" to includeDynamics,
+                                "includeSignatures" to includeSignatures
+                            )
+                        )
+                    }
+                    onGenerated()
+                }
             )
         }
     }
