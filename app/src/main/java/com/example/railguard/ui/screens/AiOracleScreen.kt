@@ -85,7 +85,7 @@ fun AiOracleScreen(
     var scanProgress by remember { mutableFloatStateOf(0f) }
     var currentScanPhase by remember { mutableStateOf("Ready") }
     var lastTensorScanResult by remember {
-        mutableStateOf("Multi-Tensor Inference Synced · Section 14 · Defect CRK-2048 verified at 46.2mm depth (99.2% confidence)")
+        mutableStateOf("Multi-Tensor Inference Synced · Edge AI Model Online · Continuous Corridor Monitoring")
     }
 
     // Interactive Action Feedback Banner
@@ -117,10 +117,10 @@ fun AiOracleScreen(
         mutableStateListOf(
             AiChatMessage(
                 sender = "assistant",
-                text = "⚡ System initialized: RailVision-DeepTrack v4.2 Edge TPU cluster online (16 ms latency).\n\n" +
-                    "Real-time telemetric streams active across 4 corridor sectors. Critical flaw detected: CRK-2048 at Chainage 14+320 UP Line (46.2mm transverse crack, Paris growth +0.41 mm/day).",
+                text = "⚡ System initialized: RailVision-DeepTrack Edge AI cluster online (16 ms latency).\n\n" +
+                    "Real-time telemetric streams active across monitored corridor sectors. Connected to Central Safety Cloud Database.",
                 actionableType = "TSR",
-                actionableLabel = "Verify TSR 25 km/h on TR-104"
+                actionableLabel = "View Live Corridor Telemetry"
             )
         )
     }
@@ -606,19 +606,25 @@ fun AiOracleScreen(
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
+                        val currentTopDefect = defects.firstOrNull()
                         Text(
-                            text = "Defect CRK-2048 (Chainage 14+320 UP Line)",
+                            text = if (currentTopDefect != null) "Defect ${currentTopDefect.id} (${currentTopDefect.section})" else "Corridor Anomaly Kinetics & Fracture Analysis",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "• Current Crack Depth: 46.2 mm (92.4% through 60E1 railhead)\n" +
-                                "• Growth Velocity: +0.41 mm/day under 2,400t freight cyclic loads\n" +
-                                "• Critical Rail Fracture Limit: 50.0 mm (72.4 Operating Hours remaining)\n" +
-                                "• Governing Equation: da/dN = 2.4×10⁻¹¹ (ΔK)³·² with ΔK = 24.2 MPa√m\n" +
-                                "• Fracture Toughness: K_IC = 30.0 MPa√m (Risk Margin: 5.8 MPa√m)\n" +
-                                "• Directive: Emergency fishplate splice clamp and 25 km/h restriction mandatory.",
+                            text = if (currentTopDefect != null) {
+                                "• Track ID: ${currentTopDefect.id} at ${currentTopDefect.chainageCoordinate}\n" +
+                                "• Estimated Flaw Size: ${currentTopDefect.estimatedLength}\n" +
+                                "• Risk Index: ${currentTopDefect.riskScore}/100 · AI Confidence: ${currentTopDefect.aiConfidencePercent}%\n" +
+                                "• Prescribed Action: ${currentTopDefect.aiPrescribedAction}"
+                            } else {
+                                "• Continuous real-time fracture kinetics evaluation online\n" +
+                                "• Paris-Erdogan crack propagation model: da/dN = C(ΔK)^m active\n" +
+                                "• Monitored by ultrasonic transducers, acoustic emission & optical vision\n" +
+                                "• Telemetry streams live from Raspberry Pi sensor unit"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
@@ -631,10 +637,10 @@ fun AiOracleScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             PrimaryButton(
-                                title = "Inspect CRK-2048",
+                                title = if (currentTopDefect != null) "Inspect ${currentTopDefect.id}" else "Defect Registry",
                                 icon = Icons.Default.Warning,
                                 onClick = {
-                                    if (defects.isNotEmpty()) onInspectDefect(defects.first())
+                                    if (currentTopDefect != null) onInspectDefect(currentTopDefect) else onNavigateCrackGrowth()
                                 },
                                 modifier = Modifier.weight(1f)
                             )
@@ -913,8 +919,8 @@ fun AiOracleScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         listOf(
-                            "Safest speed for Section 14?",
-                            "When will CRK-2048 break?",
+                            "Safest operating speed?",
+                            "Predict crack rupture window?",
                             "Work possession window?",
                             "CWR buckling risk?",
                             "Explain Nadal ratio"
@@ -930,14 +936,14 @@ fun AiOracleScreen(
                                         chatMessages.add(AiChatMessage("user", suggestion))
                                         val (replyText, actType, actLabel) = when {
                                             suggestion.contains("speed", ignoreCase = true) -> Triple(
-                                                "⚡ Under current 46.2mm transverse crack and 300m curve radius conditions, maximum safe operating speed is strictly 25 km/h.\n\n" +
-                                                    "Exceeding 35 km/h escalates wheel climb derailment risk to 48.7%. Exceeding 45 km/h causes 96.2% derailment probability via Nadal flange climb.",
+                                                "⚡ Under current corridor geometry and curve radius conditions, maximum safe operating speed is evaluated based on live sensor feed.\n\n" +
+                                                    "If flaw is detected, exceeding 35 km/h escalates wheel climb derailment risk. Safe TSR is auto-dispatched to cab.",
                                                 "TSR",
-                                                "Confirm Cab TSR 25 km/h"
+                                                "Confirm Cab TSR Restrictions"
                                             )
-                                            suggestion.contains("break", ignoreCase = true) -> Triple(
-                                                "💥 Crack CRK-2048 (Depth 46.2mm) will reach the 50.0mm critical rupture limit in 72.4 Operating Hours under 2,400t freight passes (da/dN = +0.41 mm/day).\n\n" +
-                                                    "Recommendation: Install emergency splice clamps during tonight's 01:15 GMT window.",
+                                            suggestion.contains("rupture", ignoreCase = true) || suggestion.contains("break", ignoreCase = true) -> Triple(
+                                                "💥 Flaw rupture kinetics are modeled using Paris-Erdogan law (da/dN = C(ΔK)^m). Under continuous freight passes, growth velocity is tracked against the critical rail fracture limit.\n\n" +
+                                                    "Recommendation: Real-time ultrasonic transducer monitoring is active.",
                                                 "GROWTH",
                                                 "View Crack Growth FEA Curve"
                                             )
@@ -991,11 +997,19 @@ fun AiOracleScreen(
                             focusManager.clearFocus(force = true)
                             chatMessages.add(AiChatMessage("user", userMsg))
                             queryText = ""
+                            val topDef = defects.firstOrNull()
                             val reply = "🤖 RailVision-DeepTrack Analysis for '$userMsg':\n\n" +
-                                "• Sector 14 track integrity verified at 94.2% nominal.\n" +
-                                "• Critical defect CRK-2048 (46.2mm at Chainage 14+320) is continuously monitored by acoustic emission sensors.\n" +
-                                "• Multi-Tensor inference confidence: 99.2%.\n" +
-                                "• Safety Directive: Mandatory 25 km/h TSR remains active on Train TR-104."
+                                if (topDef != null) {
+                                    "• Corridor track integrity evaluated under active monitoring.\n" +
+                                    "• Track flaw ${topDef.id} (${topDef.estimatedLength} at ${topDef.chainageCoordinate}) is monitored in real-time.\n" +
+                                    "• Multi-Tensor inference confidence: ${topDef.aiConfidencePercent}%.\n" +
+                                    "• Safety Directive: ${topDef.aiPrescribedAction}"
+                                } else {
+                                    "• Corridor track integrity evaluated at nominal condition.\n" +
+                                    "• Continuous ultrasonic, thermal and accelerometer telemetry active.\n" +
+                                    "• Multi-Tensor inference confidence: 99.4%.\n" +
+                                    "• Safety Directive: Operating at normal line speed."
+                                }
                             chatMessages.add(AiChatMessage("assistant", reply, "TSR", "Verify Cab Interlock"))
                             scope.launch {
                                 RailGuardFirebaseService.instance.saveAiOracleQuery(

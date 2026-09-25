@@ -106,7 +106,7 @@ fun SettingsScreen(
                     SettingsRowTile(
                         icon = Icons.Default.Person,
                         title = "Inspector Profile & Badges",
-                        subtitle = firebaseService.currentUser?.email ?: "e.chen@railguard.field",
+                        subtitle = firebaseService.currentUser?.email ?: "Registered Safety Inspector",
                         onClick = { onNavigate("profile") }
                     )
 

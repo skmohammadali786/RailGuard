@@ -130,6 +130,7 @@ fun TrainConnectionScreen(
 
     var selectedTrainIndex by remember { mutableIntStateOf(0) }
     val activeTrain = trainFleet[selectedTrainIndex]
+    val firebaseService = remember { com.example.railguard.data.RailGuardFirebaseService.instance }
 
     var isConnected by remember { mutableStateOf(true) }
     var isStreamingLive by remember { mutableStateOf(true) }
@@ -196,39 +197,36 @@ fun TrainConnectionScreen(
             delay(1200)
             packetCount += 6
             cycleCounter++
-            currentTemp = (28.2f + (kotlin.random.Random.nextFloat() * 0.4f))
+
+            // Fetch live Raspberry Pi & ESP32 telemetry from cloud RTDB every 2 cycles
+            if (cycleCounter % 2 == 0) {
+                firebaseService.fetchLatestSensorTelemetry()
+            }
+
+            val rpi = firebaseService.latestSensorTelemetry
+            if (rpi != null && rpi.railTempC > 0f) {
+                currentTemp = rpi.railTempC
+            } else {
+                currentTemp = (28.2f + (kotlin.random.Random.nextFloat() * 0.4f))
+            }
 
             // Jitter current speeds based on active TSR
             trainFleet.forEachIndexed { idx, tr ->
                 val base = tr.activeTsr?.toFloat() ?: tr.normalSpeedCap.toFloat()
-                val targetSpeed = base * 0.95f + (kotlin.random.Random.nextFloat() * 2.0f)
+                val targetSpeed = if (rpi != null && rpi.axleSpeedKmh > 0f && idx == 0) {
+                    rpi.axleSpeedKmh
+                } else {
+                    base * 0.95f + (kotlin.random.Random.nextFloat() * 2.0f)
+                }
                 trainFleet[idx] = tr.copy(liveSpeed = targetSpeed)
             }
 
-            // Sync live ESP32 & Train telemetry every 3 cycles to cloud RTDB
-            if (cycleCounter % 3 == 0) {
-                com.example.railguard.data.RailGuardFirebaseService.instance.uploadEspSensorData(
-                    nodeId = "ESP32-TRACK-01",
-                    ultrasonicDepthMm = 46.2f,
-                    vibrationG = 0.041f,
-                    railTempC = currentTemp,
-                    axleSpeedKmh = activeTrain.liveSpeed,
-                    chainage = activeTrain.chainage,
-                    status = "LIVE_TELEMETRY_LINKED"
-                )
-                com.example.railguard.data.RailGuardFirebaseService.instance.saveTrainTelemetry(
-                    trainId = activeTrain.id,
-                    name = activeTrain.name,
-                    speed = activeTrain.liveSpeed,
-                    tsr = activeTrain.activeTsr,
-                    section = activeTrain.corridorSection,
-                    chainage = activeTrain.chainage,
-                    status = if (activeTrain.activeTsr != null) "TSR_RESTRICTED" else "TRACK_RUN_NOMINAL"
-                )
-            }
-
             val ts = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
-            val newLog = "[$ts] TX -> ${activeTrain.id} & ESP32: {\"spd\": ${String.format("%.1f", activeTrain.liveSpeed)}, \"temp\": ${String.format("%.1f", currentTemp)}°C, \"vibe\": 0.041g, \"tsr\": ${activeTrain.activeTsr ?: "NONE"}, \"pkts\": $packetCount}"
+            val newLog = if (rpi != null) {
+                "[$ts] RX <- ${rpi.nodeId} (${rpi.hardware}): {\"ut\": ${rpi.ultrasonicDepthMm}mm, \"vibe\": ${rpi.vibrationG}g, \"temp\": ${rpi.railTempC}°C, \"spd\": ${rpi.axleSpeedKmh}km/h}"
+            } else {
+                "[$ts] TX -> ${activeTrain.id} & Telemetry Hub: {\"spd\": ${String.format("%.1f", activeTrain.liveSpeed)}, \"temp\": ${String.format("%.1f", currentTemp)}°C, \"tsr\": ${activeTrain.activeTsr ?: "NONE"}, \"pkts\": $packetCount}"
+            }
             liveLogEntries.add(newLog)
             if (liveLogEntries.size > 25) {
                 liveLogEntries.removeAt(0)
@@ -526,9 +524,11 @@ fun TrainConnectionScreen(
             Spacer(modifier = Modifier.height(14.dp))
         }
 
-        // ESP32 HARDWARE SENSOR HUB & CLOUD RTDB TRANSDUCER ARRAY
+        // RASPBERRY PI & HARDWARE SENSOR HUB
         item {
-            SectionLabel(title = "ESP32 TRACK SENSOR HUB & TRANSDUCER TELEMETRY")
+            val rpi = firebaseService.latestSensorTelemetry
+
+            SectionLabel(title = "RASPBERRY PI & TRACK SENSOR HUB")
 
             Card(
                 shape = RoundedCornerShape(12.dp),
@@ -558,21 +558,24 @@ fun TrainConnectionScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "ESP32-TRACK-01 HUB",
+                                    text = rpi?.nodeId ?: "RPI-TRACK-01 HUB",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace,
                                     color = if (isDark) Color.White else Color(0xFF0F172A)
                                 )
                                 Text(
-                                    text = "Xtensa 240MHz · WiFi/5G Gateway to RTDB",
+                                    text = rpi?.hardware ?: "Raspberry Pi 4 / ESP32 Sensor Gateway",
                                     fontSize = 10.sp,
                                     color = Color(0xFF0284C7)
                                 )
                             }
                         }
 
-                        StatusPill(label = "CLOUD STREAMING", tone = Tone.HEALTHY)
+                        StatusPill(
+                            label = if (rpi != null) "LIVE TELEMETRY" else "AWAITING RPI",
+                            tone = if (rpi != null) Tone.HEALTHY else Tone.INFO
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -591,8 +594,19 @@ fun TrainConnectionScreen(
                         ) {
                             Column {
                                 Text("ULTRASONIC UT", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                                Text("46.2 mm", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444), fontFamily = FontFamily.Monospace)
-                                Text("Flaw Peak Echo", fontSize = 8.sp, color = colorScheme.onSurfaceVariant)
+                                val utVal = if (rpi != null && rpi.ultrasonicDepthMm > 0f) "${String.format("%.1f", rpi.ultrasonicDepthMm)} mm" else "0.0 mm"
+                                Text(
+                                    text = utVal,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (rpi != null && rpi.ultrasonicDepthMm > 0f) Color(0xFFEF4444) else Color(0xFF22C55E),
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = if (rpi != null && rpi.ultrasonicDepthMm > 0f) "Flaw Peak Echo" else "Track Clear",
+                                    fontSize = 8.sp,
+                                    color = colorScheme.onSurfaceVariant
+                                )
                             }
                         }
 
@@ -605,8 +619,15 @@ fun TrainConnectionScreen(
                         ) {
                             Column {
                                 Text("VIBRATION RMS", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                                Text("0.041g", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF22C55E), fontFamily = FontFamily.Monospace)
-                                Text("ADXL345 3-Axis", fontSize = 8.sp, color = colorScheme.onSurfaceVariant)
+                                val vibeVal = if (rpi != null) "${String.format("%.3f", rpi.vibrationG)}g" else "0.000g"
+                                Text(
+                                    text = vibeVal,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF22C55E),
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text("3-Axis Accelerometer", fontSize = 8.sp, color = colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -626,8 +647,15 @@ fun TrainConnectionScreen(
                         ) {
                             Column {
                                 Text("RAILHEAD TEMP", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                                Text("${String.format("%.1f", currentTemp)}°C", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFF59E0B), fontFamily = FontFamily.Monospace)
-                                Text("MLX90614 Contact", fontSize = 8.sp, color = colorScheme.onSurfaceVariant)
+                                val tempVal = if (rpi != null && rpi.railTempC > 0f) "${String.format("%.1f", rpi.railTempC)}°C" else "${String.format("%.1f", currentTemp)}°C"
+                                Text(
+                                    text = tempVal,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFFF59E0B),
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text("Thermal Sensor", fontSize = 8.sp, color = colorScheme.onSurfaceVariant)
                             }
                         }
 
@@ -639,9 +667,16 @@ fun TrainConnectionScreen(
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("AXLE TACHOMETER", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                                Text("${String.format("%.1f", activeTrain.liveSpeed)} km/h", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF38BDF8), fontFamily = FontFamily.Monospace)
-                                Text("Hall Effect Wheel", fontSize = 8.sp, color = colorScheme.onSurfaceVariant)
+                                Text("AXLE SPEED", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
+                                val spdVal = if (rpi != null && rpi.axleSpeedKmh > 0f) "${String.format("%.1f", rpi.axleSpeedKmh)} km/h" else "${String.format("%.1f", activeTrain.liveSpeed)} km/h"
+                                Text(
+                                    text = spdVal,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF38BDF8),
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text("Tachometer Telemetry", fontSize = 8.sp, color = colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -780,10 +815,10 @@ fun TrainConnectionScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     val defectTriggers = listOf(
-                        Tuple5("CRK-2048", "Transverse Crack (46mm)", "Section 14 (North Loop)", "14+320 UP", 25),
-                        Tuple5("SQT-1092", "Squat Surface Spall (22mm)", "Section 08 (South Freight Yard)", "08+140 DOWN", 40),
-                        Tuple5("GAU-0301", "Dynamic Gauge Spread (+9.4mm)", "Section 03 (East High-Speed)", "03+450 UP", 60),
-                        Tuple5("BLT-0144", "Fishplate Web Fatigue Crack", "Section 01 (West Deep Cut)", "01+890 DOWN", 35)
+                        Tuple5("FLAW-01", "Transverse Rail Flaw", "Section 14 (North Loop)", "14+320 UP", 25),
+                        Tuple5("SQT-02", "Squat Surface Spall", "Section 08 (South Freight Yard)", "08+140 DOWN", 40),
+                        Tuple5("GAU-03", "Gauge Variation", "Section 03 (East High-Speed)", "03+450 UP", 60),
+                        Tuple5("BLT-04", "Fishplate Joint Flaw", "Section 01 (West Deep Cut)", "01+890 DOWN", 35)
                     )
 
                     defectTriggers.forEach { (defId, defName, sec, chn, tsr) ->

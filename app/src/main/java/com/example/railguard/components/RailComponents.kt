@@ -792,8 +792,8 @@ fun RealTimeTrainLineMap(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     listOf(
-                        Triple(Tone.CRITICAL, "CRK-2048 (46mm)", "km 14+320"),
-                        Triple(Tone.WARNING, "CRK-2044 (28mm)", "km 14+108"),
+                        Triple(Tone.CRITICAL, "FLAW-01 (Active)", "km 14+320"),
+                        Triple(Tone.WARNING, "JOINT-02 (Monitored)", "km 14+108"),
                         Triple(Tone.INFO, "Switch 08A", "km 08+800")
                     ).forEachIndexed { index, (tone, name, loc) ->
                         val color = toneColor(tone, true)

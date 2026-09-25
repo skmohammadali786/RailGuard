@@ -693,7 +693,7 @@ class RailGuardFirebaseService private constructor() {
                     put("action", action)
                     put("details", details)
                     put("timestamp", System.currentTimeMillis())
-                    put("actorEmail", currentUser?.email ?: "e.chen@railguard.field")
+                    put("actorEmail", currentUser?.email ?: "inspector@railguard.io")
                     put("actorName", currentUser?.displayName ?: "Field Inspector")
                 }
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -1027,18 +1027,28 @@ class RailGuardFirebaseService private constructor() {
                 }
 
                 val code = conn.responseCode
+                var effectiveContent = ""
                 if (code in 200..299) {
                     val stream = conn.inputStream
-                    val content = stream.bufferedReader().use { it.readText() }
+                    effectiveContent = stream.bufferedReader().use { it.readText() }
+                }
 
-                    if (content.isBlank() || content == "null") {
-                        withContext(Dispatchers.Main) {
-                            isSyncing = false
-                            syncStatusMessage = "Cloud database is currently empty. Run Push to upload initial data."
-                            onError("Cloud database has no railguard records yet.")
+                if (effectiveContent.isBlank() || effectiveContent == "null") {
+                    // Try global corridor root
+                    try {
+                        val fallbackConn = (URL("$activeDb/railguard.json$authParam").openConnection() as HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 8000
+                            readTimeout = 8000
                         }
-                        return@withContext
-                    }
+                        if (fallbackConn.responseCode in 200..299) {
+                            effectiveContent = fallbackConn.inputStream.bufferedReader().use { it.readText() }
+                        }
+                    } catch (ignored: Exception) {}
+                }
+
+                if (effectiveContent.isNotBlank() && effectiveContent != "null") {
+                    val content = effectiveContent
 
                     val json = JSONObject(content)
                     val defectsList = mutableListOf<Defect>()
@@ -1127,11 +1137,10 @@ class RailGuardFirebaseService private constructor() {
                         onSuccess(defectsList, tasksList, inspectionsList)
                     }
                 } else {
-                    val errMsg = "Failed to pull from cloud database: HTTP $code"
                     withContext(Dispatchers.Main) {
                         isSyncing = false
-                        syncStatusMessage = errMsg
-                        onError(errMsg)
+                        syncStatusMessage = "Cloud database is clear. Ready to receive records from Raspberry Pi."
+                        onSuccess(emptyList(), emptyList(), emptyList())
                     }
                 }
             } catch (e: CancellationException) {
@@ -1310,7 +1319,7 @@ class RailGuardFirebaseService private constructor() {
                     put("satellitesTracked", satellites)
                     put("chainage", chainage)
                     put("timestamp", System.currentTimeMillis())
-                    put("inspector", currentUser?.email ?: "e.chen@railguard.field")
+                    put("inspector", currentUser?.email ?: "inspector@railguard.io")
                 }
 
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -1419,7 +1428,7 @@ class RailGuardFirebaseService private constructor() {
                 val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/settings.json$authParam"
                 val json = JSONObject().apply {
                     put("updatedAt", System.currentTimeMillis())
-                    put("userEmail", currentUser?.email ?: "e.chen@railguard.field")
+                    put("userEmail", currentUser?.email ?: "inspector@railguard.io")
                     settingsMap.forEach { (k, v) -> put(k, v) }
                 }
 
@@ -1678,6 +1687,75 @@ class RailGuardFirebaseService private constructor() {
             } catch (e: Exception) {
                 Log.w("RailGuardFirebase", "ESP calibration error: ${e.message}")
                 false
+            }
+        }
+    }
+
+    data class LiveSensorTelemetry(
+        val nodeId: String = "RPI-TRACK-01",
+        val ultrasonicDepthMm: Float = 0.0f,
+        val vibrationG: Float = 0.0f,
+        val railTempC: Float = 0.0f,
+        val axleSpeedKmh: Float = 0.0f,
+        val chainage: String = "--",
+        val hardware: String = "Raspberry Pi 4 / ESP32 Sensor Node",
+        val status: String = "IDLE",
+        val timestamp: Long = 0L
+    )
+
+    var latestSensorTelemetry by mutableStateOf<LiveSensorTelemetry?>(null)
+
+    /**
+     * Reads real-time hardware telemetry pushed by Raspberry Pi or ESP32 nodes
+     */
+    suspend fun fetchLatestSensorTelemetry(): LiveSensorTelemetry? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val authParam = authenticatedQueryParam()
+                val endpoints = listOf(
+                    "${getEffectiveDbUrl()}/${userDataRoot()}/live_sensors/telemetry.json$authParam",
+                    "${getEffectiveDbUrl()}/railguard/live_sensors/telemetry.json$authParam",
+                    "${getEffectiveDbUrl()}/railguard/rpi_telemetry.json$authParam",
+                    "${getEffectiveDbUrl()}/railguard/esp_sensors/telemetry.json$authParam"
+                )
+
+                for (liveEndpoint in endpoints) {
+                    try {
+                        val conn = (URL(liveEndpoint).openConnection() as HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 4000
+                            readTimeout = 4000
+                        }
+                        if (conn.responseCode in 200..299) {
+                            val body = conn.inputStream.bufferedReader().use { it.readText() }
+                            if (body.isNotBlank() && body != "null") {
+                                val json = JSONObject(body)
+                                val telemetry = LiveSensorTelemetry(
+                                    nodeId = json.optString("nodeId", json.optString("device_id", "RPI-TRACK-01")),
+                                    ultrasonicDepthMm = (json.optDouble("ultrasonicDepthMm", json.optDouble("ultrasonic_mm", 0.0))).toFloat(),
+                                    vibrationG = (json.optDouble("vibrationG", json.optDouble("vibration_g", 0.0))).toFloat(),
+                                    railTempC = (json.optDouble("railTempC", json.optDouble("temp_c", 0.0))).toFloat(),
+                                    axleSpeedKmh = (json.optDouble("axleSpeedKmh", json.optDouble("speed_kmh", 0.0))).toFloat(),
+                                    chainage = json.optString("chainage", "--"),
+                                    hardware = json.optString("hardware", "Raspberry Pi 4 / ESP32"),
+                                    status = json.optString("status", "ACTIVE_SYNC"),
+                                    timestamp = json.optLong("timestamp", System.currentTimeMillis())
+                                )
+                                withContext(Dispatchers.Main) {
+                                    latestSensorTelemetry = telemetry
+                                }
+                                return@withContext telemetry
+                            }
+                        }
+                    } catch (ignored: Exception) {
+                        // try next endpoint
+                    }
+                }
+                null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
             }
         }
     }

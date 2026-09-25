@@ -43,8 +43,8 @@ fun ReportsScreen(
 
     val individualReportTypes = listOf(
         Triple("Daily Shift Safety Report", "Full patrol sweep, chainage coverage, active restrictions & sign-off", Tone.INFO),
-        Triple("Critical Defect & Rupture Dossier", "CRK-2048 growth kinetics, ultrasonic trace, derailment factor", Tone.CRITICAL),
-        Triple("Maintenance Work Orders & Dispatch", "MT-881 clip pair repair, welder schedule & clearance window", Tone.WARNING),
+        Triple("Critical Defect & Rupture Dossier", "Track flaw growth kinetics, ultrasonic trace, derailment factor", Tone.CRITICAL),
+        Triple("Maintenance Work Orders & Dispatch", "Track fastener repair, welder schedule & clearance window", Tone.WARNING),
         Triple("Track Geometry & Alignment Audit", "Gauge uniformity, cant deficiency, cross-level variance index", Tone.HEALTHY),
         Triple("Thermal Stress & CWR Buckle Risk", "Continuous welded rail neutral temp evaluation & expansion", Tone.WARNING),
         Triple("Cryptographic Evidence Bundle", "Multi-sensor frames, RTK GPS logs & SHA-256 digital seals", Tone.HEALTHY)
@@ -752,7 +752,7 @@ fun PdfPreviewScreen(
                             Text("DIRECTIVE", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.2f))
                         }
 
-                        // Defect 1: CRK-2048
+                        // Defect 1
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -761,9 +761,9 @@ fun PdfPreviewScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(2f)) {
-                                Text("CRK-2048 · Transverse Crack", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Depth: 46mm · Gauge Face · Tie #14-320", color = Color(0xFF475569), fontSize = 8.sp)
-                                Text("Growth: +0.71 mm/day · Rupture in 72h", color = Color(0xFFB91C1C), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text("FLAW-01 · Transverse Crack", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Depth: 46mm · Gauge Face · Monitored Sector", color = Color(0xFF475569), fontSize = 8.sp)
+                                Text("Growth Velocity Monitored · 72h Window", color = Color(0xFFB91C1C), fontSize = 8.sp, fontWeight = FontWeight.Bold)
                             }
                             Column(modifier = Modifier.weight(1.5f)) {
                                 Text("14+320 UP", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
@@ -787,7 +787,7 @@ fun PdfPreviewScreen(
 
                         HorizontalDivider(color = Color(0xFFF1F5F9))
 
-                        // Defect 2: CRK-2044
+                        // Defect 2
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -796,7 +796,7 @@ fun PdfPreviewScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(2f)) {
-                                Text("CRK-2044 · Head Check Flaw", color = Color(0xFFB45309), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("FLAW-02 · Head Check Flaw", color = Color(0xFFB45309), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 Text("Length: 28mm · Running Surface · Tie #14-112", color = Color(0xFF475569), fontSize = 8.sp)
                                 Text("Growth: +0.22 mm/day · Non-immediate", color = Color(0xFF64748B), fontSize = 8.sp)
                             }

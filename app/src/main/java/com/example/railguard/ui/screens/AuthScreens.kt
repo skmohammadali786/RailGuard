@@ -312,8 +312,8 @@ fun LoginScreen(
     var authMode by remember { mutableIntStateOf(0) }
     
     // Sign In fields
-    var email by remember { mutableStateOf("e.chen@railguard.field") }
-    var password by remember { mutableStateOf("railguard2026") }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     
     // Sign Up fields
@@ -932,7 +932,7 @@ fun ForgotPasswordScreen(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val settings = LocalAppSettings.current
-    var email by remember { mutableStateOf("e.chen@railguard.field") }
+    var email by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
 
     Box(
@@ -1084,7 +1084,7 @@ fun OtpScreen(
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Enter the 6-digit passcode dispatched to e.chen@railguard.field",
+            text = "Enter the 6-digit passcode dispatched to your email address",
             style = MaterialTheme.typography.bodyMedium,
             color = colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

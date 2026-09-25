@@ -87,6 +87,9 @@ fun HomeScreen(
 
         // Shift Status Card
         item {
+            val topDefect = defects.firstOrNull()
+            val criticalDefect = defects.firstOrNull { it.tone == Tone.CRITICAL }
+
             RailCard(
                 modifier = Modifier.padding(vertical = 4.dp),
                 onClick = { onNavigate("live_inspection") }
@@ -96,9 +99,12 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    StatusPill(label = "PATROL IN PROGRESS", tone = Tone.INFO)
+                    StatusPill(
+                        label = if (criticalDefect != null) "CRITICAL ATTENTION" else "PATROL IN PROGRESS",
+                        tone = if (criticalDefect != null) Tone.CRITICAL else Tone.INFO
+                    )
                     Text(
-                        text = "14:00 - 18:00",
+                        text = "Active Shift",
                         style = MaterialTheme.typography.labelSmall,
                         color = colorScheme.onSurfaceVariant
                     )
@@ -107,24 +113,24 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Section 14 · North Loop Line",
+                    text = topDefect?.section ?: "Mainline Rail Corridor",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = colorScheme.onSurface
                 )
                 Text(
-                    text = "Chainage 14+000 to 15+250 · 60E1 Rail Profile",
+                    text = if (topDefect != null) "Chainage ${topDefect.chainageCoordinate} · Monitored Profile" else "Continuous Ultrasonic & Vision Telemetry Active",
                     style = MaterialTheme.typography.bodySmall,
                     color = colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "Track Coordinates: 51°30'14.2\"N 0°07'42.8\"W · LRS 14+320 UP",
+                    text = if (topDefect != null) "Track Coordinates: ${topDefect.latitude}°N ${topDefect.longitude}°E" else "Track Coordinates: Live Corridor Telemetry Ready",
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
                     color = colorScheme.primary
                 )
                 Text(
-                    text = "Patrol Timestamp: 2024-06-18 08:42:15 UTC (38m elapsed)",
+                    text = "Status: Connected to Central Safety Cloud Database",
                     style = MaterialTheme.typography.labelSmall,
                     color = colorScheme.onSurfaceVariant
                 )
@@ -142,17 +148,17 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "AI Engine: RailVision-DeepTrack v4.2",
+                        text = "AI Engine: RailVision-DeepTrack",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = "92.4% Conf · Risk 0.68",
+                        text = if (topDefect != null) "${topDefect.aiConfidencePercent}% Conf · Risk ${topDefect.score}" else "Telemetry Stream Ready",
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = colorScheme.error
+                        color = if (topDefect != null) colorScheme.error else colorScheme.primary
                     )
                 }
 
@@ -170,7 +176,7 @@ fun HomeScreen(
                             color = colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "61%",
+                            text = if (defects.isNotEmpty()) "Active" else "Standby",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = colorScheme.primary
@@ -178,7 +184,7 @@ fun HomeScreen(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     LinearProgressIndicator(
-                        progress = { 0.61f },
+                        progress = { if (defects.isNotEmpty()) 0.75f else 0.1f },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
@@ -191,28 +197,54 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Active speed restriction banner
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(toneColor(Tone.CRITICAL, isDark).copy(alpha = 0.1f))
-                        .border(1.dp, toneColor(Tone.CRITICAL, isDark).copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Speed,
-                        contentDescription = null,
-                        tint = toneColor(Tone.CRITICAL, isDark),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Active Restriction: 25 km/h at 14+320 (CRK-2048)",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = toneColor(Tone.CRITICAL, isDark)
-                    )
+                if (criticalDefect != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(toneColor(Tone.CRITICAL, isDark).copy(alpha = 0.1f))
+                            .border(1.dp, toneColor(Tone.CRITICAL, isDark).copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Speed,
+                            contentDescription = null,
+                            tint = toneColor(Tone.CRITICAL, isDark),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Active Restriction: 25 km/h at ${criticalDefect.chainageCoordinate} (${criticalDefect.id})",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = toneColor(Tone.CRITICAL, isDark)
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF16A34A).copy(alpha = 0.1f))
+                            .border(1.dp, Color(0xFF16A34A).copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF16A34A),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Line Nominal: Operating at Normal Line Speed",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF16A34A)
+                        )
+                    }
                 }
             }
         }
@@ -229,23 +261,23 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 MetricTile(
-                    value = "18",
+                    value = "${defects.size}",
                     label = "Open defects",
-                    tone = Tone.CRITICAL,
+                    tone = if (defects.isNotEmpty()) Tone.CRITICAL else Tone.HEALTHY,
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("defects") }
                 )
                 MetricTile(
-                    value = "06",
-                    label = "Due today",
-                    tone = Tone.WARNING,
+                    value = "${tasks.size}",
+                    label = "Due tasks",
+                    tone = if (tasks.isNotEmpty()) Tone.WARNING else Tone.HEALTHY,
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("maintenance") }
                 )
                 MetricTile(
-                    value = "94.2%",
+                    value = if (defects.isEmpty()) "100%" else "${maxOf(60, 100 - defects.size * 5)}%",
                     label = "Track health",
-                    tone = Tone.HEALTHY,
+                    tone = if (defects.isEmpty()) Tone.HEALTHY else Tone.WARNING,
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("track_health") }
                 )
@@ -522,8 +554,9 @@ fun DedicatedHomepageAiOracle(
                     .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
+                val conf = if (defects.isNotEmpty()) "${defects.first().aiConfidencePercent}% CONF" else "ACTIVE CONF"
                 Text(
-                    text = "92.4% CONF",
+                    text = conf,
                     color = Color(0xFF38BDF8),
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
@@ -534,12 +567,22 @@ fun DedicatedHomepageAiOracle(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Text(
-            text = "⚡ CRK-2048 (46 mm) propagation: +0.41 mm/day under 2,400t freight traffic. Critical 50 mm rail break threshold estimated in 72 hours. Recommended TSR 25 km/h active.",
-            color = Color(0xFFE2E8F0),
-            fontSize = 11.sp,
-            lineHeight = 15.sp
-        )
+        val topDefect = defects.firstOrNull()
+        if (topDefect != null) {
+            Text(
+                text = "⚡ ${topDefect.id} (${topDefect.estimatedLength}) at ${topDefect.chainageCoordinate}. Action: ${topDefect.aiPrescribedAction}",
+                color = Color(0xFFE2E8F0),
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+        } else {
+            Text(
+                text = "⚡ Real-time tensor kinetics active. No active structural track anomalies detected. Awaiting live sensor telemetry and camera frames from Raspberry Pi / ESP32.",
+                color = Color(0xFFE2E8F0),
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+        }
 
         Spacer(modifier = Modifier.height(10.dp))
 
@@ -567,26 +610,46 @@ fun DedicatedHomepageAiOracle(
                 Text("Open Full AI Oracle →", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
 
-            OutlinedButton(
-                onClick = {
-                    if (defects.isNotEmpty()) onDefectClick(defects.first())
-                },
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFCA5A5)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444)),
-                shape = RoundedCornerShape(6.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(32.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = Color(0xFFEF4444)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Inspect CRK-2048", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            if (topDefect != null) {
+                OutlinedButton(
+                    onClick = { onDefectClick(topDefect) },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFCA5A5)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444)),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = Color(0xFFEF4444)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Inspect ${topDefect.id}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { onNavigate("train_connection") },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7)),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Memory,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = Color(0xFF38BDF8)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Hardware Hub", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }
@@ -631,7 +694,7 @@ fun TrainConnectionStatusBanner(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = "TRAIN FLEET INTERLOCK",
+                    text = "TRAIN & SENSOR TELEMETRY",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
@@ -644,7 +707,7 @@ fun TrainConnectionStatusBanner(
                         .padding(horizontal = 4.dp, vertical = 1.dp)
                 ) {
                     Text(
-                        text = "4 ACTIVE CABS",
+                        text = "READY",
                         color = Color.White,
                         fontSize = 8.sp,
                         fontWeight = FontWeight.Bold
@@ -652,7 +715,7 @@ fun TrainConnectionStatusBanner(
                 }
             }
             Text(
-                text = "TR-104 (118 km/h) · FR-802 · HS-301 · CR-512 | TSR Auto-Dispatch Ready",
+                text = "Live Central Safety Cloud Telemetry · TSR Auto-Dispatch Ready",
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 color = if (isDark) Color(0xFF7DD3FC) else Color(0xFF0369A1)

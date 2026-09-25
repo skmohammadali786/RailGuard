@@ -108,13 +108,65 @@ fun RailGuardApp() {
     val observations = remember { mutableStateListOf(*RailDataRepository.initialObservations.toTypedArray()) }
     val notifications = remember { mutableStateListOf(*RailDataRepository.initialNotifications.toTypedArray()) }
 
-    var selectedDefect by remember { mutableStateOf(defects.first()) }
-    var selectedTask by remember { mutableStateOf(tasks.first()) }
-    var selectedInspection by remember { mutableStateOf(inspections.first()) }
-    var selectedReportTitle by remember { mutableStateOf("North Corridor Weekly Safety Report") }
+    val defaultDefect = remember {
+        Defect(
+            id = "DEF-LIVE",
+            title = "Realtime Track Monitor",
+            section = "Active Corridor",
+            score = "Nominal",
+            tone = Tone.HEALTHY,
+            time = "Live",
+            detail = "Connected to Central Safety Cloud. Real-time telemetry monitoring active from Raspberry Pi / sensor unit.",
+            estimatedLength = "0.0 mm",
+            latitude = 28.6139,
+            longitude = 77.2090,
+            riskScore = 0,
+            chainageCoordinate = "KM 00+000",
+            aiConfidencePercent = 100,
+            aiPrescribedAction = "Corridor clear - active continuous monitoring."
+        )
+    }
+    val defaultTask = remember {
+        MaintenanceTask(
+            id = "TSK-LIVE",
+            title = "Corridor Preventive Inspection",
+            section = "Active Corridor",
+            due = "Pending Sync",
+            tone = Tone.HEALTHY,
+            assignee = "Field Engineer",
+            status = "Nominal",
+            torque = "Nominal"
+        )
+    }
+    val defaultInspection = remember {
+        InspectionRecord(
+            id = "INSP-LIVE",
+            section = "Active Corridor",
+            date = "Today",
+            inspector = "Field Inspector",
+            status = "Monitoring",
+            framesCount = 0,
+            detectionsCount = 0,
+            detectedCrackTitle = "No Anomalies Detected",
+            recommendedMaintenanceAction = "Normal track monitoring active"
+        )
+    }
 
-    var profileName by remember { mutableStateOf("E. Chen") }
-    var profileEmail by remember { mutableStateOf("e.chen@railguard.field") }
+    var selectedDefect by remember { mutableStateOf(defects.firstOrNull() ?: defaultDefect) }
+    var selectedTask by remember { mutableStateOf(tasks.firstOrNull() ?: defaultTask) }
+    var selectedInspection by remember { mutableStateOf(inspections.firstOrNull() ?: defaultInspection) }
+    var selectedReportTitle by remember { mutableStateOf("RailGuard Corridor Safety Report") }
+
+    var profileName by remember {
+        mutableStateOf(
+            firebaseService.currentUser?.displayName?.takeIf { it.isNotBlank() }
+                ?: firebaseService.currentUser?.email?.substringBefore("@")
+                ?: "Field Inspector"
+        )
+    }
+    var profileEmail by remember {
+        mutableStateOf(firebaseService.currentUser?.email ?: "")
+    }
     val scope = rememberCoroutineScope()
 
     fun updatePreferences(updated: AppPreferences) {
@@ -268,6 +320,10 @@ fun RailGuardApp() {
                                 )
                                 Screen.Login.route -> LoginScreen(
                                     onLoginSuccess = {
+                                        firebaseService.currentUser?.let { u ->
+                                            profileName = if (!u.displayName.isNullOrBlank()) u.displayName else u.email.substringBefore("@")
+                                            profileEmail = u.email
+                                        }
                                         backStack.clear()
                                         navigateTo(Screen.Home.route)
                                     },
@@ -390,7 +446,7 @@ fun RailGuardApp() {
                                 navigateTo(Screen.InspectionSummary.route)
                             },
                             onDefectDetected = {
-                                selectedDefect = defects.first()
+                                selectedDefect = defects.firstOrNull() ?: defaultDefect
                                 navigateTo(Screen.DefectDetails.route)
                             },
                             onOpenGps = { navigateTo(Screen.Gps.route) },
@@ -414,7 +470,7 @@ fun RailGuardApp() {
                         Screen.Gps.route -> GpsScreen(onBack = { navigateBack() })
                         Screen.Camera.route -> CameraScreen(
                             onCaptureDefect = {
-                                selectedDefect = defects.first()
+                                selectedDefect = defects.firstOrNull() ?: defaultDefect
                                 navigateTo(Screen.DefectDetails.route)
                             },
                             onBack = { navigateBack() }
@@ -609,11 +665,11 @@ fun RailGuardApp() {
                         Screen.About.route -> AboutScreen(onBack = { navigateBack() })
                         Screen.Attention.route -> AttentionScreen(
                             onNavigateDefect = {
-                                selectedDefect = defects.first()
+                                selectedDefect = defects.firstOrNull() ?: defaultDefect
                                 navigateTo(Screen.DefectDetails.route)
                             },
                             onNavigateTask = {
-                                selectedTask = tasks.first()
+                                selectedTask = tasks.firstOrNull() ?: defaultTask
                                 navigateTo(Screen.TaskDetails.route)
                             },
                             onCreateTask = { navigateTo(Screen.CreateTask.route) },
