@@ -182,6 +182,10 @@ fun RailGuardApp() {
                     "biometricEnabled" to updated.isBiometricEnabled,
                     "metricUnits" to updated.isMetric,
                     "autoSync" to updated.autoSync,
+                    "autoSyncRtdb" to updated.autoSyncRtdb,
+                    "esp32LinkActive" to updated.esp32LinkActive,
+                    "highPrecisionAi" to updated.highPrecisionAi,
+                    "tsrInterlockEnabled" to updated.tsrInterlockEnabled,
                     "updatedAt" to System.currentTimeMillis()
                 )
             )

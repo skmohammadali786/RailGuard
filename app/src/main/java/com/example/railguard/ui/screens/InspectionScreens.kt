@@ -1,5 +1,9 @@
 package com.example.railguard.ui.screens
 
+import android.graphics.Bitmap
+import java.io.ByteArrayOutputStream
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -20,6 +24,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -587,6 +593,49 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var isUploadingCapture by remember { mutableStateOf(false) }
     var uploadStatusMsg by remember { mutableStateOf<String?>(null) }
+    var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap == null) {
+            uploadStatusMsg = "Camera capture cancelled"
+        } else {
+            capturedBitmap = bitmap
+            isUploadingCapture = true
+            uploadStatusMsg = null
+            scope.launch {
+                val bytes = ByteArrayOutputStream().use { output ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)
+                    output.toByteArray()
+                }
+                val capId = "CAM-${System.currentTimeMillis() % 100000}"
+                val result = RailGuardFirebaseService.instance.uploadCameraCapture(
+                    captureId = capId,
+                    section = "Section 14 North Loop",
+                    detectionCount = 1,
+                    defectDetected = true,
+                    notes = "Camera capture at 14+320 chainage",
+                    evidenceBytes = bytes,
+                    contentType = "image/jpeg"
+                )
+                if (result.isSuccess) {
+                    RailGuardFirebaseService.instance.logSafetyAuditEvent(
+                        "CAMERA_CAPTURE_UPLOAD",
+                        mapOf(
+                            "captureId" to capId,
+                            "chainage" to "14+320",
+                            "storagePath" to result.storagePath
+                        )
+                    )
+                    uploadStatusMsg = "Photo and metadata uploaded to Firebase"
+                    onCaptureDefect()
+                } else {
+                    uploadStatusMsg = "Firebase upload failed: ${result.message}"
+                }
+                isUploadingCapture = false
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -621,11 +670,22 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                     .border(2.dp, Color(0xFF00F0FF), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("ALIGN RAILHEAD CRACK", color = Color(0xFF00F0FF), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    if (uploadStatusMsg != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(uploadStatusMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                if (capturedBitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = capturedBitmap!!.asImageBitmap(),
+                        contentDescription = "Captured rail inspection evidence",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("ALIGN RAILHEAD CRACK", color = Color(0xFF00F0FF), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        if (uploadStatusMsg != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(uploadStatusMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -638,25 +698,7 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                 } else {
                     Button(
                         onClick = {
-                            isUploadingCapture = true
-                            scope.launch {
-                                val capId = "CAM-${System.currentTimeMillis() % 100000}"
-                                RailGuardFirebaseService.instance.uploadCameraCapture(
-                                    captureId = capId,
-                                    section = "Active Corridor Sweep",
-                                    detectionCount = 1,
-                                    defectDetected = true,
-                                    notes = "4K optical field inspection capture"
-                                )
-                                RailGuardFirebaseService.instance.logSafetyAuditEvent(
-                                    "CAMERA_CAPTURE_UPLOAD",
-                                    mapOf("captureId" to capId, "chainage" to "Corridor Trackway", "resolution" to "3840x2160")
-                                )
-                                uploadStatusMsg = "Uploaded & Synced to Cloud DB"
-                                delay(600)
-                                isUploadingCapture = false
-                                onCaptureDefect()
-                            }
+                            cameraLauncher.launch(null)
                         },
                         shape = CircleShape,
                         modifier = Modifier.size(72.dp),

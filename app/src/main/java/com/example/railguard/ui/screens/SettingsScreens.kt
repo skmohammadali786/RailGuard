@@ -400,10 +400,10 @@ fun AppSettingsScreen(
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var autoSyncRtdb by remember { mutableStateOf(preferences.autoSync) }
-    var esp32LinkActive by remember { mutableStateOf(true) }
-    var highPrecisionAi by remember { mutableStateOf(true) }
-    var tsrInterlockEnabled by remember { mutableStateOf(true) }
+    var autoSyncRtdb by remember { mutableStateOf(preferences.autoSyncRtdb) }
+    var esp32LinkActive by remember { mutableStateOf(preferences.esp32LinkActive) }
+    var highPrecisionAi by remember { mutableStateOf(preferences.highPrecisionAi) }
+    var tsrInterlockEnabled by remember { mutableStateOf(preferences.tsrInterlockEnabled) }
     var syncFeedbackMsg by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -494,7 +494,15 @@ fun AppSettingsScreen(
                                     "updatedAt" to System.currentTimeMillis()
                                 )
                             )
-                            onUpdatePreferences(preferences.copy(autoSync = autoSyncRtdb))
+                            onUpdatePreferences(
+                                preferences.copy(
+                                    autoSync = autoSyncRtdb,
+                                    autoSyncRtdb = autoSyncRtdb,
+                                    esp32LinkActive = esp32LinkActive,
+                                    highPrecisionAi = highPrecisionAi,
+                                    tsrInterlockEnabled = tsrInterlockEnabled
+                                )
+                            )
                             syncFeedbackMsg = "✓ System preferences synchronized with Cloud Realtime DB"
                         }
                     }

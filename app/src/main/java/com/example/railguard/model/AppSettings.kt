@@ -17,7 +17,11 @@ data class AppPreferences(
     val isBiometricEnabled: Boolean = true,
     val isAppLocked: Boolean = false,
     val isMetric: Boolean = true,
-    val autoSync: Boolean = true
+    val autoSync: Boolean = true,
+    val autoSyncRtdb: Boolean = true,
+    val esp32LinkActive: Boolean = true,
+    val highPrecisionAi: Boolean = true,
+    val tsrInterlockEnabled: Boolean = true
 ) {
     fun formatLength(lengthMm: Double): String {
         return if (isMetric) {

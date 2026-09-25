@@ -52,6 +52,13 @@ data class ConnectionTestResult(
     val rawResponse: String = ""
 )
 
+data class FirebaseUploadResult(
+    val isSuccess: Boolean,
+    val storagePath: String = "",
+    val downloadUrl: String = "",
+    val message: String
+)
+
 enum class DatabaseBackendType {
     REALTIME_DATABASE,
     FIRESTORE
@@ -87,6 +94,10 @@ class RailGuardFirebaseService private constructor() {
         private const val KEY_BIOMETRIC_ENABLED = "app_biometric_enabled"
         private const val KEY_METRIC_UNITS = "app_metric_units"
         private const val KEY_AUTO_SYNC = "app_auto_sync"
+        private const val KEY_AUTO_SYNC_RTDB = "app_auto_sync_rtdb"
+        private const val KEY_ESP32_LINK = "app_esp32_link"
+        private const val KEY_HIGH_PRECISION_AI = "app_high_precision_ai"
+        private const val KEY_TSR_INTERLOCK = "app_tsr_interlock"
 
         // Server-Side Pre-Configured Firebase Cloud Project Credentials
         const val DEFAULT_PROJECT_NAME = "railguard"
@@ -290,7 +301,11 @@ class RailGuardFirebaseService private constructor() {
             passcodePin = prefs.getString(KEY_PASSCODE_PIN, "1234") ?: "1234",
             isBiometricEnabled = prefs.getBoolean(KEY_BIOMETRIC_ENABLED, true),
             isMetric = prefs.getBoolean(KEY_METRIC_UNITS, true),
-            autoSync = prefs.getBoolean(KEY_AUTO_SYNC, true)
+            autoSync = prefs.getBoolean(KEY_AUTO_SYNC, true),
+            autoSyncRtdb = prefs.getBoolean(KEY_AUTO_SYNC_RTDB, true),
+            esp32LinkActive = prefs.getBoolean(KEY_ESP32_LINK, true),
+            highPrecisionAi = prefs.getBoolean(KEY_HIGH_PRECISION_AI, true),
+            tsrInterlockEnabled = prefs.getBoolean(KEY_TSR_INTERLOCK, true)
         )
     }
 
@@ -303,6 +318,10 @@ class RailGuardFirebaseService private constructor() {
             putBoolean(KEY_BIOMETRIC_ENABLED, preferences.isBiometricEnabled)
             putBoolean(KEY_METRIC_UNITS, preferences.isMetric)
             putBoolean(KEY_AUTO_SYNC, preferences.autoSync)
+            putBoolean(KEY_AUTO_SYNC_RTDB, preferences.autoSyncRtdb)
+            putBoolean(KEY_ESP32_LINK, preferences.esp32LinkActive)
+            putBoolean(KEY_HIGH_PRECISION_AI, preferences.highPrecisionAi)
+            putBoolean(KEY_TSR_INTERLOCK, preferences.tsrInterlockEnabled)
             apply()
         }
     }
@@ -334,7 +353,11 @@ class RailGuardFirebaseService private constructor() {
                     passcodeEnabled = json.optBoolean("passcodeEnabled", local.passcodeEnabled),
                     isBiometricEnabled = json.optBoolean("biometricEnabled", local.isBiometricEnabled),
                     isMetric = json.optBoolean("metricUnits", local.isMetric),
-                    autoSync = json.optBoolean("autoSync", local.autoSync)
+                    autoSync = json.optBoolean("autoSync", local.autoSync),
+                    autoSyncRtdb = json.optBoolean("autoSyncRtdb", local.autoSyncRtdb),
+                    esp32LinkActive = json.optBoolean("esp32LinkActive", local.esp32LinkActive),
+                    highPrecisionAi = json.optBoolean("highPrecisionAi", local.highPrecisionAi),
+                    tsrInterlockEnabled = json.optBoolean("tsrInterlockEnabled", local.tsrInterlockEnabled)
                 )
                 withContext(Dispatchers.Main) {
                     saveAppPreferences(remote)
@@ -1384,12 +1407,24 @@ class RailGuardFirebaseService private constructor() {
         section: String,
         detectionCount: Int,
         defectDetected: Boolean,
-        notes: String
-    ) {
-        withContext(Dispatchers.IO) {
+        notes: String,
+        evidenceBytes: ByteArray? = null,
+        contentType: String = "image/jpeg"
+    ): FirebaseUploadResult {
+        return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
                 val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/camera_captures/$captureId.json$authParam"
+                val storageResult = evidenceBytes?.let {
+                    uploadEvidenceFile(
+                        storagePath = "${userDataRoot()}/evidence/$captureId.jpg",
+                        bytes = it,
+                        contentType = contentType
+                    )
+                }
+                if (storageResult != null && !storageResult.isSuccess) {
+                    return@withContext storageResult
+                }
                 val json = JSONObject().apply {
                     put("id", captureId)
                     put("section", section)
@@ -1400,6 +1435,14 @@ class RailGuardFirebaseService private constructor() {
                     put("inspector", currentUser?.email ?: "field-inspector")
                     put("resolution", "4K-HDR (3840x2160)")
                     put("exposureMode", "Ultra-High Frequency Rail Shutter")
+                    if (storageResult != null) {
+                        put("storagePath", storageResult.storagePath)
+                        put("downloadUrl", storageResult.downloadUrl)
+                        put("contentType", contentType)
+                        put("evidenceUploaded", true)
+                    } else {
+                        put("evidenceUploaded", false)
+                    }
                 }
 
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -1410,11 +1453,85 @@ class RailGuardFirebaseService private constructor() {
                     setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 }
                 OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
-                conn.responseCode
+                val responseCode = conn.responseCode
+                if (responseCode in 200..299) {
+                    FirebaseUploadResult(
+                        isSuccess = true,
+                        storagePath = storageResult?.storagePath.orEmpty(),
+                        downloadUrl = storageResult?.downloadUrl.orEmpty(),
+                        message = "Camera capture metadata and evidence synchronized."
+                    )
+                } else {
+                    FirebaseUploadResult(
+                        isSuccess = false,
+                        message = "Camera metadata upload failed: HTTP $responseCode"
+                    )
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w("RailGuardFirebase", "Camera capture sync error: ${e.message}")
+                FirebaseUploadResult(false, message = e.message ?: "Camera upload failed.")
+            }
+        }
+    }
+
+    suspend fun uploadEvidenceFile(
+        storagePath: String,
+        bytes: ByteArray,
+        contentType: String
+    ): FirebaseUploadResult {
+        return withContext(Dispatchers.IO) {
+            try {
+                val token = getValidIdToken()
+                val encodedBucket = java.net.URLEncoder
+                    .encode(DEFAULT_STORAGE_BUCKET, "UTF-8")
+                    .replace("+", "%20")
+                val encodedPath = java.net.URLEncoder
+                    .encode(storagePath, "UTF-8")
+                    .replace("+", "%20")
+                val endpoint =
+                    "https://firebasestorage.googleapis.com/v0/b/$encodedBucket/o" +
+                        "?uploadType=media&name=$encodedPath"
+                val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 15000
+                    readTimeout = 30000
+                    doOutput = true
+                    setRequestProperty("Authorization", "Bearer $token")
+                    setRequestProperty("Content-Type", contentType)
+                    setRequestProperty("Content-Length", bytes.size.toString())
+                }
+                connection.outputStream.use { it.write(bytes) }
+                val code = connection.responseCode
+                val body = (if (code in 200..299) connection.inputStream else connection.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) {
+                    return@withContext FirebaseUploadResult(
+                        false,
+                        message = "Evidence upload failed: HTTP $code"
+                    )
+                }
+
+                val json = JSONObject(body)
+                val objectName = json.optString("name", storagePath)
+                val bucket = json.optString("bucket", DEFAULT_STORAGE_BUCKET)
+                val encodedObjectName = java.net.URLEncoder
+                    .encode(objectName, "UTF-8")
+                    .replace("+", "%20")
+                val downloadToken = json.optString("downloadTokens").substringBefore(",").trim()
+                val tokenQuery = if (downloadToken.isNotBlank()) "&token=$downloadToken" else ""
+                FirebaseUploadResult(
+                    isSuccess = true,
+                    storagePath = objectName,
+                    downloadUrl = "https://firebasestorage.googleapis.com/v0/b/$bucket/o/$encodedObjectName?alt=media$tokenQuery",
+                    message = "Evidence file uploaded to Firebase Storage."
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Evidence upload error: ${e.message}")
+                FirebaseUploadResult(false, message = e.message ?: "Evidence upload failed.")
             }
         }
     }
