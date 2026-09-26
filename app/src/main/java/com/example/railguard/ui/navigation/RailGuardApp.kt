@@ -344,7 +344,6 @@ fun RailGuardApp() {
                             onLoginClick = { navigateTo(Screen.Login.route) }
                         )
                         Screen.ForgotPassword.route -> ForgotPasswordScreen(
-                            onSendOtp = { navigateTo(Screen.Otp.route) },
                             onBackToLogin = { navigateTo(Screen.Login.route) }
                         )
                         Screen.Otp.route -> OtpScreen(
@@ -708,13 +707,7 @@ fun RailGuardApp() {
                             onNavigateHeatmap = { navigateTo(Screen.RiskHeatmap.route) },
                             onBack = { navigateBack() }
                         )
-                        Screen.TrainConnection.route -> LiveInspectionScreen(
-                            onEndInspection = { navigateBack() },
-                            onDefectDetected = {
-                                selectedDefect = defects.firstOrNull() ?: defaultDefect
-                                navigateTo(Screen.DefectDetails.route)
-                            },
-                            onOpenGps = { navigateTo(Screen.Gps.route) },
+                        Screen.TrainConnection.route -> HardwareTelemetryScreen(
                             onBack = { navigateBack() }
                         )
                         Screen.FirebaseSync.route -> AppSettingsScreen(

@@ -344,8 +344,10 @@ fun PdfPreviewScreen(
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
     var isDownloaded by remember { mutableStateOf(false) }
     var isDownloading by remember { mutableStateOf(false) }
+    var cloudStatus by remember { mutableStateOf<String?>(null) }
     var generatedPdfFile by remember { mutableStateOf<File?>(null) }
     var selectedPage by remember { mutableIntStateOf(0) } // 0 = All Pages (Full Dossier)
 
@@ -362,6 +364,20 @@ fun PdfPreviewScreen(
             generatedPdfFile = file
             isDownloading = false
             isDownloaded = true
+            cloudStatus = "Uploading PDF evidence to Firebase..."
+            scope.launch {
+                val reportId = "PDF-${System.currentTimeMillis() % 100000}"
+                val result = com.example.railguard.data.RailGuardFirebaseService.instance.uploadReportPdf(
+                    reportId = reportId,
+                    title = reportTitle,
+                    pdfBytes = file.readBytes()
+                )
+                cloudStatus = if (result.isSuccess) {
+                    "PDF uploaded and indexed in Firebase ✓"
+                } else {
+                    "PDF saved locally, but Firebase upload failed: ${result.message}"
+                }
+            }
             Toast.makeText(
                 context,
                 "✓ PDF Saved to Documents: ${file.name} (${file.length() / 1024} KB)",
@@ -508,6 +524,21 @@ fun PdfPreviewScreen(
                             Text("Open", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF16A34A))
                         }
                     }
+                }
+            }
+            if (cloudStatus != null) {
+                item {
+                    Text(
+                        text = cloudStatus ?: "",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (cloudStatus?.contains("failed", ignoreCase = true) == true) {
+                            colorScheme.error
+                        } else {
+                            Color(0xFF16A34A)
+                        },
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
                 }
             }
 

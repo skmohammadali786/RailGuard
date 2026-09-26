@@ -590,6 +590,50 @@ class RailGuardFirebaseService private constructor() {
         }
     }
 
+    suspend fun sendPasswordResetEmail(
+        email: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val apiKey = getEffectiveApiKey()
+        withContext(Dispatchers.IO) {
+            try {
+                val endpoint = "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=$apiKey"
+                val payload = JSONObject().apply {
+                    put("requestType", "PASSWORD_RESET")
+                    put("email", email.trim())
+                }
+                val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 10000
+                    readTimeout = 10000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(connection.outputStream).use { it.write(payload.toString()) }
+                val code = connection.responseCode
+                val body = (if (code in 200..299) connection.inputStream else connection.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code in 200..299) {
+                    withContext(Dispatchers.Main) {
+                        onSuccess()
+                    }
+                } else {
+                    val message = parseFirebaseError(body, code)
+                    withContext(Dispatchers.Main) {
+                        onError(message)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    onError(e.localizedMessage ?: "Unable to send the password reset email.")
+                }
+            }
+        }
+    }
+
     private fun updateProfileDisplayName(idToken: String, displayName: String) {
         try {
             val apiKey = getEffectiveApiKey()
@@ -1323,8 +1367,8 @@ class RailGuardFirebaseService private constructor() {
     /**
      * Dispatches temporary speed restriction (TSR) live to Firebase for train cab signaling
      */
-    suspend fun dispatchTsrToFirebase(trainId: String, tsrSpeedKmH: Int, reason: String) {
-        withContext(Dispatchers.IO) {
+    suspend fun dispatchTsrToFirebase(trainId: String, tsrSpeedKmH: Int, reason: String): Boolean {
+        return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
                 val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/trains/$trainId/tsr.json$authParam"
@@ -1345,11 +1389,12 @@ class RailGuardFirebaseService private constructor() {
                 }
 
                 OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
-                conn.responseCode
+                conn.responseCode in 200..299
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w("RailGuardFirebase", "TSR dispatch error: ${e.message}")
+                false
             }
         }
     }
@@ -1533,6 +1578,56 @@ class RailGuardFirebaseService private constructor() {
             } catch (e: Exception) {
                 Log.w("RailGuardFirebase", "Evidence upload error: ${e.message}")
                 FirebaseUploadResult(false, message = e.message ?: "Evidence upload failed.")
+            }
+        }
+    }
+
+    suspend fun uploadReportPdf(
+        reportId: String,
+        title: String,
+        pdfBytes: ByteArray
+    ): FirebaseUploadResult {
+        return withContext(Dispatchers.IO) {
+            val upload = uploadEvidenceFile(
+                storagePath = "${userDataRoot()}/reports/$reportId.pdf",
+                bytes = pdfBytes,
+                contentType = "application/pdf"
+            )
+            if (!upload.isSuccess) return@withContext upload
+
+            try {
+                val authParam = authenticatedQueryParam()
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/reports/$reportId.json$authParam"
+                val json = JSONObject().apply {
+                    put("id", reportId)
+                    put("title", title)
+                    put("status", "PDF_UPLOADED")
+                    put("inspector", currentUser?.email ?: "field-inspector")
+                    put("generatedAt", System.currentTimeMillis())
+                    put("storagePath", upload.storagePath)
+                    put("downloadUrl", upload.downloadUrl)
+                    put("contentType", "application/pdf")
+                    put("sizeBytes", pdfBytes.size)
+                }
+                val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 10000
+                    readTimeout = 10000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                OutputStreamWriter(connection.outputStream).use { it.write(json.toString()) }
+                val code = connection.responseCode
+                if (code in 200..299) {
+                    upload.copy(message = "PDF uploaded to Firebase Storage and indexed in Realtime Database.")
+                } else {
+                    FirebaseUploadResult(false, message = "PDF index upload failed: HTTP $code")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "PDF metadata sync error: ${e.message}")
+                FirebaseUploadResult(false, message = e.message ?: "PDF metadata sync failed.")
             }
         }
     }

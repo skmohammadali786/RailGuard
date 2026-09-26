@@ -927,13 +927,16 @@ fun RegistrationScreen(
 
 @Composable
 fun ForgotPasswordScreen(
-    onSendOtp: () -> Unit,
     onBackToLogin: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val settings = LocalAppSettings.current
+    val scope = rememberCoroutineScope()
+    val firebaseService = remember { RailGuardFirebaseService.instance }
     var email by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
+    var statusMessage by remember { mutableStateOf("") }
+    var isSending by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -1012,18 +1015,44 @@ fun ForgotPasswordScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+                if (statusMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = statusMessage,
+                        color = Color(0xFF16A34A),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
                 PrimaryButton(
-                    title = settings.translate("send_code"),
+                    title = if (isSending) "Sending reset email..." else settings.translate("send_code"),
                     onClick = {
                         if (!email.contains("@")) {
                             errorMessage = "Enter the email associated with your account."
                         } else {
-                            onSendOtp()
+                            isSending = true
+                            errorMessage = ""
+                            statusMessage = ""
+                            scope.launch {
+                                firebaseService.sendPasswordResetEmail(
+                                    email = email,
+                                    onSuccess = {
+                                        isSending = false
+                                        statusMessage = "Password reset email sent. Open the link in your email to choose a new password."
+                                    },
+                                    onError = { message ->
+                                        isSending = false
+                                        errorMessage = message
+                                    }
+                                )
+                            }
                         }
-                    }
+                    },
+                    disabled = isSending
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
