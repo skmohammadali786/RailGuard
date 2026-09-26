@@ -469,49 +469,7 @@ fun RealTimeTrainLineMap(
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDark.current
 
-    // Live continuous train movement animation
-    val infiniteTransition = rememberInfiniteTransition(label = "TrainAnimation")
-    val train1Progress by infiniteTransition.animateFloat(
-        initialValue = 0.15f,
-        targetValue = 0.85f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 18000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "Train1Progress"
-    )
-
-    val train2Progress by infiniteTransition.animateFloat(
-        initialValue = 0.80f,
-        targetValue = 0.10f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 26000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "Train2Progress"
-    )
-
-    val signalPulse by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "SignalPulse"
-    )
-
-    val settings = LocalAppSettings.current
     var isCompactView by remember(compact) { mutableStateOf(compact) }
-    var selectedStationName by remember { mutableStateOf<String?>(null) }
-    var selectedTrainId by remember { mutableStateOf<String?>(null) }
-
-    val stations = listOf(
-        Pair("West Cut", "01+200"),
-        Pair("North Loop", "14+000"),
-        Pair("East Jct", "03+500"),
-        Pair("South Yard", "08+800")
-    )
 
     Column(
         modifier = modifier
@@ -532,11 +490,11 @@ fun RealTimeTrainLineMap(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF22C55E).copy(alpha = signalPulse))
+                        .background(Color(0xFF64748B))
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (isCompactView) "CORRIDOR MAP (MINI)" else "REAL-TIME CORRIDOR LINE MAP",
+                    text = if (isCompactView) "CORRIDOR SCHEMATIC (MINI)" else "CORRIDOR LINE SCHEMATIC",
                     color = Color.White,
                     fontSize = if (isCompactView) 9.5.sp else 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -588,14 +546,14 @@ fun RealTimeTrainLineMap(
                             .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "CLEAR LINE",
-                            color = Color(0xFF86EFAC),
+                        text = "NO CLOUD RECORDS",
+                        color = Color(0xFFCBD5E1),
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
-                Text("LIVE", color = Color(0xFF22C55E), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                Text("SCHEMATIC", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
         }
 
@@ -659,148 +617,6 @@ fun RealTimeTrainLineMap(
                 }
             }
 
-            // Stations along Top
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.TopCenter),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                stations.forEach { (name, chainage) ->
-                    val isSelected = selectedStationName == name
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable {
-                            selectedStationName = if (isSelected) null else name
-                            onSelectStation?.invoke(name)
-                        }
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(if (isCompactView) 8.dp else 11.dp)
-                                .clip(CircleShape)
-                                .background(if (isSelected) Color(0xFFF59E0B) else Color.White)
-                                .border(if (isCompactView) 1.5.dp else 2.dp, if (isSelected) Color.White else Color(0xFF0284C7), CircleShape)
-                        )
-                        Spacer(modifier = Modifier.height(1.dp))
-                        Text(
-                            text = name,
-                            fontSize = if (isCompactView) 8.sp else 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isSelected) Color(0xFFFCD34D) else Color.White.copy(alpha = 0.9f)
-                        )
-                        if (!isCompactView) {
-                            Text(
-                                text = "km $chainage",
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color.White.copy(alpha = 0.6f)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Signal lights along the track
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.Center)
-                    .offset(y = if (isCompactView) (-24).dp else (-32).dp)
-                    .padding(horizontal = 24.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                listOf(Color(0xFF22C55E), Color(0xFFF59E0B), Color(0xFF22C55E)).forEach { sigColor ->
-                    Box(
-                        modifier = Modifier
-                            .size(if (isCompactView) 5.dp else 7.dp)
-                            .clip(CircleShape)
-                            .background(sigColor)
-                            .border(1.dp, Color.White.copy(alpha = 0.4f), CircleShape)
-                    )
-                }
-            }
-
-            // Animated Live Train 1: TR-104 Express (Up Line)
-            BoxWithConstraints(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.Center)
-                    .offset(y = if (isCompactView) (-12).dp else (-18).dp)
-            ) {
-                val trainX = maxWidth * train1Progress - 20.dp
-                Box(
-                    modifier = Modifier
-                        .offset(x = trainX)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Color(0xFF0284C7))
-                        .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(5.dp))
-                        .clickable {
-                            selectedTrainId = "TR-104"
-                            onSelectTrain?.invoke("TR-104")
-                        }
-                        .padding(horizontal = 4.dp, vertical = 1.5.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Train,
-                            contentDescription = "TR-104",
-                            tint = Color.White,
-                            modifier = Modifier.size(if (isCompactView) 9.dp else 11.dp)
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text(
-                            text = "TR-104 ${settings.formatSpeed(118)}",
-                            color = Color.White,
-                            fontSize = if (isCompactView) 7.sp else 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-            }
-
-            // Animated Live Train 2: FR-802 Freight (Down Line)
-            BoxWithConstraints(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.Center)
-                    .offset(y = if (isCompactView) 12.dp else 18.dp)
-            ) {
-                val train2X = maxWidth * train2Progress - 20.dp
-                Box(
-                    modifier = Modifier
-                        .offset(x = train2X)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Color(0xFFD97706))
-                        .border(1.dp, Color(0xFFFCD34D), RoundedCornerShape(5.dp))
-                        .clickable {
-                            selectedTrainId = "FR-802"
-                            onSelectTrain?.invoke("FR-802")
-                        }
-                        .padding(horizontal = 4.dp, vertical = 1.5.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.DirectionsRailway,
-                            contentDescription = "FR-802",
-                            tint = Color.White,
-                            modifier = Modifier.size(if (isCompactView) 9.dp else 11.dp)
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text(
-                            text = "FR-802 ${settings.formatSpeed(45)}",
-                            color = Color.White,
-                            fontSize = if (isCompactView) 7.sp else 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-            }
-
             // Defect Pins along bottom
             if (showMarkers) {
                 if (defects.isNotEmpty()) {
@@ -851,13 +667,13 @@ fun RealTimeTrainLineMap(
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
                             contentDescription = null,
-                            tint = Color(0xFF22C55E),
+                            tint = Color(0xFF94A3B8),
                             modifier = Modifier.size(11.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Track Corridor Nominal · All Sectors Clear",
-                            color = Color(0xFF86EFAC),
+                            text = "No cloud defect records loaded",
+                            color = Color(0xFFCBD5E1),
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.SemiBold
@@ -867,7 +683,7 @@ fun RealTimeTrainLineMap(
             }
         }
 
-        // Live Telemetry Readout Bar
+        // Backend telemetry is rendered by HardwareTelemetryScreen, not invented here.
         Spacer(modifier = Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -875,14 +691,14 @@ fun RealTimeTrainLineMap(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "⚡ 25kV OLE Power: NORMAL · 🌡️ Rail Temp: 28.4°C · 🚆 2 Trains Active",
+                text = "Telemetry values are available only when returned by Firebase.",
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "Track Up: CLEAR",
-                color = Color(0xFF22C55E),
+                text = "NO TELEMETRY",
+                color = Color(0xFF94A3B8),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace

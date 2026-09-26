@@ -286,7 +286,101 @@ class RailGuardFirebaseService private constructor() {
 
     private fun userDataRoot(): String {
         val uid = currentUser?.localId
-        return if (!uid.isNullOrBlank()) "railguard/users/$uid" else "railguard"
+        return if (!uid.isNullOrBlank()) {
+            "railguard/users/$uid"
+        } else {
+            throw IllegalStateException("Sign in is required to access cloud data.")
+        }
+    }
+
+    /**
+     * Reads one authenticated JSON object from the current user's namespace.
+     * All app data must use this helper so a signed-out device never falls back
+     * to a shared/demo path.
+     */
+    private suspend fun readUserObject(path: String): JSONObject? {
+        return withContext(Dispatchers.IO) {
+            val authParam = authenticatedQueryParam()
+            val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/$path.json$authParam"
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 10000
+                readTimeout = 10000
+            }
+            val code = connection.responseCode
+            val body = (if (code in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                throw IllegalStateException(parseFirebaseError(body, code))
+            }
+            if (body.isBlank() || body == "null") null else JSONObject(body)
+        }
+    }
+
+    suspend fun pullNotifications(
+        onSuccess: (List<com.example.railguard.model.NotificationItem>) -> Unit,
+        onError: (String) -> Unit = {}
+    ) {
+        try {
+            val json = readUserObject("notifications")
+            val result = mutableListOf<com.example.railguard.model.NotificationItem>()
+            if (json != null) {
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val item = json.optJSONObject(key) ?: continue
+                    result += com.example.railguard.model.NotificationItem(
+                        id = item.optString("id", key),
+                        title = item.optString("title", ""),
+                        message = item.optString("message", ""),
+                        time = item.optString("time", item.optString("timestamp", "")),
+                        tone = runCatching {
+                            Tone.valueOf(item.optString("tone", Tone.INFO.name).uppercase())
+                        }.getOrDefault(Tone.INFO),
+                        read = item.optBoolean("read", false)
+                    )
+                }
+            }
+            withContext(Dispatchers.Main) { onSuccess(result) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("RailGuardFirebase", "Notifications pull error: ${e.message}")
+            withContext(Dispatchers.Main) { onError(e.message ?: "Notifications could not be loaded.") }
+        }
+    }
+
+    suspend fun pullObservations(
+        onSuccess: (List<ObservationItem>) -> Unit,
+        onError: (String) -> Unit = {}
+    ) {
+        try {
+            val json = readUserObject("observations")
+            val result = mutableListOf<ObservationItem>()
+            if (json != null) {
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val item = json.optJSONObject(key) ?: continue
+                    result += ObservationItem(
+                        id = item.optString("id", key),
+                        title = item.optString("title", ""),
+                        chainage = item.optString("chainage", "Unknown"),
+                        time = item.optString("time", item.optString("timestamp", "")),
+                        severity = item.optString("severity", "Unknown"),
+                        tone = runCatching {
+                            Tone.valueOf(item.optString("tone", Tone.INFO.name).uppercase())
+                        }.getOrDefault(Tone.INFO)
+                    )
+                }
+            }
+            withContext(Dispatchers.Main) { onSuccess(result) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("RailGuardFirebase", "Observations pull error: ${e.message}")
+            withContext(Dispatchers.Main) { onError(e.message ?: "Observations could not be loaded.") }
+        }
     }
 
     fun loadAppPreferences(): AppPreferences {
@@ -1017,6 +1111,7 @@ class RailGuardFirebaseService private constructor() {
                         inspObj.put(insp.id, JSONObject().apply {
                             put("id", insp.id)
                             put("section", insp.section)
+                            put("date", insp.date)
                             put("inspector", insp.inspector)
                             put("status", insp.status)
                             put("framesCount", insp.framesCount)
@@ -1029,7 +1124,9 @@ class RailGuardFirebaseService private constructor() {
                 }
 
                 val conn = (URL(dbEndpoint).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "PUT"
+                    // PATCH preserves settings, telemetry, audit logs and
+                    // other collections that are not part of this bulk sync.
+                    requestMethod = "PATCH"
                     connectTimeout = 12000
                     readTimeout = 12000
                     doOutput = true
@@ -1100,18 +1197,9 @@ class RailGuardFirebaseService private constructor() {
                     effectiveContent = stream.bufferedReader().use { it.readText() }
                 }
 
-                if (effectiveContent.isBlank() || effectiveContent == "null") {
-                    // Try global corridor root
-                    try {
-                        val fallbackConn = (URL("$activeDb/railguard.json$authParam").openConnection() as HttpURLConnection).apply {
-                            requestMethod = "GET"
-                            connectTimeout = 8000
-                            readTimeout = 8000
-                        }
-                        if (fallbackConn.responseCode in 200..299) {
-                            effectiveContent = fallbackConn.inputStream.bufferedReader().use { it.readText() }
-                        }
-                    } catch (ignored: Exception) {}
+                if (code !in 200..299) {
+                    val body = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    throw IllegalStateException(parseFirebaseError(body, code))
                 }
 
                 if (effectiveContent.isNotBlank() && effectiveContent != "null") {
@@ -1134,17 +1222,17 @@ class RailGuardFirebaseService private constructor() {
                                     id = item.optString("id", key),
                                     title = item.optString("title", "Track Defect"),
                                     section = item.optString("section", "Mainline"),
-                                    score = item.optString("score", "Warning"),
-                                    tone = try { Tone.valueOf(item.optString("tone", "WARNING")) } catch (e: Exception) { Tone.WARNING },
-                                    time = item.optString("time", "Just now"),
+                                     score = item.optString("score", "Unknown"),
+                                     tone = try { Tone.valueOf(item.optString("tone", Tone.UNKNOWN.name)) } catch (e: Exception) { Tone.UNKNOWN },
+                                     time = item.optString("time", "Unknown"),
                                     detail = item.optString("detail", ""),
-                                    estimatedLength = item.optString("estimatedLength", "10 mm"),
-                                    latitude = item.optDouble("latitude", 28.6142),
-                                    longitude = item.optDouble("longitude", 77.2085),
-                                    riskScore = item.optInt("riskScore", 70),
-                                    chainageCoordinate = item.optString("chainageCoordinate", "KM 42+000"),
-                                    aiConfidencePercent = item.optInt("aiConfidencePercent", 90),
-                                    aiPrescribedAction = item.optString("aiPrescribedAction", "Inspect track.")
+                                     estimatedLength = item.optString("estimatedLength", "Unknown"),
+                                     latitude = item.optDouble("latitude", 0.0),
+                                     longitude = item.optDouble("longitude", 0.0),
+                                     riskScore = item.optInt("riskScore", 0),
+                                     chainageCoordinate = item.optString("chainageCoordinate", "Unknown"),
+                                     aiConfidencePercent = item.optInt("aiConfidencePercent", 0),
+                                     aiPrescribedAction = item.optString("aiPrescribedAction", "No cloud recommendation available")
                                 )
                             )
                         }
@@ -1162,11 +1250,11 @@ class RailGuardFirebaseService private constructor() {
                                     id = item.optString("id", key),
                                     title = item.optString("title", "Maintenance Task"),
                                     section = item.optString("section", "Mainline"),
-                                    due = item.optString("due", "Today"),
+                                     due = item.optString("due", "Unknown"),
                                     tone = try { Tone.valueOf(item.optString("tone", "INFO")) } catch (e: Exception) { Tone.INFO },
-                                    assignee = item.optString("assignee", "Field Gang"),
-                                    status = item.optString("status", "Pending"),
-                                    torque = item.optString("torque", "Nominal")
+                                     assignee = item.optString("assignee", "Unassigned"),
+                                     status = item.optString("status", "Unknown"),
+                                     torque = item.optString("torque", "Unknown")
                                 )
                             )
                         }
@@ -1182,14 +1270,14 @@ class RailGuardFirebaseService private constructor() {
                             inspectionsList.add(
                                 InspectionRecord(
                                     id = item.optString("id", key),
-                                    section = item.optString("section", "Corridor"),
-                                    date = item.optString("date", "Today"),
-                                    inspector = item.optString("inspector", "Inspector"),
-                                    status = item.optString("status", "Completed"),
-                                    framesCount = item.optInt("framesCount", 100),
+                                     section = item.optString("section", "Unknown"),
+                                     date = item.optString("date", "Unknown"),
+                                     inspector = item.optString("inspector", "Unknown"),
+                                     status = item.optString("status", "Unknown"),
+                                     framesCount = item.optInt("framesCount", 0),
                                     detectionsCount = item.optInt("detectionsCount", 0),
-                                    detectedCrackTitle = item.optString("detectedCrackTitle", "None"),
-                                    recommendedMaintenanceAction = item.optString("recommendedMaintenanceAction", "Routine inspection")
+                                     detectedCrackTitle = item.optString("detectedCrackTitle", "No cloud detection data"),
+                                     recommendedMaintenanceAction = item.optString("recommendedMaintenanceAction", "No cloud recommendation available")
                                 )
                             )
                         }
@@ -1942,14 +2030,14 @@ class RailGuardFirebaseService private constructor() {
     }
 
     data class LiveSensorTelemetry(
-        val nodeId: String = "RPI-TRACK-01",
+        val nodeId: String = "Unknown",
         val ultrasonicDepthMm: Float = 0.0f,
         val vibrationG: Float = 0.0f,
         val railTempC: Float = 0.0f,
         val axleSpeedKmh: Float = 0.0f,
-        val chainage: String = "--",
-        val hardware: String = "Raspberry Pi 4 / ESP32 Sensor Node",
-        val status: String = "IDLE",
+        val chainage: String = "Unknown",
+        val hardware: String = "Unknown",
+        val status: String = "Unknown",
         val timestamp: Long = 0L
     )
 
@@ -1962,46 +2050,43 @@ class RailGuardFirebaseService private constructor() {
         return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
-                val endpoints = listOf(
-                    "${getEffectiveDbUrl()}/${userDataRoot()}/live_sensors/telemetry.json$authParam",
-                    "${getEffectiveDbUrl()}/railguard/live_sensors/telemetry.json$authParam",
-                    "${getEffectiveDbUrl()}/railguard/rpi_telemetry.json$authParam",
-                    "${getEffectiveDbUrl()}/railguard/esp_sensors/telemetry.json$authParam"
-                )
-
-                for (liveEndpoint in endpoints) {
-                    try {
-                        val conn = (URL(liveEndpoint).openConnection() as HttpURLConnection).apply {
-                            requestMethod = "GET"
-                            connectTimeout = 4000
-                            readTimeout = 4000
-                        }
-                        if (conn.responseCode in 200..299) {
-                            val body = conn.inputStream.bufferedReader().use { it.readText() }
-                            if (body.isNotBlank() && body != "null") {
-                                val json = JSONObject(body)
-                                val telemetry = LiveSensorTelemetry(
-                                    nodeId = json.optString("nodeId", json.optString("device_id", "RPI-TRACK-01")),
-                                    ultrasonicDepthMm = (json.optDouble("ultrasonicDepthMm", json.optDouble("ultrasonic_mm", 0.0))).toFloat(),
-                                    vibrationG = (json.optDouble("vibrationG", json.optDouble("vibration_g", 0.0))).toFloat(),
-                                    railTempC = (json.optDouble("railTempC", json.optDouble("temp_c", 0.0))).toFloat(),
-                                    axleSpeedKmh = (json.optDouble("axleSpeedKmh", json.optDouble("speed_kmh", 0.0))).toFloat(),
-                                    chainage = json.optString("chainage", "--"),
-                                    hardware = json.optString("hardware", "Raspberry Pi 4 / ESP32"),
-                                    status = json.optString("status", "ACTIVE_SYNC"),
-                                    timestamp = json.optLong("timestamp", System.currentTimeMillis())
-                                )
-                                withContext(Dispatchers.Main) {
-                                    latestSensorTelemetry = telemetry
-                                }
-                                return@withContext telemetry
-                            }
-                        }
-                    } catch (ignored: Exception) {
-                        // try next endpoint
-                    }
+                val liveEndpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/live_sensors/telemetry.json$authParam"
+                val conn = (URL(liveEndpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 5000
+                    readTimeout = 5000
                 }
-                null
+                val code = conn.responseCode
+                if (code !in 200..299) {
+                    withContext(Dispatchers.Main) {
+                        latestSensorTelemetry = null
+                    }
+                    return@withContext null
+                }
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                if (body.isBlank() || body == "null") {
+                    withContext(Dispatchers.Main) {
+                        latestSensorTelemetry = null
+                    }
+                    return@withContext null
+                }
+                val json = JSONObject(body)
+                val telemetry = LiveSensorTelemetry(
+                    nodeId = json.optString("nodeId", "Unknown"),
+                    ultrasonicDepthMm = json.optDouble("ultrasonicDepthMm", 0.0).toFloat(),
+                    vibrationG = json.optDouble("vibrationG", 0.0).toFloat(),
+                    railTempC = json.optDouble("railTempC", 0.0).toFloat(),
+                    axleSpeedKmh = json.optDouble("axleSpeedKmh", 0.0).toFloat(),
+                    chainage = json.optString("chainage", "Unknown"),
+                    hardware = json.optString("hardware", "Unknown"),
+                    status = json.optString("status", "Unknown"),
+                    timestamp = json.optLong("timestamp", 0L)
+                )
+                withContext(Dispatchers.Main) {
+                    latestSensorTelemetry = telemetry
+                    isConnectedToFirebase = true
+                }
+                telemetry
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

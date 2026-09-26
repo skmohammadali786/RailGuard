@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.railguard.components.*
+import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.Defect
 import com.example.railguard.model.MaintenanceTask
 import com.example.railguard.model.Tone
@@ -37,6 +38,7 @@ import com.example.railguard.theme.toneColor
 fun HomeScreen(
     defects: List<Defect>,
     tasks: List<MaintenanceTask>,
+    telemetry: RailGuardFirebaseService.LiveSensorTelemetry?,
     inspectorName: String = "Field Inspector",
     onNavigate: (String) -> Unit,
     onDefectClick: (Defect) -> Unit,
@@ -44,6 +46,8 @@ fun HomeScreen(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDark.current
+    val gatewayOnline = telemetry != null &&
+        (telemetry.timestamp == 0L || System.currentTimeMillis() - telemetry.timestamp < 30_000L)
 
     LazyColumn(
         modifier = Modifier
@@ -101,24 +105,37 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = topDefect?.section ?: "Mainline Rail Corridor",
+                    text = topDefect?.section ?: telemetry?.chainage?.takeIf { it != "Unknown" }
+                        ?: "Awaiting corridor telemetry",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = colorScheme.onSurface
                 )
                 Text(
-                    text = if (topDefect != null) "Chainage ${topDefect.chainageCoordinate} · Monitored Profile" else "Continuous Ultrasonic & Vision Telemetry Active",
+                    text = when {
+                        topDefect != null -> "Chainage ${topDefect.chainageCoordinate} · Cloud defect record"
+                        telemetry != null -> "Chainage ${telemetry.chainage} · Gateway packet received"
+                        else -> "No Raspberry Pi packet received"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = if (topDefect != null) "Track Coordinates: ${topDefect.latitude}°N ${topDefect.longitude}°E" else "Track Coordinates: Live Corridor Telemetry Ready",
+                    text = if (topDefect != null && (topDefect.latitude != 0.0 || topDefect.longitude != 0.0)) {
+                        "Track Coordinates: ${topDefect.latitude}°N ${topDefect.longitude}°E"
+                    } else {
+                        "Track Coordinates: ${telemetry?.chainage ?: "Unknown"}"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
                     color = colorScheme.primary
                 )
                 Text(
-                    text = "System Status: Telemetry Active · Realtime Sync",
+                    text = if (gatewayOnline) {
+                        "Gateway: ${telemetry?.nodeId} · ${telemetry?.status}"
+                    } else {
+                        "Gateway: waiting for a current Firebase packet"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = colorScheme.onSurfaceVariant
                 )
@@ -142,7 +159,11 @@ fun HomeScreen(
                         color = colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = if (topDefect != null) "${topDefect.aiConfidencePercent}% Conf · Risk ${topDefect.score}" else "Telemetry Stream Ready",
+                        text = if (topDefect != null) {
+                            "${topDefect.aiConfidencePercent}% Conf · Risk ${topDefect.score}"
+                        } else {
+                            "No cloud analysis available"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
@@ -164,7 +185,7 @@ fun HomeScreen(
                             color = colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = if (defects.isNotEmpty()) "Active" else "Standby",
+                            text = if (gatewayOnline) "Live" else "Waiting",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = colorScheme.primary
@@ -172,7 +193,7 @@ fun HomeScreen(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     LinearProgressIndicator(
-                        progress = { if (defects.isNotEmpty()) 0.75f else 0.1f },
+                            progress = { if (gatewayOnline) 1f else 0f },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
@@ -227,7 +248,11 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Line Nominal: Operating at Normal Line Speed",
+                            text = if (gatewayOnline) {
+                                "Gateway connected: ${telemetry?.status}"
+                            } else {
+                                "No current gateway telemetry"
+                            },
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF16A34A)

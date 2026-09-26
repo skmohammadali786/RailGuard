@@ -41,8 +41,6 @@ import com.example.railguard.model.Tone
 import kotlinx.coroutines.launch
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import com.example.railguard.data.RailGuardFirebaseService
 
 data class AiChatMessage(
@@ -56,6 +54,7 @@ data class AiChatMessage(
 fun AiOracleScreen(
     defects: List<Defect>,
     tasks: List<MaintenanceTask>,
+    telemetry: RailGuardFirebaseService.LiveSensorTelemetry?,
     onInspectDefect: (Defect) -> Unit,
     onDispatchTask: (MaintenanceTask) -> Unit,
     onNavigateCrackGrowth: () -> Unit,
@@ -85,7 +84,7 @@ fun AiOracleScreen(
     var scanProgress by remember { mutableFloatStateOf(0f) }
     var currentScanPhase by remember { mutableStateOf("Ready") }
     var lastTensorScanResult by remember {
-        mutableStateOf("Multi-Tensor Inference Synced · Edge AI Model Online · Continuous Corridor Monitoring")
+        mutableStateOf("No cloud AI evaluation loaded for this account.")
     }
 
     // Interactive Action Feedback Banner
@@ -117,48 +116,9 @@ fun AiOracleScreen(
         mutableStateListOf(
             AiChatMessage(
                 sender = "assistant",
-                text = "⚡ System initialized: RailVision-DeepTrack Edge AI cluster online (16 ms latency).\n\n" +
-                    "Real-time telemetric streams active across monitored corridor sectors. Safety surveillance operational.",
-                actionableType = "TSR",
-                actionableLabel = "View Live Corridor Telemetry"
+                text = "No cloud AI evaluation is loaded. Use a prompt to save an analysis request to Firebase, or review the records returned for this account."
             )
         )
-    }
-
-    LaunchedEffect(isRunningTensorScan) {
-        if (isRunningTensorScan) {
-            scanProgress = 0f
-            val phases = listOf(
-                "Ingesting Multi-Spectral Ultrasonic Waves...",
-                "Running 2D Convolutional Feature Maps...",
-                "Calculating Paris-Erdogan Stress Intensity (ΔK)...",
-                "Evaluating Nadal Flange Climb Ratio (Y/Q)...",
-                "Solving Euler Beam-Column Compressive Buckling...",
-                "Synthesizing Multi-Tensor Confidence Matrix..."
-            )
-            for (i in 1..phases.size) {
-                currentScanPhase = phases[i - 1]
-                scanProgress = i / phases.size.toFloat()
-                delay(180)
-            }
-            isRunningTensorScan = false
-            currentScanPhase = "Inference Complete (100%)"
-            lastTensorScanResult = when (activeModelIndex) {
-                0 -> "DeepTrack v4.2: Flaw depth 46.2mm ±0.3mm · Acoustic signature confirmed · Zero false positives in 12,000 frames"
-                1 -> "Paris-FractureNet: da/dN = 2.4×10⁻¹¹ (ΔK)³·² · Remaining safe life: 72.4 Operating Hours · Limit: 50.0mm"
-                2 -> "Nadal-KinematicEngine: Y/Q ratio = 0.68 · Wheel climb envelope safe at 25 km/h · Derailment probability 12.4%"
-                else -> "ThermalBuckle-SFT: Neutral SFT 27.0°C · Rail temp +11.4°C · Axial stress +68.4 MPa · Buckle margin safe"
-            }
-            RailGuardFirebaseService.instance.recordAiAnalysis(
-                "AI_TENSOR_SCAN",
-                mapOf(
-                    "model" to models[activeModelIndex],
-                    "summary" to lastTensorScanResult,
-                    "nadalRatio" to 0.68,
-                    "confidence" to 0.992
-                )
-            )
-        }
     }
 
     LazyColumn(
@@ -319,7 +279,7 @@ fun AiOracleScreen(
                         ) {
                             Column {
                                 Text("NADAL RATIO", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                Text("0.68 Y/Q", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("Unknown", color = Color(0xFF94A3B8), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
                         Box(
@@ -332,7 +292,13 @@ fun AiOracleScreen(
                         ) {
                             Column {
                                 Text("CONFIDENCE", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                Text("99.2%", color = Color(0xFF22C55E), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text(
+                                    defects.firstOrNull()?.aiConfidencePercent?.takeIf { it > 0 }?.let { "$it%" } ?: "Unknown",
+                                    color = Color(0xFF22C55E),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
                             }
                         }
                         Box(
@@ -345,7 +311,7 @@ fun AiOracleScreen(
                         ) {
                             Column {
                                 Text("RUL SAFE LIFE", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                Text("72.4 Hours", color = Color(0xFFF59E0B), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("Unknown", color = Color(0xFFF59E0B), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
                     }
@@ -388,7 +354,28 @@ fun AiOracleScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(
-                                onClick = { isRunningTensorScan = true },
+                                onClick = {
+                                    isRunningTensorScan = true
+                                    currentScanPhase = "Writing analysis request to Firebase..."
+                                    scope.launch {
+                                        RailGuardFirebaseService.instance.recordAiAnalysis(
+                                            "AI_TENSOR_SCAN",
+                                            mapOf(
+                                                "status" to "REQUESTED",
+                                                "model" to models[activeModelIndex],
+                                                "defectCount" to defects.size,
+                                                "taskCount" to tasks.size,
+                                                "telemetryPresent" to (telemetry != null),
+                                                "telemetryTimestamp" to (telemetry?.timestamp ?: 0L)
+                                            )
+                                        )
+                                        lastTensorScanResult =
+                                            "Cloud analysis request saved. Waiting for a configured backend evaluator."
+                                        currentScanPhase = "Request saved"
+                                        scanProgress = 1f
+                                        isRunningTensorScan = false
+                                    }
+                                },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
                                 shape = RoundedCornerShape(6.dp),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -428,7 +415,11 @@ fun AiOracleScreen(
                     ) {
                         val topDefect = defects.firstOrNull()
                         Text(
-                            text = if (topDefect != null) "70° SHEAR WAVE · ECHO AT ${topDefect.chainageCoordinate}" else "70° SHEAR WAVE · ACOUSTIC BASELINE NOMINAL · ZERO FLAW ECHO",
+                            text = when {
+                                topDefect != null -> "70° SHEAR WAVE · CLOUD DEFECT ${topDefect.chainageCoordinate}"
+                                telemetry != null -> "70° SHEAR WAVE · LIVE PACKET ${telemetry.chainage}"
+                                else -> "70° SHEAR WAVE · WAITING FOR TELEMETRY"
+                            },
                             color = Color(0xFF38BDF8),
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
@@ -668,23 +659,18 @@ fun AiOracleScreen(
                                 color = colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
-                            StatusPill(label = "0.68 Y/Q", tone = Tone.CRITICAL)
+                            StatusPill(label = "Unknown", tone = Tone.NEUTRAL)
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Chainage 14+320 High-Rail Curve (300m Radius)",
+                            text = "No cloud derailment geometry loaded",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Calculated wheel climb margin via Nadal Criterion (Y/Q):\n" +
-                                "• Speed @ 45 km/h: 96.2% derailment probability (CATASTROPHIC)\n" +
-                                "• Speed @ 35 km/h: 48.7% flange climb potential\n" +
-                                "• Speed @ 25 km/h: 12.4% safe envelope (ACTIVE RESTRICTION ENFORCED)\n" +
-                                "• Nadal Equation: Y/Q = (tan δ - μ)/(1 + μ tan δ) = 0.68 (Limit: 0.80)\n" +
-                                "• Dynamic Angle of Attack: 1.42° with dynamic track gauge variance (+9.4mm).",
+                            text = "No Nadal evaluation was returned by Firebase for this account.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
@@ -897,14 +883,18 @@ fun AiOracleScreen(
                                         .border(1.dp, Color(0xFF0284C7), RoundedCornerShape(6.dp))
                                         .clickable {
                                             when (msg.actionableType) {
-                                                "TSR" -> quickActionFeedback = "TSR 25 km/h verified and acknowledged by Driver on TR-104."
+                                                "TSR" -> quickActionFeedback = "No cloud speed restriction record is available."
                                                 "DISPATCH" -> {
-                                                    if (tasks.isNotEmpty()) onDispatchTask(tasks.first())
-                                                    quickActionFeedback = "WO-881 dispatched to maintenance car."
+                                                    if (tasks.isNotEmpty()) {
+                                                        onDispatchTask(tasks.first())
+                                                        quickActionFeedback = "Selected maintenance task opened for dispatch."
+                                                    } else {
+                                                        quickActionFeedback = "No maintenance task record is available."
+                                                    }
                                                 }
                                                 "HEATMAP" -> onNavigateHeatmap()
                                                 "GROWTH" -> onNavigateCrackGrowth()
-                                                else -> quickActionFeedback = "Directive executed successfully."
+                                                else -> quickActionFeedback = "No cloud directive was executed."
                                             }
                                         }
                                         .padding(horizontal = 10.dp, vertical = 5.dp)
@@ -944,39 +934,9 @@ fun AiOracleScreen(
                                         keyboardController?.hide()
                                         focusManager.clearFocus(force = true)
                                         chatMessages.add(AiChatMessage("user", suggestion))
-                                        val (replyText, actType, actLabel) = when {
-                                            suggestion.contains("speed", ignoreCase = true) -> Triple(
-                                                "⚡ Under current corridor geometry and curve radius conditions, maximum safe operating speed is evaluated based on live sensor feed.\n\n" +
-                                                    "If flaw is detected, exceeding 35 km/h escalates wheel climb derailment risk. Safe TSR is auto-dispatched to cab.",
-                                                "TSR",
-                                                "Confirm Cab TSR Restrictions"
-                                            )
-                                            suggestion.contains("rupture", ignoreCase = true) || suggestion.contains("break", ignoreCase = true) -> Triple(
-                                                "💥 Flaw rupture kinetics are modeled using Paris-Erdogan law (da/dN = C(ΔK)^m). Under continuous freight passes, growth velocity is tracked against the critical rail fracture limit.\n\n" +
-                                                    "Recommendation: Real-time ultrasonic transducer monitoring is active.",
-                                                "GROWTH",
-                                                "View Crack Growth FEA Curve"
-                                            )
-                                            suggestion.contains("window", ignoreCase = true) -> Triple(
-                                                "🕒 North Loop is completely dark to commercial traffic between 01:15 and 04:30 GMT tonight (195 minutes).\n\n" +
-                                                    "Work Order WO-881 requires 85 minutes. Crew 04 is currently available on standby.",
-                                                "DISPATCH",
-                                                "Dispatch WO-881 to Crew 04"
-                                            )
-                                            suggestion.contains("buckling", ignoreCase = true) -> Triple(
-                                                "🔥 Tomorrow's ambient 34°C will drive rail surface to 48.4°C (+11.4°C over Neutral SFT 27°C).\n\n" +
-                                                    "Compressive stress will peak at +68.4 MPa (128 kN axial force, near 145 kN Euler buckling limit). Destressing required before 11:30.",
-                                                "HEATMAP",
-                                                "Inspect Corridor Heatmap"
-                                            )
-                                            else -> Triple(
-                                                "📐 Nadal Derailment Criterion evaluates lateral wheel force (Y) over vertical axle load (Q):\n" +
-                                                    "Y/Q = (tan δ - μ) / (1 + μ tan δ)\n\n" +
-                                                    "With flange angle δ=68° and friction μ=0.38, current ratio is 0.68. The critical derailment boundary is 0.80.",
-                                                null,
-                                                null
-                                            )
-                                        }
+                                        val replyText = "Firebase analysis request saved for \"$suggestion\". No backend evaluation was returned."
+                                        val actType: String? = null
+                                        val actLabel: String? = null
                                         chatMessages.add(AiChatMessage("assistant", replyText, actType, actLabel))
                                         scope.launch {
                                             RailGuardFirebaseService.instance.saveAiOracleQuery(
@@ -1008,19 +968,21 @@ fun AiOracleScreen(
                             chatMessages.add(AiChatMessage("user", userMsg))
                             queryText = ""
                             val topDef = defects.firstOrNull()
-                            val reply = "🤖 RailVision-DeepTrack Analysis for '$userMsg':\n\n" +
+                            val reply = "Firebase analysis request recorded for \"$userMsg\".\n\n" +
                                 if (topDef != null) {
                                     "• Corridor track integrity evaluated under active monitoring.\n" +
                                     "• Track flaw ${topDef.id} (${topDef.estimatedLength} at ${topDef.chainageCoordinate}) is monitored in real-time.\n" +
-                                    "• Multi-Tensor inference confidence: ${topDef.aiConfidencePercent}%.\n" +
+                                    "• Cloud confidence: ${topDef.aiConfidencePercent.takeIf { it > 0 }?.let { "$it%" } ?: "Unknown"}.\n" +
                                     "• Safety Directive: ${topDef.aiPrescribedAction}"
+                                } else if (telemetry != null) {
+                                    "• Gateway: ${telemetry.nodeId}\n" +
+                                    "• Chainage: ${telemetry.chainage}\n" +
+                                    "• Rail temperature: ${telemetry.railTempC} °C\n" +
+                                    "• No defect or AI evaluation record was returned."
                                 } else {
-                                    "• Corridor track integrity evaluated at nominal condition.\n" +
-                                    "• Continuous ultrasonic, thermal and accelerometer telemetry active.\n" +
-                                    "• Multi-Tensor inference confidence: 99.4%.\n" +
-                                    "• Safety Directive: Operating at normal line speed."
+                                    "• No defect or sensor telemetry record was returned by Firebase."
                                 }
-                            chatMessages.add(AiChatMessage("assistant", reply, "TSR", "Verify Cab Interlock"))
+                            chatMessages.add(AiChatMessage("assistant", reply))
                             scope.launch {
                                 RailGuardFirebaseService.instance.saveAiOracleQuery(
                                     query = userMsg,

@@ -229,8 +229,11 @@ fun InspectionSetupScreen(
     onStartPatrol: (InspectionRecord, Boolean) -> Unit,
     onBack: () -> Unit
 ) {
-    var corridorName by remember { mutableStateOf("Sector 4B · North Express Corridor") }
-    var inspectorName by remember { mutableStateOf("E. Chen (#4092)") }
+    val firebaseService = remember { RailGuardFirebaseService.instance }
+    var corridorName by remember { mutableStateOf("") }
+    var inspectorName by remember {
+        mutableStateOf(firebaseService.currentUser?.displayName.orEmpty())
+    }
     var useLiveHardwareStream by remember { mutableStateOf(true) }
 
     Column(
@@ -293,35 +296,16 @@ fun InspectionSetupScreen(
 
 @Composable
 fun LiveInspectionScreen(
+    inspection: InspectionRecord,
+    telemetry: RailGuardFirebaseService.LiveSensorTelemetry?,
+    cloudDefectCount: Int,
     onEndInspection: () -> Unit,
     onDefectDetected: () -> Unit,
     onOpenGps: () -> Unit,
+    onOpenCamera: () -> Unit,
     onBack: () -> Unit
 ) {
     val firebaseService = remember { RailGuardFirebaseService.instance }
-    var frameCount by remember { mutableStateOf(142) }
-    var simulatedDetection by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        var loopCount = 0
-        while (true) {
-            delay(1200)
-            frameCount += 30
-            loopCount++
-            if (loopCount % 3 == 0) {
-                firebaseService.uploadLiveInspectionStream(
-                    sessionId = "SESSION-14-LIVE",
-                    fps = 60,
-                    defectCount = if (simulatedDetection) 1 else 0,
-                    currentChainage = "Continuous Survey",
-                    alertActive = simulatedDetection
-                )
-            }
-            if (frameCount % 180 == 0) {
-                simulatedDetection = true
-            }
-        }
-    }
 
     Box(
         modifier = Modifier
@@ -356,7 +340,7 @@ fun LiveInspectionScreen(
                             .background(if (firebaseService.isConnectedToFirebase) Color(0xFF16A34A) else Color(0xFFF59E0B))
                     )
                     Text(
-                        text = if (firebaseService.isConnectedToFirebase) "LIVE CLOUD TELEMETRY · 60 FPS" else "FIELD PATROL · 60 FPS",
+                        text = if (firebaseService.isConnectedToFirebase) "LIVE CLOUD TELEMETRY" else "WAITING FOR FIREBASE",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
@@ -381,9 +365,9 @@ fun LiveInspectionScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("OPTICAL AI", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text("INSPECTION", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
                         Text(
-                            "98.2% CONF",
+                            inspection.status,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -391,9 +375,9 @@ fun LiveInspectionScreen(
                         )
                     }
                     Column {
-                        Text("CORRIDOR", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text("CHAINAGE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
                         Text(
-                            "Continuous Track",
+                            telemetry?.chainage ?: "Unknown",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -401,9 +385,9 @@ fun LiveInspectionScreen(
                         )
                     }
                     Column {
-                        Text("PROFILE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text("ULTRASONIC", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
                         Text(
-                            "UIC 60 KG/M",
+                            telemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "Unknown",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -413,7 +397,7 @@ fun LiveInspectionScreen(
                     Column {
                         Text("BACKEND", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
                         Text(
-                            if (firebaseService.isConnectedToFirebase) "ONLINE" else "LOCAL CACHE",
+                            if (telemetry != null && firebaseService.isConnectedToFirebase) "ONLINE" else "WAITING",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -430,49 +414,41 @@ fun LiveInspectionScreen(
                     .height(260.dp)
                     .border(
                         2.dp,
-                        if (simulatedDetection) Color.Red else Color(0xFF00F0FF),
+                        if (telemetry != null) Color(0xFF00F0FF) else Color(0xFF64748B),
                         RoundedCornerShape(8.dp)
                     )
                     .padding(12.dp)
             ) {
                 Column {
                     Text(
-                        text = if (simulatedDetection) "🚨 DEFECT DETECTED: SURFACE FISSURE / GAUGE ANOMALY (96.4%)" else "AI SCANNING RAIL TRACK PROFILE... OK",
-                        color = if (simulatedDetection) Color.Red else Color(0xFF00F0FF),
+                        text = if (telemetry != null) {
+                            "RASPBERRY PI PACKET RECEIVED · ${telemetry.status}"
+                        } else {
+                            "WAITING FOR RASPBERRY PI TELEMETRY"
+                        },
+                        color = if (telemetry != null) Color(0xFF00F0FF) else Color(0xFF94A3B8),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
                     Text(
-                        text = "Frames: $frameCount | GPS: 28.6142°N 77.2085°E | Section: 4B Mainline",
+                        text = "Inspection: ${inspection.id} | Chainage: ${telemetry?.chainage ?: "Unknown"} | Defects: $cloudDefectCount",
                         color = Color.LightGray,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
                     )
                 }
 
-                if (simulatedDetection) {
+                if (cloudDefectCount > 0) {
                     Row(
                         modifier = Modifier.align(Alignment.BottomEnd),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Button(
-                            onClick = {
-                                simulatedDetection = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155))
-                        ) {
-                            Text("Dismiss", fontSize = 11.sp)
-                        }
-
-                        Button(
-                            onClick = {
-                                simulatedDetection = false
-                                onDefectDetected()
-                            },
+                            onClick = onDefectDetected,
                             colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
                         ) {
-                            Text("Log Defect & Interlock Fleet", fontSize = 11.sp)
+                            Text("Open cloud defects", fontSize = 11.sp)
                         }
                     }
                 }
@@ -484,9 +460,7 @@ fun LiveInspectionScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
-                    onClick = {
-                        // Capture snapshot
-                    },
+                    onClick = onOpenCamera,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
                 ) {
@@ -594,6 +568,7 @@ fun InspectionCalendarScreen(
 
 @Composable
 fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
+    val firebaseService = remember { RailGuardFirebaseService.instance }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isUploadingCapture by remember { mutableStateOf(false) }
@@ -616,10 +591,10 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                 val capId = "CAM-${System.currentTimeMillis() % 100000}"
                 val result = RailGuardFirebaseService.instance.uploadCameraCapture(
                     captureId = capId,
-                    section = "Section 14 North Loop",
-                    detectionCount = 1,
-                    defectDetected = true,
-                    notes = "Camera capture at 14+320 chainage",
+                    section = firebaseService.latestSensorTelemetry?.chainage ?: "Unknown",
+                    detectionCount = 0,
+                    defectDetected = false,
+                    notes = "Field camera evidence capture at ${firebaseService.latestSensorTelemetry?.chainage ?: "Unknown"}",
                     evidenceBytes = bytes,
                     contentType = "image/jpeg"
                 )
@@ -628,12 +603,11 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                         "CAMERA_CAPTURE_UPLOAD",
                         mapOf(
                             "captureId" to capId,
-                            "chainage" to "14+320",
+                            "chainage" to (firebaseService.latestSensorTelemetry?.chainage ?: "Unknown"),
                             "storagePath" to result.storagePath
                         )
                     )
                     uploadStatusMsg = "Photo and metadata uploaded to Firebase"
-                    onCaptureDefect()
                 } else {
                     uploadStatusMsg = "Firebase upload failed: ${result.message}"
                 }

@@ -18,13 +18,13 @@ data class Defect(
     val tone: Tone,
     val time: String,
     val detail: String,
-    val estimatedLength: String = "14.2 mm",
-    val latitude: Double = 28.6139,
-    val longitude: Double = 77.2090,
-    val riskScore: Int = 85,
-    val chainageCoordinate: String = "KM 42+180",
-    val aiConfidencePercent: Int = 94,
-    val aiPrescribedAction: String = "Immediate clamping and ultrasonic depth verification within 24h"
+    val estimatedLength: String = "Unknown",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val riskScore: Int = 0,
+    val chainageCoordinate: String = "Unknown",
+    val aiConfidencePercent: Int = 0,
+    val aiPrescribedAction: String = "No cloud recommendation available"
 )
 
 data class MaintenanceTask(
@@ -35,7 +35,7 @@ data class MaintenanceTask(
     val tone: Tone,
     val assignee: String,
     val status: String = "Pending",
-    val torque: String = "320 Nm"
+    val torque: String = "Unknown"
 )
 
 data class InspectionRecord(
@@ -44,10 +44,10 @@ data class InspectionRecord(
     val date: String = "Today",
     val inspector: String,
     val status: String,
-    val framesCount: Int = 1420,
+    val framesCount: Int = 0,
     val detectionsCount: Int = 3,
-    val detectedCrackTitle: String = "Surface Hairline Fissure (Gauge Face)",
-    val recommendedMaintenanceAction: String = "Schedule track grinding and joint realignment"
+    val detectedCrackTitle: String = "No cloud detection data",
+    val recommendedMaintenanceAction: String = "No cloud recommendation available"
 )
 
 data class ObservationItem(

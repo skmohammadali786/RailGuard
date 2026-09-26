@@ -17,6 +17,7 @@ import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.*
 import com.example.railguard.theme.RailGuardTheme
 import com.example.railguard.ui.screens.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String) {
@@ -108,53 +109,12 @@ fun RailGuardApp() {
     val observations = remember { mutableStateListOf(*RailDataRepository.initialObservations.toTypedArray()) }
     val notifications = remember { mutableStateListOf(*RailDataRepository.initialNotifications.toTypedArray()) }
 
-    val defaultDefect = remember {
-        Defect(
-            id = "DEF-LIVE",
-            title = "Realtime Track Monitor",
-            section = "Active Corridor",
-            score = "Nominal",
-            tone = Tone.HEALTHY,
-            time = "Live",
-            detail = "Real-time corridor telemetry active. Monitored profile within nominal tolerances.",
-            estimatedLength = "0.0 mm",
-            latitude = 28.6139,
-            longitude = 77.2090,
-            riskScore = 0,
-            chainageCoordinate = "KM 00+000",
-            aiConfidencePercent = 100,
-            aiPrescribedAction = "Corridor clear - active continuous monitoring."
-        )
+    var latestSensorTelemetry by remember {
+        mutableStateOf<RailGuardFirebaseService.LiveSensorTelemetry?>(null)
     }
-    val defaultTask = remember {
-        MaintenanceTask(
-            id = "TSK-LIVE",
-            title = "Corridor Preventive Inspection",
-            section = "Active Corridor",
-            due = "Pending Sync",
-            tone = Tone.HEALTHY,
-            assignee = "Field Engineer",
-            status = "Nominal",
-            torque = "Nominal"
-        )
-    }
-    val defaultInspection = remember {
-        InspectionRecord(
-            id = "INSP-LIVE",
-            section = "Active Corridor",
-            date = "Today",
-            inspector = "Field Inspector",
-            status = "Monitoring",
-            framesCount = 0,
-            detectionsCount = 0,
-            detectedCrackTitle = "No Anomalies Detected",
-            recommendedMaintenanceAction = "Normal track monitoring active"
-        )
-    }
-
-    var selectedDefect by remember { mutableStateOf(defects.firstOrNull() ?: defaultDefect) }
-    var selectedTask by remember { mutableStateOf(tasks.firstOrNull() ?: defaultTask) }
-    var selectedInspection by remember { mutableStateOf(inspections.firstOrNull() ?: defaultInspection) }
+    var selectedDefect by remember { mutableStateOf<Defect?>(null) }
+    var selectedTask by remember { mutableStateOf<MaintenanceTask?>(null) }
+    var selectedInspection by remember { mutableStateOf<InspectionRecord?>(null) }
     var selectedReportTitle by remember { mutableStateOf("RailGuard Corridor Safety Report") }
 
     var profileName by remember {
@@ -192,8 +152,9 @@ fun RailGuardApp() {
         }
     }
 
-    // Synchronize only after Firebase has an authenticated user. The local
-    // repository remains the offline fallback when the account has no records.
+    // Keep the app state as a projection of the authenticated user's cloud
+    // namespace. Empty cloud collections are intentionally empty; they are not
+    // replaced with sample records.
     LaunchedEffect(firebaseService.currentUser?.localId) {
         if (firebaseService.currentUser == null) return@LaunchedEffect
         firebaseService.currentUser?.let { user ->
@@ -204,29 +165,42 @@ fun RailGuardApp() {
             appPreferences = remotePreferences
             isDarkMode = remotePreferences.isDarkMode
         }
-        firebaseService.pullAllFromFirebase(
-            onSuccess = { rDefects, rTasks, rInspections ->
-                if (rDefects.isNotEmpty()) {
-                    rDefects.forEach { rd ->
-                        val idx = defects.indexOfFirst { it.id == rd.id }
-                        if (idx >= 0) defects[idx] = rd else defects.add(0, rd)
+        while (true) {
+            firebaseService.pullAllFromFirebase(
+                onSuccess = { rDefects, rTasks, rInspections ->
+                    defects.clear()
+                    defects.addAll(rDefects)
+                    tasks.clear()
+                    tasks.addAll(rTasks)
+                    inspections.clear()
+                    inspections.addAll(rInspections)
+                    selectedDefect = selectedDefect?.let { current ->
+                        rDefects.firstOrNull { it.id == current.id }
                     }
-                }
-                if (rTasks.isNotEmpty()) {
-                    rTasks.forEach { rt ->
-                        val idx = tasks.indexOfFirst { it.id == rt.id }
-                        if (idx >= 0) tasks[idx] = rt else tasks.add(0, rt)
+                    selectedTask = selectedTask?.let { current ->
+                        rTasks.firstOrNull { it.id == current.id }
                     }
-                }
-                if (rInspections.isNotEmpty()) {
-                    rInspections.forEach { ri ->
-                        val idx = inspections.indexOfFirst { it.id == ri.id }
-                        if (idx >= 0) inspections[idx] = ri else inspections.add(0, ri)
+                    selectedInspection = selectedInspection?.let { current ->
+                        rInspections.firstOrNull { it.id == current.id }
                     }
+                },
+                onError = { /* keep the last confirmed cloud snapshot visible */ }
+            )
+            firebaseService.pullNotifications(
+                onSuccess = {
+                    notifications.clear()
+                    notifications.addAll(it)
                 }
-            },
-            onError = { /* fallback to local repository silently */ }
-        )
+            )
+            firebaseService.pullObservations(
+                onSuccess = {
+                    observations.clear()
+                    observations.addAll(it)
+                }
+            )
+            latestSensorTelemetry = firebaseService.fetchLatestSensorTelemetry()
+            delay(10_000)
+        }
     }
 
     val focusManager = LocalFocusManager.current
@@ -357,6 +331,7 @@ fun RailGuardApp() {
                         Screen.Home.route -> HomeScreen(
                             defects = defects,
                             tasks = tasks,
+                            telemetry = latestSensorTelemetry,
                             inspectorName = profileName,
                             onNavigate = { navigateTo(it) },
                             onDefectClick = {
@@ -431,36 +406,46 @@ fun RailGuardApp() {
                             },
                             onBack = { navigateBack() }
                         )
-                        Screen.LiveInspection.route -> LiveInspectionScreen(
+                        Screen.LiveInspection.route -> selectedInspection?.let { inspection ->
+                            LiveInspectionScreen(
+                            inspection = inspection,
+                            telemetry = latestSensorTelemetry,
+                            cloudDefectCount = defects.size,
                             onEndInspection = {
-                                val completed = selectedInspection.copy(
-                                    status = "Completed · Pending Sign-off"
-                                )
-                                val idx = inspections.indexOfFirst { it.id == selectedInspection.id }
-                                if (idx >= 0) inspections[idx] = completed
-                                selectedInspection = completed
-                                scope.launch {
-                                    firebaseService.uploadInspectionToFirebase(completed)
-                                    firebaseService.logSafetyAuditEvent(
-                                        action = "PATROL_COMPLETED",
-                                        details = "Inspection ${completed.id} completed on ${completed.section}"
+                                selectedInspection?.let { inspection ->
+                                    val completed = inspection.copy(
+                                        status = "Completed · Pending Sign-off"
                                     )
+                                    val idx = inspections.indexOfFirst { it.id == inspection.id }
+                                    if (idx >= 0) inspections[idx] = completed
+                                    selectedInspection = completed
+                                    scope.launch {
+                                        firebaseService.uploadInspectionToFirebase(completed)
+                                        firebaseService.logSafetyAuditEvent(
+                                            action = "PATROL_COMPLETED",
+                                            details = "Inspection ${completed.id} completed on ${completed.section}"
+                                        )
+                                    }
+                                    navigateTo(Screen.InspectionSummary.route)
                                 }
-                                navigateTo(Screen.InspectionSummary.route)
                             },
                             onDefectDetected = {
-                                selectedDefect = defects.firstOrNull() ?: defaultDefect
-                                navigateTo(Screen.DefectDetails.route)
+                                selectedDefect = defects.firstOrNull()
+                                if (selectedDefect != null) navigateTo(Screen.DefectDetails.route)
                             },
                             onOpenGps = { navigateTo(Screen.Gps.route) },
+                            onOpenCamera = { navigateTo(Screen.Camera.route) },
                             onBack = { navigateBack() }
-                        )
-                        Screen.InspectionDetails.route -> InspectionDetailsScreen(
-                            inspection = selectedInspection,
-                            onOpenLive = { navigateTo(Screen.LiveInspection.route) },
-                            onOpenSummary = { navigateTo(Screen.InspectionSummary.route) },
-                            onBack = { navigateBack() }
-                        )
+                            )
+                        } ?: CloudDataRequiredScreen("Start a cloud inspection before opening the live viewfinder", ::navigateBack)
+                        Screen.InspectionDetails.route -> selectedInspection?.let { inspection ->
+                            InspectionDetailsScreen(
+                                inspection = inspection,
+                                onOpenLive = { navigateTo(Screen.LiveInspection.route) },
+                                onOpenSummary = { navigateTo(Screen.InspectionSummary.route) },
+                                onBack = { navigateBack() }
+                            )
+                        } ?: CloudDataRequiredScreen("Select a cloud inspection before opening details", ::navigateBack)
                         Screen.InspectionSummary.route -> InspectionSummaryScreen(
                             onDone = {
                                 navigateBack()
@@ -474,38 +459,56 @@ fun RailGuardApp() {
                         Screen.Gps.route -> GpsScreen(onBack = { navigateBack() })
                         Screen.Camera.route -> CameraScreen(
                             onCaptureDefect = {
-                                selectedDefect = defects.firstOrNull() ?: defaultDefect
-                                navigateTo(Screen.DefectDetails.route)
+                                selectedDefect = defects.firstOrNull()
+                                if (selectedDefect != null) navigateTo(Screen.DefectDetails.route)
                             },
                             onBack = { navigateBack() }
                         )
 
                         // Sub-screens: Defects
-                        Screen.DefectDetails.route -> DefectDetailsScreen(
+                        Screen.DefectDetails.route -> selectedDefect?.let { defect ->
+                            DefectDetailsScreen(
+                                defect = defect,
+                                onOpenMeasurement = { navigateTo(Screen.CrackMeasurement.route) },
+                                onOpenComparison = { navigateTo(Screen.ImageComparison.route) },
+                                onOpenObjectDetection = { navigateTo(Screen.ObjectDetection.route) },
+                                onOpenAlignment = { navigateTo(Screen.Alignment.route) },
+                                onOpenGrowth = { navigateTo(Screen.GrowthAnalysis.route) },
+                                onOpenVerify = { navigateTo(Screen.EngineerVerification.route) },
+                                onOpenComments = { navigateTo(Screen.Comments.route) },
+                                onBack = { navigateBack() }
+                            )
+                        } ?: CloudDataRequiredScreen("Select a cloud defect before opening details", ::navigateBack)
+                        Screen.CrackMeasurement.route -> CrackMeasurementScreen(
                             defect = selectedDefect,
-                            onOpenMeasurement = { navigateTo(Screen.CrackMeasurement.route) },
-                            onOpenComparison = { navigateTo(Screen.ImageComparison.route) },
-                            onOpenObjectDetection = { navigateTo(Screen.ObjectDetection.route) },
-                            onOpenAlignment = { navigateTo(Screen.Alignment.route) },
-                            onOpenGrowth = { navigateTo(Screen.GrowthAnalysis.route) },
-                            onOpenVerify = { navigateTo(Screen.EngineerVerification.route) },
-                            onOpenComments = { navigateTo(Screen.Comments.route) },
                             onBack = { navigateBack() }
                         )
-                        Screen.CrackMeasurement.route -> CrackMeasurementScreen(onBack = { navigateBack() })
-                        Screen.GrowthAnalysis.route -> GrowthAnalysisScreen(onBack = { navigateBack() })
-                        Screen.ImageComparison.route -> ImageComparisonScreen(onBack = { navigateBack() })
-                        Screen.ObjectDetection.route -> ObjectDetectionScreen(onBack = { navigateBack() })
-                        Screen.Alignment.route -> AlignmentAnalysisScreen(onBack = { navigateBack() })
+                        Screen.GrowthAnalysis.route -> GrowthAnalysisScreen(
+                            defect = selectedDefect,
+                            onBack = { navigateBack() }
+                        )
+                        Screen.ImageComparison.route -> ImageComparisonScreen(
+                            defect = selectedDefect,
+                            onBack = { navigateBack() }
+                        )
+                        Screen.ObjectDetection.route -> ObjectDetectionScreen(
+                            defect = selectedDefect,
+                            onBack = { navigateBack() }
+                        )
+                        Screen.Alignment.route -> AlignmentAnalysisScreen(
+                            defect = selectedDefect,
+                            onBack = { navigateBack() }
+                        )
                         Screen.EngineerVerification.route -> EngineerVerificationScreen(
                             onSigned = {
                                 scope.launch {
-                                    val verified = selectedDefect.copy(
+                                     val defect = selectedDefect ?: return@launch
+                                     val verified = defect.copy(
                                         score = "Verified (100%)",
                                         tone = Tone.HEALTHY,
                                         aiPrescribedAction = "Verified & signed off by Lead Engineer ($profileName)"
                                     )
-                                    val idx = defects.indexOfFirst { it.id == selectedDefect.id }
+                                     val idx = defects.indexOfFirst { it.id == defect.id }
                                     if (idx >= 0) defects[idx] = verified
                                     selectedDefect = verified
                                     firebaseService.uploadDefectToFirebase(verified)
@@ -564,28 +567,32 @@ fun RailGuardApp() {
                             },
                             onBack = { navigateBack() }
                         )
-                        Screen.TaskDetails.route -> TaskDetailsScreen(
-                            task = selectedTask,
-                            onOpenBeforeAfter = { navigateTo(Screen.BeforeAfter.route) },
-                            onOpenVerify = { navigateTo(Screen.MaintenanceVerification.route) },
-                            onBack = { navigateBack() }
-                        )
+                        Screen.TaskDetails.route -> selectedTask?.let { task ->
+                            TaskDetailsScreen(
+                                task = task,
+                                onOpenBeforeAfter = { navigateTo(Screen.BeforeAfter.route) },
+                                onOpenVerify = { navigateTo(Screen.MaintenanceVerification.route) },
+                                onBack = { navigateBack() }
+                            )
+                        } ?: CloudDataRequiredScreen("Select a cloud maintenance task before opening details", ::navigateBack)
                         Screen.BeforeAfter.route -> BeforeAfterScreen(onBack = { navigateBack() })
                         Screen.MaintenanceVerification.route -> MaintenanceVerificationScreen(
                             onVerified = {
                                 scope.launch {
-                                    val verifiedTask = selectedTask.copy(
-                                        status = "Completed · Verified",
-                                        tone = Tone.HEALTHY
-                                    )
-                                    val idx = tasks.indexOfFirst { it.id == selectedTask.id }
-                                    if (idx >= 0) tasks[idx] = verifiedTask
-                                    selectedTask = verifiedTask
-                                    firebaseService.uploadTaskToFirebase(verifiedTask)
-                                    firebaseService.logSafetyAuditEvent(
-                                        action = "MAINTENANCE_VERIFIED",
-                                        details = "Task ${verifiedTask.id} completed and verified for ${verifiedTask.section}"
-                                    )
+                                     selectedTask?.let { task ->
+                                         val verifiedTask = task.copy(
+                                             status = "Completed · Verified",
+                                             tone = Tone.HEALTHY
+                                         )
+                                         val idx = tasks.indexOfFirst { it.id == task.id }
+                                         if (idx >= 0) tasks[idx] = verifiedTask
+                                         selectedTask = verifiedTask
+                                         firebaseService.uploadTaskToFirebase(verifiedTask)
+                                         firebaseService.logSafetyAuditEvent(
+                                             action = "MAINTENANCE_VERIFIED",
+                                             details = "Task ${verifiedTask.id} completed and verified for ${verifiedTask.section}"
+                                         )
+                                     }
                                 }
                                 navigateBack()
                             },
@@ -673,12 +680,12 @@ fun RailGuardApp() {
                             defects = defects,
                             tasks = tasks,
                             onNavigateDefect = {
-                                selectedDefect = defects.firstOrNull() ?: defaultDefect
-                                navigateTo(Screen.DefectDetails.route)
+                                 selectedDefect = defects.firstOrNull()
+                                 if (selectedDefect != null) navigateTo(Screen.DefectDetails.route)
                             },
                             onNavigateTask = {
-                                selectedTask = tasks.firstOrNull() ?: defaultTask
-                                navigateTo(Screen.TaskDetails.route)
+                                 selectedTask = tasks.firstOrNull()
+                                 if (selectedTask != null) navigateTo(Screen.TaskDetails.route)
                             },
                             onCreateTask = { navigateTo(Screen.CreateTask.route) },
                             onCompareImages = { navigateTo(Screen.ImageComparison.route) },
@@ -695,6 +702,7 @@ fun RailGuardApp() {
                         Screen.AiOracle.route -> AiOracleScreen(
                             defects = defects,
                             tasks = tasks,
+                            telemetry = latestSensorTelemetry,
                             onInspectDefect = {
                                 selectedDefect = it
                                 navigateTo(Screen.DefectDetails.route)

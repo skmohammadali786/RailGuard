@@ -205,9 +205,9 @@ fun CreateMaintenanceTaskScreen(
     val colorScheme = MaterialTheme.colorScheme
     var title by remember { mutableStateOf("") }
     var section by remember { mutableStateOf("") }
-    var due by remember { mutableStateOf("Due today") }
+    var due by remember { mutableStateOf("") }
     var assignee by remember { mutableStateOf("") }
-    var torque by remember { mutableStateOf("Nominal") }
+    var torque by remember { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier
