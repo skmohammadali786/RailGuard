@@ -460,6 +460,7 @@ fun RailwayLineGraphic(
 fun RealTimeTrainLineMap(
     compact: Boolean = false,
     showMarkers: Boolean = true,
+    defects: List<Defect> = emptyList(),
     onMarkerClick: ((Int) -> Unit)? = null,
     onSelectTrain: ((String) -> Unit)? = null,
     onSelectStation: ((String) -> Unit)? = null,
@@ -565,18 +566,34 @@ fun RealTimeTrainLineMap(
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Color(0xFFEF4444).copy(alpha = 0.2f))
-                        .padding(horizontal = 5.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = "${settings.formatSpeed(25)} ZONE",
-                        color = Color(0xFFFCA5A5),
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                if (defects.any { it.tone == Tone.CRITICAL }) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFFEF4444).copy(alpha = 0.2f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "${settings.formatSpeed(25)} ZONE",
+                            color = Color(0xFFFCA5A5),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF16A34A).copy(alpha = 0.2f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "CLEAR LINE",
+                            color = Color(0xFF86EFAC),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
                 Text("LIVE", color = Color(0xFF22C55E), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
@@ -593,16 +610,18 @@ fun RealTimeTrainLineMap(
                 .background(Color(0xFF0B131E))
                 .padding(horizontal = 8.dp, vertical = if (isCompactView) 4.dp else 8.dp)
         ) {
-            // Speed restriction zone highlight band
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(0.35f)
-                    .align(Alignment.CenterStart)
-                    .offset(x = 80.dp)
-                    .background(Color(0xFFEF4444).copy(alpha = 0.08f))
-                    .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.25f), RoundedCornerShape(4.dp))
-            )
+            // Speed restriction zone highlight band only when critical defects exist
+            if (defects.any { it.tone == Tone.CRITICAL }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(0.35f)
+                        .align(Alignment.CenterStart)
+                        .offset(x = 80.dp)
+                        .background(Color(0xFFEF4444).copy(alpha = 0.08f))
+                        .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.25f), RoundedCornerShape(4.dp))
+                )
+            }
 
             // Up Line (Northbound)
             Box(
@@ -784,43 +803,65 @@ fun RealTimeTrainLineMap(
 
             // Defect Pins along bottom
             if (showMarkers) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 32.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    listOf(
-                        Triple(Tone.CRITICAL, "FLAW-01 (Active)", "km 14+320"),
-                        Triple(Tone.WARNING, "JOINT-02 (Monitored)", "km 14+108"),
-                        Triple(Tone.INFO, "Switch 08A", "km 08+800")
-                    ).forEachIndexed { index, (tone, name, loc) ->
-                        val color = toneColor(tone, true)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(color.copy(alpha = 0.2f))
-                                .border(1.dp, color.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                                .clickable { onMarkerClick?.invoke(index) }
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Warning,
-                                contentDescription = name,
-                                tint = color,
-                                modifier = Modifier.size(10.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = "$name · $loc",
-                                color = Color.White,
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
+                if (defects.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        defects.take(3).forEachIndexed { index, d ->
+                            val color = toneColor(d.tone, true)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(color.copy(alpha = 0.2f))
+                                    .border(1.dp, color.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                    .clickable { onMarkerClick?.invoke(index) }
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = d.id,
+                                    tint = color,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "${d.id} · ${d.chainageCoordinate}",
+                                    color = Color.White,
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 16.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF22C55E),
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Track Corridor Nominal · All Sectors Clear",
+                            color = Color(0xFF86EFAC),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }

@@ -161,6 +161,46 @@ fun DefectsListScreen(
             }
         }
 
+        if (filteredDefects.isEmpty()) {
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                    Column(
+                        modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF16A34A).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF16A34A),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "No Track Anomalies Logged",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Active track corridor is 100% nominal. Defects detected by Raspberry Pi / ESP32 sensors or optical scans will appear here automatically.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+
         items(filteredDefects, key = { it.id }) { defect ->
             DefectListItem(defect = defect, onClick = { onSelectDefect(defect) })
         }
@@ -342,7 +382,7 @@ fun DefectDetailsScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text("Cloud Telemetry Sync", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text(firebaseSyncMessage ?: "Replicate defect to central safety cloud", fontSize = 10.sp, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+                            Text(firebaseSyncMessage ?: "Replicate defect telemetry to cloud storage", fontSize = 10.sp, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
                         }
                     }
 
@@ -543,7 +583,10 @@ fun MetricRow(label: String, value: String) {
 }
 
 @Composable
-fun CrackMeasurementScreen(onBack: () -> Unit) {
+fun CrackMeasurementScreen(
+    defect: Defect? = null,
+    onBack: () -> Unit
+) {
     val isDark = LocalIsDark.current
     val scope = rememberCoroutineScope()
     var isTransmitting by remember { mutableStateOf(false) }
@@ -554,16 +597,24 @@ fun CrackMeasurementScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "Crack Width & Depth", subtitle = "Sub-millimeter optical measurement", onBack = onBack)
+        SubScreenHeader(
+            title = "Crack Width & Depth",
+            subtitle = if (defect != null) "${defect.id} · Sub-millimeter measurement" else "Sub-millimeter optical measurement",
+            onBack = onBack
+        )
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Optical Sensor Geometry", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(
+                    text = if (defect != null) "Optical Sensor Geometry: ${defect.id}" else "Optical Sensor Geometry",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
                 Spacer(modifier = Modifier.height(12.dp))
-                MetricRow("Crack Surface Aperture", "2.42 mm (±0.05 mm)")
-                MetricRow("Estimated Depth Profile", "8.90 mm (Ultrasonic Verified)")
-                MetricRow("Crack Propagation Angle", "45° Oblique to Rail Web")
-                MetricRow("Stress Concentration K_t", "3.48")
+                MetricRow("Crack Surface Aperture", defect?.estimatedLength ?: "0.00 mm (Nominal)")
+                MetricRow("Estimated Depth Profile", if (defect != null) "8.90 mm (Ultrasonic Verified)" else "Nominal Profile")
+                MetricRow("Monitored Chainage", defect?.chainageCoordinate ?: "Active Track Corridor")
+                MetricRow("Stress Concentration K_t", if (defect != null) "3.48" else "1.00 (Standard)")
 
                 Spacer(modifier = Modifier.height(14.dp))
                 if (transmitMsg != null) {
@@ -579,7 +630,7 @@ fun CrackMeasurementScreen(onBack: () -> Unit) {
                         scope.launch {
                             RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "CRACK_MEASUREMENT",
-                                mapOf("apertureMm" to 2.42, "depthMm" to 8.90, "propagationAngle" to "45 deg", "kt" to 3.48)
+                                mapOf("defectId" to (defect?.id ?: "NOMINAL"), "aperture" to (defect?.estimatedLength ?: "0.0mm"), "kt" to 3.48)
                             )
                             isTransmitting = false
                             transmitMsg = "Measurement synced to Cloud Telemetry ✓"
@@ -592,7 +643,10 @@ fun CrackMeasurementScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun GrowthAnalysisScreen(onBack: () -> Unit) {
+fun GrowthAnalysisScreen(
+    defect: Defect? = null,
+    onBack: () -> Unit
+) {
     val scope = rememberCoroutineScope()
     var isTransmitting by remember { mutableStateOf(false) }
     var transmitMsg by remember { mutableStateOf<String?>(null) }
@@ -602,17 +656,25 @@ fun GrowthAnalysisScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "Growth Dynamics", subtitle = "Paris law fatigue crack propagation", onBack = onBack)
+        SubScreenHeader(
+            title = "Growth Dynamics",
+            subtitle = if (defect != null) "${defect.id} · Paris law fatigue model" else "Paris law fatigue crack propagation",
+            onBack = onBack
+        )
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Simulated Cycles To Critical Limit", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Under 25-ton axle load, estimated critical threshold reached in 1,200 freight cycles (~14 operational days).", fontSize = 12.sp)
+                if (defect != null) {
+                    Text("Under 25-ton axle load, estimated critical threshold reached in 1,200 freight cycles (~14 operational days).", fontSize = 12.sp)
+                } else {
+                    Text("No active crack anomalies detected. Track rail profile is within nominal fatigue life limits.", fontSize = 12.sp)
+                }
                 Spacer(modifier = Modifier.height(12.dp))
-                MetricRow("Delta-K Stress Intensity", "24.6 MPa·m^(1/2)")
-                MetricRow("Fatigue Life Remaining", "14 Days at Current Tonnage")
-                MetricRow("Speed Restriction Required", "Yes (Max 30 km/h)")
+                MetricRow("Delta-K Stress Intensity", if (defect != null) "24.6 MPa·m^(1/2)" else "Nominal (< 5 MPa·m^(1/2))")
+                MetricRow("Fatigue Life Remaining", if (defect != null) "14 Days at Current Tonnage" else "Standard Service Cycle")
+                MetricRow("Speed Restriction Required", if (defect != null && defect.tone == Tone.CRITICAL) "Yes (Max 25 km/h)" else "No (Nominal Speed)")
 
                 Spacer(modifier = Modifier.height(14.dp))
                 if (transmitMsg != null) {
@@ -628,7 +690,7 @@ fun GrowthAnalysisScreen(onBack: () -> Unit) {
                         scope.launch {
                             RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "FATIGUE_GROWTH_PREDICTION",
-                                mapOf("deltaK" to 24.6, "remainingDays" to 14, "speedLimit" to 30)
+                                mapOf("defectId" to (defect?.id ?: "NOMINAL"), "deltaK" to 24.6, "remainingDays" to 14)
                             )
                             isTransmitting = false
                             transmitMsg = "Fatigue simulation archived in Cloud DB ✓"
@@ -641,7 +703,10 @@ fun GrowthAnalysisScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun ImageComparisonScreen(onBack: () -> Unit) {
+fun ImageComparisonScreen(
+    defect: Defect? = null,
+    onBack: () -> Unit
+) {
     val scope = rememberCoroutineScope()
     var isTransmitting by remember { mutableStateOf(false) }
     var transmitMsg by remember { mutableStateOf<String?>(null) }
@@ -651,13 +716,21 @@ fun ImageComparisonScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "Historical Comparison", subtitle = "30-Day image delta comparison", onBack = onBack)
+        SubScreenHeader(
+            title = "Historical Comparison",
+            subtitle = if (defect != null) "${defect.id} · Image delta comparison" else "30-Day image delta comparison",
+            onBack = onBack
+        )
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Visual Delta Detection", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Crack has extended by +4.2 mm since previous patrol on 24 August 2026.", fontSize = 12.sp)
+                if (defect != null) {
+                    Text("${defect.id} (${defect.title}) monitored at ${defect.chainageCoordinate}. Flaw size: ${defect.estimatedLength}.", fontSize = 12.sp)
+                } else {
+                    Text("Baseline nominal. No anomaly selected for historical visual delta analysis.", fontSize = 12.sp)
+                }
 
                 Spacer(modifier = Modifier.height(14.dp))
                 if (transmitMsg != null) {
@@ -673,7 +746,7 @@ fun ImageComparisonScreen(onBack: () -> Unit) {
                         scope.launch {
                             RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "IMAGE_DELTA_COMPARISON",
-                                mapOf("extensionMm" to 4.2, "baselineDate" to "2026-08-24")
+                                mapOf("defectId" to (defect?.id ?: "NOMINAL"), "baselineStatus" to "Verified")
                             )
                             isTransmitting = false
                             transmitMsg = "Visual delta synced to Cloud DB ✓"
@@ -686,7 +759,10 @@ fun ImageComparisonScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun ObjectDetectionScreen(onBack: () -> Unit) {
+fun ObjectDetectionScreen(
+    defect: Defect? = null,
+    onBack: () -> Unit
+) {
     val scope = rememberCoroutineScope()
     var isTransmitting by remember { mutableStateOf(false) }
     var transmitMsg by remember { mutableStateOf<String?>(null) }
@@ -696,13 +772,17 @@ fun ObjectDetectionScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "AI Object Segmentation", subtitle = "Multi-class track components", onBack = onBack)
+        SubScreenHeader(
+            title = "AI Object Segmentation",
+            subtitle = if (defect != null) "${defect.id} · Track component analysis" else "Multi-class track components",
+            onBack = onBack
+        )
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 MetricRow("Rail Head & Web", "Detected (99% conf)")
                 MetricRow("Sleeper Concrete Block", "Detected (96% conf)")
-                MetricRow("Pandrol Fastener Clips", "1 Present, 1 Loose")
+                MetricRow("Pandrol Fastener Clips", if (defect != null) "Inspected (${defect.title})" else "Nominal Clearance")
                 MetricRow("Ballast Bed Level", "Normal Clearance")
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -719,7 +799,7 @@ fun ObjectDetectionScreen(onBack: () -> Unit) {
                         scope.launch {
                             RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "AI_OBJECT_SEGMENTATION",
-                                mapOf("railheadConf" to 0.99, "sleeperConf" to 0.96, "fastenerState" to "Loose")
+                                mapOf("railheadConf" to 0.99, "sleeperConf" to 0.96)
                             )
                             isTransmitting = false
                             transmitMsg = "Segmentation telemetry saved to Cloud ✓"
@@ -732,7 +812,10 @@ fun ObjectDetectionScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun AlignmentAnalysisScreen(onBack: () -> Unit) {
+fun AlignmentAnalysisScreen(
+    defect: Defect? = null,
+    onBack: () -> Unit
+) {
     val scope = rememberCoroutineScope()
     var isTransmitting by remember { mutableStateOf(false) }
     var transmitMsg by remember { mutableStateOf<String?>(null) }
@@ -742,14 +825,18 @@ fun AlignmentAnalysisScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "Track Alignment", subtitle = "Gauge & cant geometric evaluation", onBack = onBack)
+        SubScreenHeader(
+            title = "Track Alignment",
+            subtitle = if (defect != null) "${defect.chainageCoordinate} · Geometric analysis" else "Gauge & cant geometric evaluation",
+            onBack = onBack
+        )
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 MetricRow("Standard Track Gauge", "1435.0 mm")
-                MetricRow("Current Measured Gauge", "1438.2 mm (+3.2 mm)")
-                MetricRow("Cross-Level Cant", "2.1 mm (Within Tolerance)")
-                MetricRow("Twist over 3m Base", "1.4 mm/m")
+                MetricRow("Current Measured Gauge", "1435.4 mm (Nominal)")
+                MetricRow("Cross-Level Cant", "1.2 mm (Within Tolerance)")
+                MetricRow("Twist over 3m Base", "0.8 mm/m (Safe)")
 
                 Spacer(modifier = Modifier.height(14.dp))
                 if (transmitMsg != null) {
@@ -765,7 +852,7 @@ fun AlignmentAnalysisScreen(onBack: () -> Unit) {
                         scope.launch {
                             RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "TRACK_ALIGNMENT_GEOMETRY",
-                                mapOf("gauge" to 1438.2, "cant" to 2.1, "twist" to 1.4)
+                                mapOf("gauge" to 1435.4, "cant" to 1.2, "twist" to 0.8)
                             )
                             isTransmitting = false
                             transmitMsg = "Track geometry saved to Cloud DB ✓"
@@ -783,7 +870,7 @@ fun EngineerVerificationScreen(onSigned: () -> Unit, onBack: () -> Unit) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     var engineerNotes by remember { mutableStateOf("") }
-    var signedBy by remember { mutableStateOf("E. Chen, Lead Track Inspector #4092") }
+    var signedBy by remember { mutableStateOf(RailGuardFirebaseService.instance.currentUser?.email?.substringBefore("@")?.replace(".", " ")?.replaceFirstChar { it.uppercase() } ?: "Lead Track Inspector") }
 
     Column(
         modifier = Modifier
@@ -847,10 +934,7 @@ fun CommentsScreen(onBack: () -> Unit) {
     val keyboardController = LocalSoftwareKeyboardController.current
     var newComment by remember { mutableStateOf("") }
     val comments = remember {
-        mutableStateListOf(
-            "Shift 1: Noticed light ballast vibration during 08:30 express train passage.",
-            "Shift 2: Dispatch gang #3 notified for speed restriction flag installation."
-        )
+        mutableStateListOf<String>()
     }
 
     Column(
@@ -884,7 +968,7 @@ fun CommentsScreen(onBack: () -> Unit) {
                         newComment = ""
                         scope.launch {
                             val author = RailGuardFirebaseService.instance.currentUser?.email ?: "Lead Inspector"
-                            RailGuardFirebaseService.instance.saveComment("DEF-2048", author, textToSave)
+                            RailGuardFirebaseService.instance.saveComment("DEF-LOG", author, textToSave)
                         }
                     }
                 }) {
@@ -893,10 +977,21 @@ fun CommentsScreen(onBack: () -> Unit) {
             }
         )
         Spacer(modifier = Modifier.height(16.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(comments) { comment ->
-                RailCard(modifier = Modifier.fillMaxWidth()) {
-                    Text(text = comment, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+        if (comments.isEmpty()) {
+            RailCard(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "No field log remarks entered yet. Use the input above to record observations during track patrol.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(comments) { comment ->
+                    RailCard(modifier = Modifier.fillMaxWidth()) {
+                        Text(text = comment, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+                    }
                 }
             }
         }
@@ -943,18 +1038,47 @@ fun AllObservationsScreen(observations: List<ObservationItem>, onBack: () -> Uni
         }
 
         Spacer(modifier = Modifier.height(12.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(observations, key = { it.id }) { obs ->
-                RailCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = obs.title, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text(text = "${obs.chainage} · ${obs.time}", fontSize = 11.sp, color = Color.Gray)
+        if (observations.isEmpty()) {
+            RailCard(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                Column(
+                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = Color(0xFF16A34A),
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "No Observations Logged",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Field observations captured during patrols will appear here automatically.",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(observations, key = { it.id }) { obs ->
+                    RailCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = obs.title, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(text = "${obs.chainage} · ${obs.time}", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            StatusChip(title = obs.severity, tone = obs.tone)
                         }
-                        StatusChip(title = obs.severity, tone = obs.tone)
                     }
                 }
             }

@@ -116,7 +116,7 @@ fun RailGuardApp() {
             score = "Nominal",
             tone = Tone.HEALTHY,
             time = "Live",
-            detail = "Connected to Central Safety Cloud. Real-time telemetry monitoring active from Raspberry Pi / sensor unit.",
+            detail = "Real-time corridor telemetry active. Monitored profile within nominal tolerances.",
             estimatedLength = "0.0 mm",
             latitude = 28.6139,
             longitude = 77.2090,
@@ -465,6 +465,7 @@ fun RailGuardApp() {
                             onBack = { navigateBack() }
                         )
                         Screen.InspectionCalendar.route -> InspectionCalendarScreen(
+                            inspections = inspections,
                             onBack = { navigateBack() }
                         )
                         Screen.Gps.route -> GpsScreen(onBack = { navigateBack() })
@@ -531,7 +532,7 @@ fun RailGuardApp() {
                             onNavigateToGps = { navigateTo(Screen.Gps.route) },
                             onBack = { navigateBack() }
                         )
-                        Screen.RiskHeatmap.route -> RiskHeatmapScreen(onBack = { navigateBack() })
+                        Screen.RiskHeatmap.route -> RiskHeatmapScreen(defects = defects, onBack = { navigateBack() })
                         Screen.LocationDetails.route -> LocationDetailsScreen(onBack = { navigateBack() })
 
                         // Sub-screens: Maintenance
@@ -587,7 +588,7 @@ fun RailGuardApp() {
                             },
                             onBack = { navigateBack() }
                         )
-                        Screen.MaintenanceAnalytics.route -> MaintenanceAnalyticsScreen(onBack = { navigateBack() })
+                        Screen.MaintenanceAnalytics.route -> MaintenanceAnalyticsScreen(tasks = tasks, onBack = { navigateBack() })
 
                         // Sub-screens: Reports
                         Screen.Reports.route -> ReportsScreen(
@@ -612,6 +613,8 @@ fun RailGuardApp() {
                         Screen.PdfPreview.route -> PdfPreviewScreen(
                             reportTitle = selectedReportTitle,
                             inspectorName = profileName,
+                            defects = defects,
+                            tasks = tasks,
                             onBack = { navigateBack() }
                         )
                         Screen.ShareReport.route -> ShareReportScreen(
@@ -664,6 +667,8 @@ fun RailGuardApp() {
                         Screen.Help.route -> HelpCenterScreen(onBack = { navigateBack() })
                         Screen.About.route -> AboutScreen(onBack = { navigateBack() })
                         Screen.Attention.route -> AttentionScreen(
+                            defects = defects,
+                            tasks = tasks,
                             onNavigateDefect = {
                                 selectedDefect = defects.firstOrNull() ?: defaultDefect
                                 navigateTo(Screen.DefectDetails.route)
@@ -699,27 +704,18 @@ fun RailGuardApp() {
                             onNavigateHeatmap = { navigateTo(Screen.RiskHeatmap.route) },
                             onBack = { navigateBack() }
                         )
-                        Screen.TrainConnection.route -> TrainConnectionScreen(
-                            onNavigateLiveScan = { navigateTo(Screen.LiveInspection.route) },
-                            onNavigateMap = { navigateTo(Screen.Map.route) },
+                        Screen.TrainConnection.route -> LiveInspectionScreen(
+                            onEndInspection = { navigateBack() },
+                            onDefectDetected = {
+                                selectedDefect = defects.firstOrNull() ?: defaultDefect
+                                navigateTo(Screen.DefectDetails.route)
+                            },
+                            onOpenGps = { navigateTo(Screen.Gps.route) },
                             onBack = { navigateBack() }
                         )
-                        Screen.FirebaseSync.route -> FirebaseSyncScreen(
-                            defects = defects,
-                            tasks = tasks,
-                            inspections = inspections,
-                            onDefectsUpdated = { newDefects ->
-                                defects.clear()
-                                defects.addAll(newDefects)
-                            },
-                            onTasksUpdated = { newTasks ->
-                                tasks.clear()
-                                tasks.addAll(newTasks)
-                            },
-                            onInspectionsUpdated = { newInspections ->
-                                inspections.clear()
-                                inspections.addAll(newInspections)
-                            },
+                        Screen.FirebaseSync.route -> AppSettingsScreen(
+                            preferences = appPreferences,
+                            onUpdatePreferences = { updatePreferences(it) },
                             onBack = { navigateBack() }
                         )
                     }

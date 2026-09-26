@@ -37,7 +37,7 @@ import com.example.railguard.theme.toneColor
 fun HomeScreen(
     defects: List<Defect>,
     tasks: List<MaintenanceTask>,
-    inspectorName: String = "E. Chen",
+    inspectorName: String = "Field Inspector",
     onNavigate: (String) -> Unit,
     onDefectClick: (Defect) -> Unit,
     onTaskClick: (MaintenanceTask) -> Unit
@@ -54,8 +54,8 @@ fun HomeScreen(
     ) {
         item {
             Header(
-                title = "North corridor patrol",
-                subtitle = "Shift 1 · $inspectorName · On duty",
+                title = "Rail Corridor Operations",
+                subtitle = "Active Shift · $inspectorName · Telemetry Monitoring",
                 isHome = true,
                 onNotificationClick = { onNavigate("notifications") }
             )
@@ -69,18 +69,6 @@ fun HomeScreen(
                 onNavigate = onNavigate,
                 onDefectClick = onDefectClick,
                 onTaskClick = onTaskClick
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-        }
-
-        // Live Connected Train Telemetry Banner
-        item {
-            TrainConnectionStatusBanner(
-                onOpenTrainConnection = { onNavigate("train_connection") }
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            FirebaseSyncBanner(
-                onOpenFirebaseSync = { onNavigate("firebase_sync") }
             )
             Spacer(modifier = Modifier.height(10.dp))
         }
@@ -130,7 +118,7 @@ fun HomeScreen(
                     color = colorScheme.primary
                 )
                 Text(
-                    text = "Status: Connected to Central Safety Cloud Database",
+                    text = "System Status: Telemetry Active · Realtime Sync",
                     style = MaterialTheme.typography.labelSmall,
                     color = colorScheme.onSurfaceVariant
                 )
@@ -294,6 +282,7 @@ fun HomeScreen(
             RealTimeTrainLineMap(
                 compact = true,
                 showMarkers = true,
+                defects = defects,
                 onMarkerClick = { onNavigate("defect_map") }
             )
             Spacer(modifier = Modifier.height(6.dp))
@@ -357,6 +346,44 @@ fun HomeScreen(
                     onClick = { onTaskClick(task) }
                 )
             }
+
+            if (defects.isEmpty() && tasks.isEmpty()) {
+                RailCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF16A34A).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF16A34A),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "All Track Sectors Clear",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Zero pending alerts. Real-time telemetry from Raspberry Pi will appear here automatically.",
+                                fontSize = 11.sp,
+                                color = colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Quick Workspace Grid - Dedicated screens for every button
@@ -374,15 +401,15 @@ fun HomeScreen(
                     modifier = Modifier.weight(1f)
                 )
                 WorkspaceTile(
-                    title = "Train Uplink",
-                    subtitle = "Live ETCS cab",
-                    icon = Icons.Default.Train,
-                    onClick = { onNavigate("train_connection") },
+                    title = "Field Camera",
+                    subtitle = "Optical HUD",
+                    icon = Icons.Default.PhotoCamera,
+                    onClick = { onNavigate("camera") },
                     modifier = Modifier.weight(1f)
                 )
                 WorkspaceTile(
                     title = "Live Scan",
-                    subtitle = "Camera HUD",
+                    subtitle = "Realtime HUD",
                     icon = Icons.Default.CameraAlt,
                     onClick = { onNavigate("live_inspection") },
                     modifier = Modifier.weight(1f)
@@ -462,14 +489,14 @@ fun HomeScreen(
                 )
                 WorkspaceTile(
                     title = "Observations",
-                    subtitle = "Field log (12)",
+                    subtitle = "Field log",
                     icon = Icons.Default.Visibility,
                     onClick = { onNavigate("all_observations") },
                     modifier = Modifier.weight(1f)
                 )
                 WorkspaceTile(
                     title = "Track Health",
-                    subtitle = "94.2% condition",
+                    subtitle = if (defects.isEmpty()) "100% Nominal" else "${maxOf(60, 100 - defects.size * 5)}% Condition",
                     icon = Icons.Default.HealthAndSafety,
                     onClick = { onNavigate("track_health") },
                     modifier = Modifier.weight(1f)
@@ -632,7 +659,7 @@ fun DedicatedHomepageAiOracle(
                 }
             } else {
                 OutlinedButton(
-                    onClick = { onNavigate("train_connection") },
+                    onClick = { onNavigate("live_inspection") },
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7)),
                     shape = RoundedCornerShape(6.dp),
@@ -642,92 +669,16 @@ fun DedicatedHomepageAiOracle(
                         .height(32.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Memory,
+                        imageVector = Icons.Default.CameraAlt,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
                         tint = Color(0xFF38BDF8)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Hardware Hub", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Live Track Scan", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
-    }
-}
-
-@Composable
-fun TrainConnectionStatusBanner(
-    onOpenTrainConnection: () -> Unit
-) {
-    val isDark = LocalIsDark.current
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (isDark) Color(0xFF0F1E2E) else Color(0xFFE0F2FE))
-            .border(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-            .clickable { onOpenTrainConnection() }
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF0284C7).copy(alpha = 0.2f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.DirectionsTransit,
-                contentDescription = null,
-                tint = Color(0xFF0284C7),
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "TRAIN & SENSOR TELEMETRY",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = if (isDark) Color.White else Color(0xFF0369A1)
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Color(0xFF16A34A))
-                        .padding(horizontal = 4.dp, vertical = 1.dp)
-                ) {
-                    Text(
-                        text = "READY",
-                        color = Color.White,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-            Text(
-                text = "Live Central Safety Cloud Telemetry · TSR Auto-Dispatch Ready",
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                color = if (isDark) Color(0xFF7DD3FC) else Color(0xFF0369A1)
-            )
-        }
-
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = "Open Train Fleet Interlock",
-            tint = Color(0xFF0284C7),
-            modifier = Modifier.size(16.dp)
-        )
     }
 }
 
@@ -778,82 +729,6 @@ fun WorkspaceTile(
             fontSize = 11.sp,
             color = colorScheme.onSurfaceVariant,
             maxLines = 1
-        )
-    }
-}
-
-@Composable
-fun FirebaseSyncBanner(
-    onOpenFirebaseSync: () -> Unit
-) {
-    val isDark = LocalIsDark.current
-    val firebaseService = remember { com.example.railguard.data.RailGuardFirebaseService.instance }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
-            .border(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFCBD5E1), RoundedCornerShape(10.dp))
-            .clickable { onOpenFirebaseSync() }
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(Color(0xFFFFA000).copy(alpha = 0.2f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.CloudSync,
-                contentDescription = null,
-                tint = Color(0xFFFFA000),
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "CENTRAL SAFETY CLOUD SYNC",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = if (isDark) Color.White else Color(0xFF0F172A)
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(if (firebaseService.isConnectedToFirebase) Color(0xFF16A34A) else Color(0xFF64748B))
-                        .padding(horizontal = 4.dp, vertical = 1.dp)
-                ) {
-                    Text(
-                        text = if (firebaseService.isConnectedToFirebase) "SYNCED" else "CLOUD READY",
-                        color = Color.White,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-            Text(
-                text = "Central Realtime Database · Tap to view live cloud records",
-                fontSize = 10.sp,
-                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-            )
-        }
-
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = "Open Central Cloud Sync",
-            tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-            modifier = Modifier.size(16.dp)
         )
     }
 }

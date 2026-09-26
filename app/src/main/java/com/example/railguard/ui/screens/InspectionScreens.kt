@@ -105,6 +105,46 @@ fun InspectionsListScreen(
             }
         }
 
+        if (inspections.isEmpty()) {
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                    Column(
+                        modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF0284C7).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FactCheck,
+                                contentDescription = null,
+                                tint = Color(0xFF0284C7),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "No Past Patrol Inspections",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = if (isDark) Color.White else Color(0xFF0F172A)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Start a 'New Patrol' or stream camera frames from Raspberry Pi to log optical inspection runs.",
+                            fontSize = 12.sp,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+
         items(inspections, key = { it.id }) { insp ->
             RailCard(
                 modifier = Modifier
@@ -263,7 +303,7 @@ fun LiveInspectionScreen(
                     sessionId = "SESSION-14-LIVE",
                     fps = 60,
                     defectCount = if (simulatedDetection) 1 else 0,
-                    currentChainage = "KM 42+180 UP",
+                    currentChainage = "Continuous Survey",
                     alertActive = simulatedDetection
                 )
             }
@@ -343,7 +383,7 @@ fun LiveInspectionScreen(
                     Column {
                         Text("CORRIDOR", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
                         Text(
-                            "KM 42+180 UP",
+                            "Continuous Track",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -502,7 +542,7 @@ fun InspectionSummaryScreen(onDone: () -> Unit, onBack: () -> Unit) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Patrol Complete", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF16A34A))
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("4.2 kilometers scanned with zero optical dropout. 3 defects verified and synced to cloud.", fontSize = 13.sp)
+                Text("Track corridor sweep completed with zero optical dropout. Inspection telemetry verified and saved.", fontSize = 13.sp)
                 Spacer(modifier = Modifier.height(16.dp))
                 PrimaryButton(title = "Done & Return Home", onClick = onDone)
             }
@@ -511,7 +551,10 @@ fun InspectionSummaryScreen(onDone: () -> Unit, onBack: () -> Unit) {
 }
 
 @Composable
-fun InspectionCalendarScreen(onBack: () -> Unit) {
+fun InspectionCalendarScreen(
+    inspections: List<InspectionRecord> = emptyList(),
+    onBack: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -521,11 +564,19 @@ fun InspectionCalendarScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Upcoming Scheduled Runs", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("Scheduled Patrol Sweeps", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(12.dp))
-                MetricRow("Today 14:00", "Sector 4B Post-Weld Patrol")
-                MetricRow("Tomorrow 06:00", "High-Speed Rail Corridor 1 Early Scan")
-                MetricRow("25 Sep 09:30", "Southern Freight Bypass Turnout Check")
+                if (inspections.isEmpty()) {
+                    Text(
+                        text = "No scheduled patrols pending. Initiate a 'New Patrol' from the Inspections menu for real-time corridor surveillance.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    inspections.take(5).forEach { insp ->
+                        MetricRow(insp.section, insp.status)
+                    }
+                }
             }
         }
     }
@@ -592,14 +643,14 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                                 val capId = "CAM-${System.currentTimeMillis() % 100000}"
                                 RailGuardFirebaseService.instance.uploadCameraCapture(
                                     captureId = capId,
-                                    section = "Section 14 North Loop",
+                                    section = "Active Corridor Sweep",
                                     detectionCount = 1,
                                     defectDetected = true,
-                                    notes = "4K optical capture at 14+320 chainage"
+                                    notes = "4K optical field inspection capture"
                                 )
                                 RailGuardFirebaseService.instance.logSafetyAuditEvent(
                                     "CAMERA_CAPTURE_UPLOAD",
-                                    mapOf("captureId" to capId, "chainage" to "14+320", "resolution" to "3840x2160")
+                                    mapOf("captureId" to capId, "chainage" to "Corridor Trackway", "resolution" to "3840x2160")
                                 )
                                 uploadStatusMsg = "Uploaded & Synced to Cloud DB"
                                 delay(600)

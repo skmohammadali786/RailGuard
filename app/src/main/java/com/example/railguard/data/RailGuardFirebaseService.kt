@@ -1223,6 +1223,43 @@ class RailGuardFirebaseService private constructor() {
     }
 
     /**
+     * Purges all defects, tasks, and inspections from cloud database to ensure clean real telemetry
+     */
+    suspend fun purgeAllDemoDataFromCloud(onDone: () -> Unit = {}) {
+        withContext(Dispatchers.IO) {
+            try {
+                val authParam = authenticatedQueryParam()
+                val activeDb = getEffectiveDbUrl()
+                val targets = listOf(
+                    "$activeDb/${userDataRoot()}/defects.json$authParam",
+                    "$activeDb/${userDataRoot()}/tasks.json$authParam",
+                    "$activeDb/${userDataRoot()}/inspections.json$authParam",
+                    "$activeDb/railguard/defects.json$authParam",
+                    "$activeDb/railguard/tasks.json$authParam",
+                    "$activeDb/railguard/inspections.json$authParam"
+                )
+                for (target in targets) {
+                    try {
+                        val conn = (URL(target).openConnection() as HttpURLConnection).apply {
+                            requestMethod = "DELETE"
+                            connectTimeout = 5000
+                            readTimeout = 5000
+                        }
+                        conn.responseCode
+                    } catch (ignored: Exception) {}
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Purge error: ${e.message}")
+            }
+            withContext(Dispatchers.Main) {
+                onDone()
+            }
+        }
+    }
+
+    /**
      * Uploads a newly updated or created maintenance task to Firebase
      */
     suspend fun uploadTaskToFirebase(task: MaintenanceTask) {

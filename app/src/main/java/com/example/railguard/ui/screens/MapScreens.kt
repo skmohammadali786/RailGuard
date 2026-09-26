@@ -129,7 +129,7 @@ fun MapScreen(
                     ) {
                         Column {
                             Text("● North Line Trackway (KM 38 → KM 44)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            Text("Current Hardware Cart: KM 42+180 (Speed: 14.2 km/h)", fontSize = 11.sp, color = Color(0xFF0284C7))
+                            Text(if (defects.isNotEmpty()) "Monitored Segment: ${defects.first().chainageCoordinate}" else "Active Track Corridor: Nominal Line Speed", fontSize = 11.sp, color = Color(0xFF0284C7))
                         }
 
                         // Defect pin badges
@@ -226,6 +226,38 @@ fun DefectMapScreen(
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
+        if (defects.isEmpty()) {
+            RailCard(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                Column(
+                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF16A34A).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF16A34A),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("All Track Sectors Clear", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Zero defect GPS pins recorded. All surveyed track sectors nominal.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(defects) { d ->
                 RailCard(modifier = Modifier.fillMaxWidth().clickable { onSelectDefect(d) }) {
@@ -241,7 +273,12 @@ fun DefectMapScreen(
 }
 
 @Composable
-fun RiskHeatmapScreen(onBack: () -> Unit) {
+fun RiskHeatmapScreen(
+    defects: List<Defect> = emptyList(),
+    onBack: () -> Unit
+) {
+    val criticalCount = defects.count { it.tone == Tone.CRITICAL }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -251,13 +288,22 @@ fun RiskHeatmapScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Sector 4B: Red Hazard Cluster", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Red)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("3 high-strain fissures concentrated within 200 meters near KM 42+180. Derailment risk probability: 8.4%.", fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(12.dp))
-                MetricRow("Highest Risk Segment", "KM 42+100 to KM 42+300")
-                MetricRow("Axle Load Stress", "28.5 Tons / Axle")
-                MetricRow("Speed Restriction Advice", "20 km/h Emergency Slow Order")
+                if (criticalCount > 0) {
+                    Text("Active High-Strain Hazard Clusters", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Red)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("$criticalCount critical anomaly locations requiring immediate track team deployment.", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    MetricRow("Critical Anomalies", "$criticalCount active")
+                    MetricRow("Recommended Speed Limit", "25 km/h Emergency Slow Order")
+                } else {
+                    Text("Corridor Hazard Index: Nominal", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF16A34A))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Zero high-strain anomaly clusters detected across monitored sectors. Derailment risk nominal (0.0%).", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    MetricRow("Hazard Density", "0.0 / Low")
+                    MetricRow("Track Geometry", "UIC 60 Nominal Clearance")
+                    MetricRow("Authorized Line Speed", "Full Line Speed Permitted")
+                }
             }
         }
     }
@@ -310,7 +356,7 @@ fun LocationDetailsScreen(onBack: () -> Unit) {
                                 heading = 142.0,
                                 accuracyM = 0.52f,
                                 satellites = 18,
-                                chainage = "14+320 Up Line"
+                                chainage = "Active Corridor Trackway"
                             )
                             isSyncingGeodesy = false
                             geodesySyncMsg = "Survey coordinates persisted to Cloud Realtime DB ✓"
@@ -341,7 +387,7 @@ fun GpsScreen(onBack: () -> Unit) {
                 heading = 142.0,
                 accuracyM = 0.78f,
                 satellites = 18,
-                chainage = "14+320 Up Line"
+                chainage = "Active Corridor Trackway"
             )
             broadcastPushedCount++
             lastSyncStatus = "Packet #$broadcastPushedCount streamed to Cloud DB"
@@ -403,7 +449,7 @@ fun GpsScreen(onBack: () -> Unit) {
                 MetricRow("HDOP / VDOP", "0.78 / 1.12 (High Precision)")
                 MetricRow("Ground Speed", "14.2 km/h (Cart Inspection Speed)")
                 MetricRow("Magnetic Heading", "142° SE")
-                MetricRow("Chainage Segment", "14+320 Up Line")
+                MetricRow("Chainage Segment", "Active Corridor Trackway")
                 MetricRow("Telemetry Packets", "$broadcastPushedCount transmitted")
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -419,7 +465,7 @@ fun GpsScreen(onBack: () -> Unit) {
                                 heading = 142.0,
                                 accuracyM = 0.78f,
                                 satellites = 18,
-                                chainage = "14+320 Up Line"
+                                chainage = "Active Corridor Trackway"
                             )
                             manualSyncing = false
                             lastSyncStatus = "Manual Fix Synced to Cloud DB ✓"

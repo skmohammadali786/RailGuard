@@ -24,12 +24,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.railguard.components.*
+import com.example.railguard.model.Defect
+import com.example.railguard.model.MaintenanceTask
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
 import com.example.railguard.util.PdfExporter
 import kotlinx.coroutines.launch
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun ReportsScreen(
@@ -67,6 +72,7 @@ fun ReportsScreen(
 
         // Prominent Daily Report Generation Card
         item {
+            val todayDateStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
@@ -88,7 +94,7 @@ fun ReportsScreen(
                     ) {
                         StatusPill(label = "DAILY SAFETY PASS", tone = Tone.INFO)
                         Text(
-                            text = "Shift 1 · 2024-06-18",
+                            text = "Shift 1 · $todayDateStr",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = colorScheme.onSurfaceVariant
@@ -104,7 +110,7 @@ fun ReportsScreen(
                         color = colorScheme.onSurface
                     )
                     Text(
-                        text = "Instantly compile all findings, 42 visual frames, speed restrictions, and engineer signatures into a colorful, verified PDF.",
+                        text = "Instantly compile all findings, verified optical frames, speed restrictions, and engineer signatures into a colorful, verified PDF.",
                         style = MaterialTheme.typography.bodySmall,
                         color = colorScheme.onSurfaceVariant
                     )
@@ -114,7 +120,7 @@ fun ReportsScreen(
                     PrimaryButton(
                         title = "Generate Daily Report PDF",
                         icon = Icons.Default.PictureAsPdf,
-                        onClick = { onOpenPdf("Daily Shift Safety Report · 2024-06-18") }
+                        onClick = { onOpenPdf("Daily Shift Safety Report · $todayDateStr") }
                     )
                 }
             }
@@ -253,7 +259,7 @@ fun BuildEvidencePackageScreen(
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
-                EvidenceCheckboxRow("42 High-Resolution Visual Frames", includeFrames) { includeFrames = it }
+                EvidenceCheckboxRow("High-Resolution Visual Frames", includeFrames) { includeFrames = it }
                 EvidenceCheckboxRow("RTK GPS Coordinates & Chainage", includeGps) { includeGps = it }
                 EvidenceCheckboxRow("AI Defect Bounding Boxes & Confidence", includeAiScores) { includeAiScores = it }
                 EvidenceCheckboxRow("Inertial Accelerometer & Geometry Trace", includeDynamics) { includeDynamics = it }
@@ -332,6 +338,8 @@ data class ReportKpiItem(
 fun PdfPreviewScreen(
     reportTitle: String,
     inspectorName: String = "E. Chen",
+    defects: List<Defect> = emptyList(),
+    tasks: List<MaintenanceTask> = emptyList(),
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -347,7 +355,9 @@ fun PdfPreviewScreen(
             val file = PdfExporter.generateInspectionPdf(
                 context = context,
                 reportTitle = reportTitle,
-                inspectorName = inspectorName
+                inspectorName = inspectorName,
+                defects = defects,
+                tasks = tasks
             )
             generatedPdfFile = file
             isDownloading = false
@@ -752,173 +762,57 @@ fun PdfPreviewScreen(
                             Text("DIRECTIVE", color = Color(0xFF1E293B), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1.2f))
                         }
 
-                        // Defect 1
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFFFEF2F2))
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(2f)) {
-                                Text("FLAW-01 · Transverse Crack", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Depth: 46mm · Gauge Face · Monitored Sector", color = Color(0xFF475569), fontSize = 8.sp)
-                                Text("Growth Velocity Monitored · 72h Window", color = Color(0xFFB91C1C), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        if (defects.isEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFFF0FDF4))
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "All surveyed track sectors clear. Zero structural anomalies or crack propagation logged.",
+                                    color = Color(0xFF15803D),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
-                            Column(modifier = Modifier.weight(1.5f)) {
-                                Text("14+320 UP", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                                Text("51.50394, -0.12856", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Box(
+                        } else {
+                            defects.take(5).forEachIndexed { idx, d ->
+                                val bg = if (idx % 2 == 0) Color(0xFFFEF2F2) else Color.White
+                                Row(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(Color(0xFFDC2626))
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        .fillMaxWidth()
+                                        .background(bg)
+                                        .padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("92/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                    Column(modifier = Modifier.weight(2f)) {
+                                        Text("${d.id} · ${d.title}", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text("Flaw Size: ${d.estimatedLength} · Risk Score: ${d.riskScore}/100", color = Color(0xFF475569), fontSize = 8.sp)
+                                    }
+                                    Column(modifier = Modifier.weight(1.5f)) {
+                                        Text(d.chainageCoordinate, color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                        Text("${d.latitude}, ${d.longitude}", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(3.dp))
+                                                .background(if (d.tone == Tone.CRITICAL) Color(0xFFDC2626) else Color(0xFFD97706))
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("${d.riskScore}/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    Column(modifier = Modifier.weight(1.2f)) {
+                                        Text(if (d.tone == Tone.CRITICAL) "25 km/h TSR" else "Monitor", color = Color(0xFF991B1B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text(d.aiPrescribedAction.take(16), color = Color(0xFF475569), fontSize = 8.sp)
+                                    }
                                 }
-                            }
-                            Column(modifier = Modifier.weight(1.2f)) {
-                                Text("25 km/h TSR", color = Color(0xFF991B1B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text("Clamp + Replace", color = Color(0xFF475569), fontSize = 8.sp)
-                            }
-                        }
-
-                        HorizontalDivider(color = Color(0xFFF1F5F9))
-
-                        // Defect 2
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color.White)
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(2f)) {
-                                Text("FLAW-02 · Head Check Flaw", color = Color(0xFFB45309), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Length: 28mm · Running Surface · Tie #14-112", color = Color(0xFF475569), fontSize = 8.sp)
-                                Text("Growth: +0.22 mm/day · Non-immediate", color = Color(0xFF64748B), fontSize = 8.sp)
-                            }
-                            Column(modifier = Modifier.weight(1.5f)) {
-                                Text("14+108 DOWN", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                                Text("51.50290, -0.12640", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(Color(0xFFF59E0B))
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                ) {
-                                    Text("74/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            Column(modifier = Modifier.weight(1.2f)) {
-                                Text("Monitor 48h", color = Color(0xFFB45309), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text("Grind profile", color = Color(0xFF475569), fontSize = 8.sp)
-                            }
-                        }
-
-                        HorizontalDivider(color = Color(0xFFF1F5F9))
-
-                        // Defect 3: FL-1092
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFFFFFBEB))
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(2f)) {
-                                Text("FL-1092 · Clip Displacement", color = Color(0xFF92400E), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Displacement: 14mm · Sleeper #14-380 Left", color = Color(0xFF475569), fontSize = 8.sp)
-                            }
-                            Column(modifier = Modifier.weight(1.5f)) {
-                                Text("14+380 UP", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                                Text("51.50420, -0.12910", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(Color(0xFFD97706))
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                ) {
-                                    Text("58/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            Column(modifier = Modifier.weight(1.2f)) {
-                                Text("Dispatch MT-881", color = Color(0xFF92400E), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text("Replace clip tonight", color = Color(0xFF475569), fontSize = 8.sp)
-                            }
-                        }
-
-                        HorizontalDivider(color = Color(0xFFF1F5F9))
-
-                        // Defect 4: GEO-0402
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color.White)
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(2f)) {
-                                Text("GEO-0402 · Gauge Widening", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Gauge: 1,442.0 mm (+7mm variance)", color = Color(0xFF475569), fontSize = 8.sp)
-                            }
-                            Column(modifier = Modifier.weight(1.5f)) {
-                                Text("14+250 UP", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                                Text("51.50340, -0.12780", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(Color(0xFF0284C7))
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                ) {
-                                    Text("44/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            Column(modifier = Modifier.weight(1.2f)) {
-                                Text("Re-gauge Pass", color = Color(0xFF0369A1), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text("Tamping cycle", color = Color(0xFF475569), fontSize = 8.sp)
-                            }
-                        }
-
-                        HorizontalDivider(color = Color(0xFFF1F5F9))
-
-                        // Defect 5: SW-0801
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFFF8FAFC))
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(2f)) {
-                                Text("SW-0801 · Switch Blade Gap", color = Color(0xFF475569), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Gap: 3.8mm at Turnout 14A · Lubricate", color = Color(0xFF475569), fontSize = 8.sp)
-                            }
-                            Column(modifier = Modifier.weight(1.5f)) {
-                                Text("14+520", color = Color(0xFF0F172A), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                                Text("51.50510, -0.13020", color = Color(0xFF64748B), fontSize = 7.sp, fontFamily = FontFamily.Monospace)
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(Color(0xFF64748B))
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                ) {
-                                    Text("36/100", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            Column(modifier = Modifier.weight(1.2f)) {
-                                Text("Scheduled Check", color = Color(0xFF475569), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text("Crew 02 routine", color = Color(0xFF475569), fontSize = 8.sp)
+                                HorizontalDivider(color = Color(0xFFF1F5F9))
                             }
                         }
                     }

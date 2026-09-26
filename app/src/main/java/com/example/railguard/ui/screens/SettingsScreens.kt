@@ -28,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.railguard.model.Defect
+import com.example.railguard.model.MaintenanceTask
 import com.example.railguard.components.*
 import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.AppPreferences
@@ -47,6 +49,68 @@ fun SettingsScreen(
 ) {
     val isDark = LocalIsDark.current
     val firebaseService = remember { RailGuardFirebaseService.instance }
+    val scope = rememberCoroutineScope()
+    var showCloudDataDialog by remember { mutableStateOf(false) }
+    var isPurgingData by remember { mutableStateOf(false) }
+    var purgeFeedback by remember { mutableStateOf<String?>(null) }
+
+    if (showCloudDataDialog) {
+        AlertDialog(
+            onDismissRequest = { showCloudDataDialog = false },
+            title = {
+                Text("Cloud & Database Sync", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = if (firebaseService.isConnectedToFirebase) "✓ Connected to Firebase Realtime Database" else "Offline Cache Mode",
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (firebaseService.isConnectedToFirebase) Color(0xFF16A34A) else Color(0xFFEAB308),
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = "Project: ${firebaseService.projectId}",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (purgeFeedback != null) {
+                        Text(
+                            text = purgeFeedback ?: "",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF16A34A)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = {
+                            isPurgingData = true
+                            purgeFeedback = "Purging all cloud records..."
+                            scope.launch {
+                                firebaseService.purgeAllDemoDataFromCloud {
+                                    isPurgingData = false
+                                    purgeFeedback = "All cloud data purged. Database clean!"
+                                }
+                            }
+                        },
+                        enabled = !isPurgingData,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (isPurgingData) "Purging..." else "Purge All Cloud Data & Reset", fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCloudDataDialog = false }) {
+                    Text("Close", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -57,8 +121,8 @@ fun SettingsScreen(
     ) {
         item {
             ScreenHeader(
-                title = "Settings & Cloud Control",
-                subtitle = "Central safety cloud backend, train fleet signaling & system security"
+                title = "Settings & Data Management",
+                subtitle = "Inspector account, cloud sync, security & system parameters"
             )
         }
 
@@ -66,7 +130,7 @@ fun SettingsScreen(
             RailCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "BACKEND & FLEET GATEWAY",
+                        text = "DATA & CLOUD STORAGE",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
@@ -76,16 +140,9 @@ fun SettingsScreen(
 
                     SettingsRowTile(
                         icon = Icons.Default.CloudSync,
-                        title = "Central Safety Cloud Backend",
-                        subtitle = if (firebaseService.isConnectedToFirebase) "Connected: Active Cloud Telemetry" else "Ready for Cloud Realtime DB & Auth",
-                        onClick = { onNavigate("firebase_sync") }
-                    )
-
-                    SettingsRowTile(
-                        icon = Icons.Default.Train,
-                        title = "Train Fleet Interlock & Cab Link",
-                        subtitle = "Ground-to-cab telemetry, ETCS speed caps & TSR dispatch",
-                        onClick = { onNavigate("train_connection") }
+                        title = "Cloud Sync & Data Management",
+                        subtitle = if (firebaseService.isConnectedToFirebase) "Firebase Realtime DB Synced" else "Offline Cache Mode",
+                        onClick = { showCloudDataDialog = true }
                     )
                 }
             }
@@ -381,7 +438,7 @@ fun AppSettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("ESP32 Sensor Hardware Hub", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("IoT Sensor Interface", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         Text("Link ultrasonic UT, accelerometer & thermal sensors", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = esp32LinkActive, onCheckedChange = { esp32LinkActive = it })
@@ -589,7 +646,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text("Version 2.4.0 (Enterprise Hardware Build)", fontSize = 12.sp, color = Color.Gray)
                 Spacer(modifier = Modifier.height(12.dp))
-                Text("Integrated with Central Safety Cloud Database, dual GPS telemetry fusion, computer vision crack estimation, and real-time prototype actuator control.", fontSize = 12.sp)
+                Text("Enterprise mobile inspection platform for automated track surveillance, flaw detection, and predictive maintenance.", fontSize = 12.sp)
             }
         }
     }
@@ -597,6 +654,8 @@ fun AboutScreen(onBack: () -> Unit) {
 
 @Composable
 fun AttentionScreen(
+    defects: List<Defect> = emptyList(),
+    tasks: List<MaintenanceTask> = emptyList(),
     onNavigateDefect: () -> Unit,
     onNavigateTask: () -> Unit,
     onCreateTask: () -> Unit,
@@ -607,6 +666,8 @@ fun AttentionScreen(
     onRiskHeatmap: () -> Unit,
     onBack: () -> Unit
 ) {
+    val topDefect = defects.firstOrNull()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -616,17 +677,23 @@ fun AttentionScreen(
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Critical Sector 4B Alert", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.Red)
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("Transverse crack growth rate accelerated. Derailment risk score 92/100.", fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onNavigateDefect, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
-                        Text("View Defect")
+                if (topDefect != null) {
+                    Text("Critical ${topDefect.section} Alert", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.Red)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("${topDefect.title} at ${topDefect.chainageCoordinate}. Risk score: ${topDefect.riskScore}/100.", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onNavigateDefect, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
+                            Text("View Defect")
+                        }
+                        Button(onClick = onCreateTask) {
+                            Text("Dispatch Gang")
+                        }
                     }
-                    Button(onClick = onCreateTask) {
-                        Text("Dispatch Gang")
-                    }
+                } else {
+                    Text("All Track Sectors Clear", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFF16A34A))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Zero critical defects or emergency restrictions pending. Monitored corridors nominal.", fontSize = 12.sp)
                 }
             }
         }

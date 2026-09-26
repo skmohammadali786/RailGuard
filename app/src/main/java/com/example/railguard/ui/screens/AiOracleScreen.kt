@@ -118,7 +118,7 @@ fun AiOracleScreen(
             AiChatMessage(
                 sender = "assistant",
                 text = "⚡ System initialized: RailVision-DeepTrack Edge AI cluster online (16 ms latency).\n\n" +
-                    "Real-time telemetric streams active across monitored corridor sectors. Connected to Central Safety Cloud Database.",
+                    "Real-time telemetric streams active across monitored corridor sectors. Safety surveillance operational.",
                 actionableType = "TSR",
                 actionableLabel = "View Live Corridor Telemetry"
             )
@@ -426,8 +426,9 @@ fun AiOracleScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val topDefect = defects.firstOrNull()
                         Text(
-                            text = "70° SHEAR WAVE · ECHO AT DEPTH 46.2 mm",
+                            text = if (topDefect != null) "70° SHEAR WAVE · ECHO AT ${topDefect.chainageCoordinate}" else "70° SHEAR WAVE · ACOUSTIC BASELINE NOMINAL · ZERO FLAW ECHO",
                             color = Color(0xFF38BDF8),
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
@@ -798,17 +799,26 @@ fun AiOracleScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Live Cab Signal Enforcements Across Corridor",
+                            text = "Speed Restrictions & Corridor Enforcements",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "• Train TR-104 (InterCity Express): Enforcing 25 km/h TSR at KM 14+000\n" +
-                                "• Train FR-802 (Heavy Haul Freight): Enforcing 40 km/h TSR at KM 08+000\n" +
-                                "• Train HS-301 (Arrow Bullet): Full 180 km/h authorized at KM 03+000\n" +
-                                "• Train RC-515 (Regional Metro): Full 90 km/h clear at KM 01+000\n" +
-                                "• Direct Cab DMI Beacon: Active via 5G Telemetry Uplink (Loss rate: 0.00%).",
+                            text = if (defects.isNotEmpty()) {
+                                val criticalDefects = defects.filter { it.tone == Tone.CRITICAL }
+                                if (criticalDefects.isNotEmpty()) {
+                                    criticalDefects.joinToString("\n") { "• Emergency TSR Slow Order: 25 km/h at ${it.chainageCoordinate} (${it.section})" } +
+                                        "\n• Action Required: Immediate maintenance crew dispatch & safety clamp"
+                                } else {
+                                    "• Advisory Caution: 40 km/h advisory speed across monitored sectors\n• Corridor status: Under scheduled surveillance"
+                                }
+                            } else {
+                                "• All Corridor Sectors: 100% nominal track geometry confirmed\n" +
+                                "• Line Speed: Full authorized speed (120 - 180 km/h) permitted\n" +
+                                "• TSR Enforcements: Zero speed orders or emergency slow restrictions active\n" +
+                                "• Telemetry Uplink: Continuous corridor surveillance active"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
@@ -817,10 +827,10 @@ fun AiOracleScreen(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         PrimaryButton(
-                            title = "Broadcast TSR Advisory to Fleet",
+                            title = if (defects.isNotEmpty()) "Broadcast Speed Restriction" else "Confirm Line Speed Clear",
                             icon = Icons.Default.Send,
                             onClick = {
-                                quickActionFeedback = "Emergency TSR advisory re-broadcasted to TR-104 and FR-802."
+                                quickActionFeedback = if (defects.isNotEmpty()) "TSR speed restriction broadcasted to active trains." else "Line clear confirmed across all corridor sectors."
                             }
                         )
                     }
