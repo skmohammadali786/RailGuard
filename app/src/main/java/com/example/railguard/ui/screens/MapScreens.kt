@@ -1,5 +1,12 @@
 package com.example.railguard.ui.screens
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import com.example.railguard.data.RailGuardFirebaseService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -31,6 +39,28 @@ import com.example.railguard.model.Defect
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
+import androidx.core.content.ContextCompat
+
+private fun hasLocationPermission(context: Context): Boolean {
+    return ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+}
+
+private fun readLastKnownLocation(context: Context): Location? {
+    if (!hasLocationPermission(context)) return null
+    val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+    return listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        .mapNotNull { provider ->
+            runCatching { manager.getLastKnownLocation(provider) }.getOrNull()
+        }
+        .maxByOrNull { it.time }
+}
 
 @Composable
 fun MapScreen(
@@ -311,9 +341,20 @@ fun RiskHeatmapScreen(
 
 @Composable
 fun LocationDetailsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isSyncingGeodesy by remember { mutableStateOf(false) }
     var geodesySyncMsg by remember { mutableStateOf<String?>(null) }
+    var location by remember { mutableStateOf<Location?>(null) }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions.values.any { it }) {
+            location = readLastKnownLocation(context)
+        } else {
+            geodesySyncMsg = "Location permission was denied"
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -324,12 +365,12 @@ fun LocationDetailsScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                MetricRow("Latitude", "28.613938° N")
-                MetricRow("Longitude", "77.209021° E")
-                MetricRow("Ellipsoidal Height", "+216.42 m")
-                MetricRow("Geoid Separation", "-32.10 m")
-                MetricRow("Track Gradient", "+0.45% Rising Grade")
-                MetricRow("Nearest Station", "Central Junction (3.8 km)")
+                MetricRow("Latitude", location?.latitude?.toString() ?: "Waiting for device fix")
+                MetricRow("Longitude", location?.longitude?.toString() ?: "Waiting for device fix")
+                MetricRow("Accuracy", location?.accuracy?.let { "%.2f m".format(it) } ?: "Unavailable")
+                MetricRow("Altitude", location?.altitude?.let { "%.2f m".format(it) } ?: "Unavailable")
+                MetricRow("Bearing", location?.bearing?.let { "%.1f°".format(it) } ?: "Unavailable")
+                MetricRow("Source", location?.provider ?: "Device GPS / network")
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -349,17 +390,38 @@ fun LocationDetailsScreen(onBack: () -> Unit) {
                     onClick = {
                         isSyncingGeodesy = true
                         scope.launch {
-                            RailGuardFirebaseService.instance.recordGpsTelemetry(
-                                lat = 28.613938,
-                                lng = 77.209021,
-                                speedKmh = 14.2,
-                                heading = 142.0,
-                                accuracyM = 0.52f,
-                                satellites = 18,
-                                chainage = "Active Corridor Trackway"
-                            )
-                            isSyncingGeodesy = false
-                            geodesySyncMsg = "Survey coordinates persisted to Cloud Realtime DB ✓"
+                            if (!hasLocationPermission(context)) {
+                                isSyncingGeodesy = false
+                                locationPermissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
+                                )
+                            } else {
+                                location = readLastKnownLocation(context)
+                                val fix = location
+                                if (fix == null) {
+                                    isSyncingGeodesy = false
+                                    geodesySyncMsg = "No device location fix is available"
+                                } else {
+                                    val synced = RailGuardFirebaseService.instance.recordGpsTelemetry(
+                                        lat = fix.latitude,
+                                        lng = fix.longitude,
+                                        speedKmh = if (fix.hasSpeed()) fix.speed * 3.6 else 0.0,
+                                        heading = if (fix.hasBearing()) fix.bearing.toDouble() else 0.0,
+                                        accuracyM = fix.accuracy,
+                                        satellites = fix.extras?.getInt("satellites") ?: 0,
+                                        chainage = "Device GPS Fix"
+                                    )
+                                    isSyncingGeodesy = false
+                                    geodesySyncMsg = if (synced) {
+                                        "Device coordinates persisted to Cloud Realtime DB ✓"
+                                    } else {
+                                        "Firebase rejected the location update"
+                                    }
+                                }
+                            }
                         }
                     }
                 )
@@ -370,27 +432,48 @@ fun LocationDetailsScreen(onBack: () -> Unit) {
 
 @Composable
 fun GpsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var isBroadcastingLive by remember { mutableStateOf(true) }
-    var broadcastPushedCount by remember { mutableIntStateOf(1) }
+    var isBroadcastingLive by remember { mutableStateOf(false) }
+    var broadcastPushedCount by remember { mutableIntStateOf(0) }
     var manualSyncing by remember { mutableStateOf(false) }
-    var lastSyncStatus by remember { mutableStateOf("Live Cloud Broadcast Active") }
+    var lastSyncStatus by remember { mutableStateOf("Waiting for GPS permission and device fix") }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions.values.any { it }) {
+            isBroadcastingLive = true
+            lastSyncStatus = "GPS permission granted; starting cloud broadcast"
+        } else {
+            isBroadcastingLive = false
+            lastSyncStatus = "GPS permission was denied"
+        }
+    }
 
     // Live continuous GPS sync loop to Firebase RTDB
     LaunchedEffect(isBroadcastingLive) {
         while (isBroadcastingLive) {
             delay(3000)
-            RailGuardFirebaseService.instance.recordGpsTelemetry(
-                lat = 28.613938 + (kotlin.random.Random.nextDouble() - 0.5) * 0.0001,
-                lng = 77.209021 + (kotlin.random.Random.nextDouble() - 0.5) * 0.0001,
-                speedKmh = 14.2 + (kotlin.random.Random.nextDouble() - 0.5) * 0.4,
-                heading = 142.0,
-                accuracyM = 0.78f,
-                satellites = 18,
-                chainage = "Active Corridor Trackway"
-            )
-            broadcastPushedCount++
-            lastSyncStatus = "Packet #$broadcastPushedCount streamed to Cloud DB"
+            val fix = readLastKnownLocation(context)
+            if (fix == null) {
+                lastSyncStatus = "Waiting for a device GPS fix"
+            } else {
+                val synced = RailGuardFirebaseService.instance.recordGpsTelemetry(
+                    lat = fix.latitude,
+                    lng = fix.longitude,
+                    speedKmh = if (fix.hasSpeed()) fix.speed * 3.6 else 0.0,
+                    heading = if (fix.hasBearing()) fix.bearing.toDouble() else 0.0,
+                    accuracyM = fix.accuracy,
+                    satellites = fix.extras?.getInt("satellites") ?: 0,
+                    chainage = "Device GPS Fix"
+                )
+                if (synced) {
+                    broadcastPushedCount++
+                    lastSyncStatus = "Packet #$broadcastPushedCount streamed to Cloud DB"
+                } else {
+                    lastSyncStatus = "Firebase rejected the GPS packet"
+                }
+            }
         }
     }
 
@@ -426,7 +509,20 @@ fun GpsScreen(onBack: () -> Unit) {
                     }
                     Switch(
                         checked = isBroadcastingLive,
-                        onCheckedChange = { isBroadcastingLive = it }
+                        onCheckedChange = { enabled ->
+                            if (!enabled) {
+                                isBroadcastingLive = false
+                            } else if (hasLocationPermission(context)) {
+                                isBroadcastingLive = true
+                            } else {
+                                locationPermissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
+                                )
+                            }
+                        }
                     )
                 }
 
@@ -458,17 +554,32 @@ fun GpsScreen(onBack: () -> Unit) {
                     onClick = {
                         manualSyncing = true
                         scope.launch {
-                            RailGuardFirebaseService.instance.recordGpsTelemetry(
-                                lat = 28.613938,
-                                lng = 77.209021,
-                                speedKmh = 14.2,
-                                heading = 142.0,
-                                accuracyM = 0.78f,
-                                satellites = 18,
-                                chainage = "Active Corridor Trackway"
-                            )
-                            manualSyncing = false
-                            lastSyncStatus = "Manual Fix Synced to Cloud DB ✓"
+                            if (!hasLocationPermission(context)) {
+                                manualSyncing = false
+                                lastSyncStatus = "Grant GPS permission before syncing"
+                            } else {
+                                val fix = readLastKnownLocation(context)
+                                if (fix == null) {
+                                    manualSyncing = false
+                                    lastSyncStatus = "No device GPS fix is available"
+                                } else {
+                                    val synced = RailGuardFirebaseService.instance.recordGpsTelemetry(
+                                        lat = fix.latitude,
+                                        lng = fix.longitude,
+                                        speedKmh = if (fix.hasSpeed()) fix.speed * 3.6 else 0.0,
+                                        heading = if (fix.hasBearing()) fix.bearing.toDouble() else 0.0,
+                                        accuracyM = fix.accuracy,
+                                        satellites = fix.extras?.getInt("satellites") ?: 0,
+                                        chainage = "Device GPS Fix"
+                                    )
+                                    manualSyncing = false
+                                    lastSyncStatus = if (synced) {
+                                        "Manual device fix synced to Cloud DB ✓"
+                                    } else {
+                                        "Firebase rejected the manual GPS fix"
+                                    }
+                                }
+                            }
                         }
                     },
                     enabled = !manualSyncing,

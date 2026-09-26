@@ -1,6 +1,8 @@
 package com.example.railguard.ui.screens
 
+import android.Manifest
 import android.graphics.Bitmap
+import android.content.pm.PackageManager
 import java.io.ByteArrayOutputStream
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +40,7 @@ import com.example.railguard.model.Defect
 import com.example.railguard.model.InspectionRecord
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -590,6 +594,7 @@ fun InspectionCalendarScreen(
 
 @Composable
 fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isUploadingCapture by remember { mutableStateOf(false) }
     var uploadStatusMsg by remember { mutableStateOf<String?>(null) }
@@ -634,6 +639,15 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                 }
                 isUploadingCapture = false
             }
+        }
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            cameraLauncher.launch(null)
+        } else {
+            uploadStatusMsg = "Camera permission was denied"
         }
     }
 
@@ -698,7 +712,16 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                 } else {
                     Button(
                         onClick = {
-                            cameraLauncher.launch(null)
+                            if (
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.CAMERA
+                                ) == PackageManager.PERMISSION_GRANTED
+                            ) {
+                                cameraLauncher.launch(null)
+                            } else {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
                         },
                         shape = CircleShape,
                         modifier = Modifier.size(72.dp),

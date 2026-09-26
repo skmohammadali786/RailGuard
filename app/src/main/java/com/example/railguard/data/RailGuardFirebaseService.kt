@@ -1365,8 +1365,8 @@ class RailGuardFirebaseService private constructor() {
         accuracyM: Float,
         satellites: Int,
         chainage: String
-    ) {
-        withContext(Dispatchers.IO) {
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
                 val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/telemetry/live_gps.json$authParam"
@@ -1390,11 +1390,12 @@ class RailGuardFirebaseService private constructor() {
                     setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 }
                 OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
-                conn.responseCode
+                conn.responseCode in 200..299
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w("RailGuardFirebase", "GPS telemetry sync error: ${e.message}")
+                false
             }
         }
     }
