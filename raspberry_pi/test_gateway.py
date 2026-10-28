@@ -4,10 +4,11 @@ Unit and integration tests for the RailGuard Raspberry Pi edge gateway.
 Tests packet normalization, sensor key aliases, command expiry, and idempotency.
 """
 
-import unittest
-import time
-import sys
+import json
 import os
+import sys
+import time
+import unittest
 from unittest.mock import MagicMock
 
 # Mock firebase_admin and serial if not installed in the local test runner
@@ -102,6 +103,40 @@ class TestCameraCrackDetector(unittest.TestCase):
         telem = ccd.build_anomaly_telemetry("KM 14+320")
         self.assertEqual(telem["status"], "ANOMALY_FLAGGED")
         self.assertAlmostEqual(telem["ultrasonicDepthMm"], 46.2)
+        self.assertIn("x:", telem["crackBoundingBox"])
+
+    def test_local_wifi_server_endpoints(self):
+        import camera_crack_detector as ccd
+        import urllib.request
+        server = ccd.start_local_wifi_server(host="127.0.0.1", port=18080)
+        time.sleep(0.1)
+
+        # 1. Health endpoint
+        with urllib.request.urlopen("http://127.0.0.1:18080/api/health", timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "ONLINE")
+
+        # 2. Latest crack endpoint
+        with urllib.request.urlopen("http://127.0.0.1:18080/api/latest_crack", timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertIn("status", data)
+
+        # 3. TSR emergency slow order POST
+        req = urllib.request.Request(
+            "http://127.0.0.1:18080/api/tsr",
+            data=json.dumps({"speed": 25}).encode(),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "EXECUTED")
+            self.assertEqual(data["activeTsrSpeedKmH"], 25)
+
+        if server:
+            server.shutdown()
 
 
 if __name__ == "__main__":

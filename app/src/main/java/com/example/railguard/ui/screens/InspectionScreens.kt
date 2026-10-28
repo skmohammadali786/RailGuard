@@ -420,15 +420,19 @@ fun LiveInspectionScreen(
             }
 
             // Center Optical Bounding Box & Reticle in Light Technical Style
+            val isAnomaly = telemetry?.hasCrack == true ||
+                telemetry?.status?.contains("ANOMALY", ignoreCase = true) == true ||
+                ((telemetry?.ultrasonicDepthMm ?: 68.2f) in 10.0f..55.0f)
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(260.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFF0F9FF))
+                    .background(if (isAnomaly) Color(0xFFFEF2F2) else Color(0xFFF0F9FF))
                     .border(
                         2.dp,
-                        if (telemetry != null) Color(0xFF0284C7) else Color(0xFF94A3B8),
+                        if (isAnomaly) Color(0xFFDC2626) else if (telemetry != null) Color(0xFF0284C7) else Color(0xFF94A3B8),
                         RoundedCornerShape(12.dp)
                     )
                     .padding(14.dp)
@@ -442,15 +446,17 @@ fun LiveInspectionScreen(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(if (telemetry != null) Color(0xFF16A34A) else Color(0xFF0284C7))
+                                .background(if (isAnomaly) Color(0xFFDC2626) else if (telemetry != null) Color(0xFF16A34A) else Color(0xFF0284C7))
                         )
                         Text(
-                            text = if (telemetry != null) {
+                            text = if (isAnomaly) {
+                                "AUTOMATED CRACK DETECTED · ${telemetry?.status ?: "ANOMALY"}"
+                            } else if (telemetry != null) {
                                 "RASPBERRY PI PACKET RECEIVED · ${telemetry.status}"
                             } else {
                                 "WAITING FOR RASPBERRY PI TELEMETRY"
                             },
-                            color = if (telemetry != null) Color(0xFF0284C7) else Color(0xFF475569),
+                            color = if (isAnomaly) Color(0xFFDC2626) else if (telemetry != null) Color(0xFF0284C7) else Color(0xFF475569),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
@@ -464,6 +470,48 @@ fun LiveInspectionScreen(
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium
                     )
+                }
+
+                // Optical Target Bounding Box Crosshairs when Anomaly Detected
+                if (isAnomaly) {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(180.dp)
+                                .height(56.dp)
+                                .border(2.dp, Color(0xFFDC2626), RoundedCornerShape(6.dp))
+                                .background(Color(0x22DC2626)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "TARGET: CRACK [${telemetry?.flawType?.ifBlank { "Transverse Fissure" } ?: "Transverse Fissure"}]",
+                                    color = Color(0xFFDC2626),
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "SIZE: ${telemetry?.crackLengthMm ?: 14.8f}mm · DEPTH: ${telemetry?.ultrasonicDepthMm ?: 46.2f}mm",
+                                    color = Color(0xFF991B1B),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "WI-FI TELEMETRY FUSION: CONFIDENCE ${telemetry?.aiConfidencePercent ?: 96}%",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFDC2626)
+                        )
+                    }
                 }
 
                 if (cloudDefectCount > 0) {

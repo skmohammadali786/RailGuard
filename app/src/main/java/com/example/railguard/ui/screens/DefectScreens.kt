@@ -524,7 +524,13 @@ fun DefectDetailsScreen(
                     MetricRow(label = "Corridor Section", value = defect.section)
                     MetricRow(label = "Chainage Marker", value = defect.chainageCoordinate)
                     MetricRow(label = "GPS Coordinates", value = "${defect.latitude} N, ${defect.longitude} E")
+                    MetricRow(label = "Flaw Classification", value = defect.flawType)
                     MetricRow(label = "Estimated Crack Size", value = defect.estimatedLength)
+                    MetricRow(label = "Ultrasonic Flaw Depth", value = "${defect.ultrasonicDepthMm} mm (Nominal: 68.2mm)")
+                    MetricRow(label = "Impact Vibration Shock", value = "${defect.vibrationG} g")
+                    MetricRow(label = "Rail Temperature", value = "${defect.railTempC} °C")
+                    MetricRow(label = "Axle Speed", value = "${defect.speedKmh} km/h")
+                    MetricRow(label = "Optical Bounding Box", value = defect.boundingBox)
                     MetricRow(label = "AI Confidence", value = "${defect.aiConfidencePercent}% Match")
                     MetricRow(label = "Overall Risk Index", value = "${defect.riskScore} / 100")
                 }

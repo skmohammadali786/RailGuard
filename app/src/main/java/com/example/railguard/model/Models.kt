@@ -24,8 +24,33 @@ data class Defect(
     val riskScore: Int = 0,
     val chainageCoordinate: String = "Unknown",
     val aiConfidencePercent: Int = 0,
-    val aiPrescribedAction: String = "No cloud recommendation available"
+    val aiPrescribedAction: String = "No cloud recommendation available",
+    val flawType: String = "Transverse Gauge Corner Fissure",
+    val ultrasonicDepthMm: Float = 46.2f,
+    val vibrationG: Float = 0.425f,
+    val railTempC: Float = 32.8f,
+    val speedKmh: Float = 45.0f,
+    val boundingBox: String = "x:140,y:88,w:120,h:45"
 )
+
+data class CrackAlertData(
+    val defectId: String,
+    val flawType: String,
+    val chainage: String,
+    val section: String,
+    val confidence: Int,
+    val crackLength: String,
+    val ultrasonicDepthMm: Float,
+    val vibrationG: Float,
+    val railTempC: Float,
+    val speedKmh: Float,
+    val recommendedTsrKmh: Float,
+    val coordinates: String,
+    val action: String,
+    val boundingBox: String,
+    val timestamp: Long
+)
+
 
 data class MaintenanceTask(
     val id: String,

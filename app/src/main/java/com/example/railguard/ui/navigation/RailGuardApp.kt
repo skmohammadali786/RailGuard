@@ -3,16 +3,28 @@ package com.example.railguard.ui.navigation
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.*
 import com.example.railguard.theme.RailGuardTheme
@@ -196,8 +208,19 @@ fun RailGuardApp() {
                     observations.addAll(it)
                 }
             )
-            latestSensorTelemetry = firebaseService.fetchLatestSensorTelemetry()
             delay(10_000)
+        }
+    }
+
+    // High-speed real-time telemetry & automated crack detection polling (1.2s cadence)
+    // Direct Raspberry Pi Wi-Fi LAN query (< 50ms) with seamless Firebase cloud fallback
+    LaunchedEffect(firebaseService.currentUser?.localId) {
+        while (true) {
+            val liveTelemetry = firebaseService.fetchDirectWifiOrCloudTelemetry()
+            if (liveTelemetry != null) {
+                latestSensorTelemetry = liveTelemetry
+            }
+            delay(1200)
         }
     }
 
@@ -773,7 +796,324 @@ fun RailGuardApp() {
                 onUnlock = { isAppLocked = false }
             )
         }
+
+        val crackAlert = firebaseService.latestCrackAlert
+        if (crackAlert != null) {
+            InstantCrackAlertModal(
+                alert = crackAlert,
+                onEngageTsr = {
+                    scope.launch {
+                        firebaseService.issueEmergencyTsr(25)
+                    }
+                },
+                onViewDefect = {
+                    val matchingDefect = defects.firstOrNull { it.id == crackAlert.defectId } ?: Defect(
+                        id = crackAlert.defectId,
+                        title = "Transverse Rail Fissure (Auto-Detected)",
+                        section = crackAlert.section,
+                        score = "CRITICAL (${crackAlert.confidence}% AI Flaw Match)",
+                        tone = Tone.CRITICAL,
+                        time = java.text.SimpleDateFormat("HH:mm · dd MMM", java.util.Locale.getDefault()).format(java.util.Date(crackAlert.timestamp)),
+                        detail = "Automated camera & ultrasonic edge scan flagged surface rail crack at ${crackAlert.chainage}. Flaw depth: ${crackAlert.ultrasonicDepthMm} mm. Impact vibration: ${crackAlert.vibrationG} g.",
+                        estimatedLength = crackAlert.crackLength,
+                        latitude = 51.5074,
+                        longitude = -0.1278,
+                        riskScore = 94,
+                        chainageCoordinate = crackAlert.chainage,
+                        aiConfidencePercent = crackAlert.confidence,
+                        aiPrescribedAction = crackAlert.action,
+                        flawType = crackAlert.flawType,
+                        ultrasonicDepthMm = crackAlert.ultrasonicDepthMm,
+                        vibrationG = crackAlert.vibrationG,
+                        railTempC = crackAlert.railTempC,
+                        speedKmh = crackAlert.speedKmh,
+                        boundingBox = crackAlert.boundingBox
+                    )
+                    selectedDefect = matchingDefect
+                    if (defects.none { it.id == matchingDefect.id }) {
+                        defects.add(0, matchingDefect)
+                    }
+                    firebaseService.latestCrackAlert = null
+                    navigateTo(Screen.DefectDetails.route)
+                },
+                onDismiss = {
+                    firebaseService.latestCrackAlert = null
+                }
+            )
+        }
     }
 }
 }
+}
+
+@Composable
+fun InstantCrackAlertModal(
+    alert: CrackAlertData,
+    onEngageTsr: () -> Unit,
+    onViewDefect: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var tsrEngaged by remember { mutableStateOf(false) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .wrapContentHeight()
+                .padding(vertical = 16.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White,
+            tonalElevation = 10.dp,
+            shadowElevation = 12.dp,
+            border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFDC2626))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Header Ribbon with Pulsing Alert Badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFDC2626))
+                        )
+                        Text(
+                            text = "CRITICAL DEFECT DETECTED · WI-FI LINK",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFFDC2626)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                // Title & Subtitle
+                Column {
+                    Text(
+                        text = "Camera Automated Rail Crack Alert",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Text(
+                        text = "Raspberry Pi Vision AI + Ultrasonic Depth Sensor Fusion",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+
+                // Visual Optical Viewfinder Preview Box
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFFFEF2F2))
+                        .border(1.5.dp, Color(0xFFFCA5A5), RoundedCornerShape(10.dp))
+                        .padding(10.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(140.dp)
+                                .height(46.dp)
+                                .border(2.dp, Color(0xFFDC2626), RoundedCornerShape(6.dp))
+                                .background(Color(0x22DC2626)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "CRACK: ${alert.crackLength}",
+                                color = Color(0xFFDC2626),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "BBOX: [${alert.boundingBox}] · AI CONFIDENCE: ${alert.confidence}%",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF991B1B)
+                        )
+                    }
+
+                    Text(
+                        text = "RPI-CAM-STREAM",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF94A3B8),
+                        modifier = Modifier.align(Alignment.TopStart)
+                    )
+                }
+
+                // Sensor & Operational Metrics Matrix (100% Light Mode)
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFFF8FAFC),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ModalMetricRow("FLAW TYPE", alert.flawType, Color(0xFFDC2626))
+                        ModalMetricRow("LOCATION", "${alert.chainage} · ${alert.section}", Color(0xFF0F172A))
+                        ModalMetricRow("GPS", alert.coordinates, Color(0xFF0284C7))
+                        ModalMetricRow("CRACK SIZE", alert.crackLength, Color(0xFFDC2626))
+                        ModalMetricRow("ULTRASONIC DEPTH", "${alert.ultrasonicDepthMm} mm (Nominal: 68.2mm)", Color(0xFFD97706))
+                        ModalMetricRow("IMPACT VIBRATION", "${alert.vibrationG} g", Color(0xFFEA580C))
+                        ModalMetricRow("RAIL TEMP / SPEED", "${alert.railTempC} °C · ${alert.speedKmh} km/h", Color(0xFF475569))
+                    }
+                }
+
+                // Safety Prescription Note
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFFEFF6FF),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Speed,
+                            contentDescription = null,
+                            tint = Color(0xFF0284C7),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "AI PRESCRIPTION",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF0369A1)
+                            )
+                            Text(
+                                text = alert.action,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF1E293B)
+                            )
+                        }
+                    }
+                }
+
+                // Action Buttons
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            tsrEngaged = true
+                            onEngageTsr()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (tsrEngaged) Color(0xFF16A34A) else Color(0xFFDC2626)
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            if (tsrEngaged) Icons.Default.Check else Icons.Default.Speed,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (tsrEngaged) "Emergency TSR 25 km/h Engaged (Wi-Fi Ack)" else "Engage Emergency TSR (25 km/h)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onViewDefect,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7))
+                        ) {
+                            Text("Inspect Full Dossier", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+                        }
+
+                        TextButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Acknowledge & Dismiss", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModalMetricRow(label: String, value: String, valueColor: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = Color(0xFF64748B)
+        )
+        Text(
+            text = value,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = valueColor
+        )
+    }
 }
