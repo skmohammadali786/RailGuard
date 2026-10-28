@@ -50,67 +50,6 @@ fun SettingsScreen(
     val isDark = LocalIsDark.current
     val firebaseService = remember { RailGuardFirebaseService.instance }
     val scope = rememberCoroutineScope()
-    var showCloudDataDialog by remember { mutableStateOf(false) }
-    var isPurgingData by remember { mutableStateOf(false) }
-    var purgeFeedback by remember { mutableStateOf<String?>(null) }
-
-    if (showCloudDataDialog) {
-        AlertDialog(
-            onDismissRequest = { showCloudDataDialog = false },
-            title = {
-                Text("Cloud & Database Sync", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = if (firebaseService.isConnectedToFirebase) "✓ Connected to Firebase Realtime Database" else "Offline Cache Mode",
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (firebaseService.isConnectedToFirebase) Color(0xFF16A34A) else Color(0xFFEAB308),
-                        fontSize = 13.sp
-                    )
-                    Text(
-                        text = "Project: ${firebaseService.projectId}",
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (purgeFeedback != null) {
-                        Text(
-                            text = purgeFeedback ?: "",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF16A34A)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedButton(
-                        onClick = {
-                            isPurgingData = true
-                            purgeFeedback = "Purging all cloud records..."
-                            scope.launch {
-                                firebaseService.purgeAllDemoDataFromCloud {
-                                    isPurgingData = false
-                                    purgeFeedback = "All cloud data purged. Database clean!"
-                                }
-                            }
-                        },
-                        enabled = !isPurgingData,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (isPurgingData) "Purging..." else "Purge All Cloud Data & Reset", fontSize = 12.sp)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showCloudDataDialog = false }) {
-                    Text("Close", fontWeight = FontWeight.Bold)
-                }
-            }
-        )
-    }
 
     LazyColumn(
         modifier = Modifier
@@ -121,38 +60,9 @@ fun SettingsScreen(
     ) {
         item {
             ScreenHeader(
-                title = "Settings & Data Management",
-                subtitle = "Inspector account, cloud sync, security & system parameters"
+                title = "Settings & Preferences",
+                subtitle = "Inspector account, security, regionalization & system parameters"
             )
-        }
-
-        item {
-            RailCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = "DATA & CLOUD STORAGE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF0284C7)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    SettingsRowTile(
-                        icon = Icons.Default.CloudSync,
-                        title = "Cloud Sync & Data Management",
-                        subtitle = if (firebaseService.isConnectedToFirebase) "Firebase Realtime DB Synced" else "Offline Cache Mode",
-                        onClick = { showCloudDataDialog = true }
-                    )
-
-                    SettingsRowTile(
-                        icon = Icons.Default.Sensors,
-                        title = "Hardware & Train Corridor Link",
-                        subtitle = "Raspberry Pi / ESP32 sensor telemetry & TSR control",
-                        onClick = { onNavigate("train_connection") }
-                    )
-                }
-            }
         }
 
         item {

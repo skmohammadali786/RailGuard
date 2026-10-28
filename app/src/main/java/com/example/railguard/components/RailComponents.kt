@@ -683,7 +683,7 @@ fun RealTimeTrainLineMap(
             }
         }
 
-        // Backend telemetry is rendered by HardwareTelemetryScreen, not invented here.
+        // Backend telemetry is rendered directly on operational screens (HomeScreen, LiveInspectionScreen)
         Spacer(modifier = Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -692,7 +692,7 @@ fun RealTimeTrainLineMap(
         ) {
             Text(
                 text = "Telemetry values are available only when returned by Firebase.",
-                color = Color.White.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
             )

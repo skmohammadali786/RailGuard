@@ -83,8 +83,6 @@ sealed class Screen(val route: String) {
     object Attention : Screen("attention")
     object Notifications : Screen("notifications")
     object AiOracle : Screen("ai_oracle")
-    object TrainConnection : Screen("train_connection")
-    object FirebaseSync : Screen("firebase_sync")
 }
 
 data class NavigationTab(
@@ -748,14 +746,6 @@ fun RailGuardApp() {
                             },
                             onNavigateCrackGrowth = { navigateTo(Screen.GrowthAnalysis.route) },
                             onNavigateHeatmap = { navigateTo(Screen.RiskHeatmap.route) },
-                            onBack = { navigateBack() }
-                        )
-                        Screen.TrainConnection.route -> HardwareTelemetryScreen(
-                            onBack = { navigateBack() }
-                        )
-                        Screen.FirebaseSync.route -> AppSettingsScreen(
-                            preferences = appPreferences,
-                            onUpdatePreferences = { updatePreferences(it) },
                             onBack = { navigateBack() }
                         )
                     }
