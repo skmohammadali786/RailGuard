@@ -536,7 +536,12 @@ fun AiOracleScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("Entrance Echo (0mm)", color = Color(0xFF64748B), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
-                        Text("FLAW PEAK: 46.2mm (+18.4 dB)", color = Color(0xFFEF4444), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        val flawText = when {
+                            telemetry != null && telemetry.ultrasonicDepthMm > 0 -> "FLAW ECHO: ${telemetry.ultrasonicDepthMm}mm (Live UT)"
+                            defects.isNotEmpty() -> "FLAW PEAK: ${defects.first().estimatedLength}"
+                            else -> "AWAITING SENSOR TELEMETRY"
+                        }
+                        Text(flawText, color = Color(0xFFEF4444), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                         Text("Backwall Echo (172mm)", color = Color(0xFF64748B), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
                     }
                 }
@@ -698,22 +703,30 @@ fun AiOracleScreen(
                                 color = colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
-                            StatusPill(label = "01:15 - 04:30 GMT", tone = Tone.HEALTHY)
+                            StatusPill(
+                                label = if (tasks.isNotEmpty()) tasks.first().due else "No Tasks Due",
+                                tone = if (tasks.isNotEmpty()) tasks.first().tone else Tone.HEALTHY
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "North Loop Corridor Window: 3h 15m Blackout Tonight",
+                            text = if (tasks.isNotEmpty()) "${tasks.first().title} - ${tasks.first().section}" else "No Maintenance Scheduled",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "• Traffic Blackout: 195 minutes without commercial train conflict\n" +
-                                "• Work Order WO-881: Replace Rail Clip Pair & Emergency Splice Clamps\n" +
-                                "• Required Possession Duration: 85 minutes (Margin: +110 mins)\n" +
-                                "• Crew 04 (Lead: M. Ross) equipped with induction heater & torque kit\n" +
-                                "• Service Disruption: 0% morning passenger peak delay impact.",
+                            text = if (tasks.isNotEmpty()) {
+                                "• Work Order: ${tasks.first().id} (${tasks.first().title})\n" +
+                                "• Section: ${tasks.first().section}\n" +
+                                "• Due: ${tasks.first().due}\n" +
+                                "• Assignee: ${tasks.first().assignee}\n" +
+                                "• Status: ${tasks.first().status}"
+                            } else {
+                                "• No active work orders pending in cloud database.\n" +
+                                "• All track sectors operational."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
@@ -722,11 +735,11 @@ fun AiOracleScreen(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         PrimaryButton(
-                            title = "Dispatch Work Order WO-881 to Crew 04",
+                            title = if (tasks.isNotEmpty()) "Inspect Work Order ${tasks.first().id}" else "All Tasks Nominal",
                             icon = Icons.Default.Build,
                             onClick = {
                                 if (tasks.isNotEmpty()) onDispatchTask(tasks.first())
-                                quickActionFeedback = "Work Order WO-881 dispatched to Crew 04 for 01:15 GMT possession window."
+                                quickActionFeedback = if (tasks.isNotEmpty()) "Work Order ${tasks.first().id} opened." else "No active work orders."
                             }
                         )
                     }
@@ -744,7 +757,10 @@ fun AiOracleScreen(
                                 color = colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
-                            StatusPill(label = "+68.4 MPa", tone = Tone.WARNING)
+                            StatusPill(
+                                label = if (telemetry != null && telemetry.railTempC > 0) "${telemetry.railTempC}°C" else "Nominal",
+                                tone = if (telemetry != null && telemetry.railTempC > 45) Tone.WARNING else Tone.HEALTHY
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -755,12 +771,16 @@ fun AiOracleScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "• Projected Peak Rail Surface Temp: 48.4°C (+11.4°C over SFT)\n" +
-                                "• Stress-Free Neutral Temperature (SFT): 27.0°C\n" +
-                                "• Compressive Axial Stress: +68.4 MPa (128 kN axial force)\n" +
-                                "• Critical Euler Buckling Threshold: P_buckle = 145 kN (Margin: 17 kN)\n" +
-                                "• Lateral Ballast Resistance: 4.8 kN/sleeper (Marginal at 14+380)\n" +
-                                "• Recommendation: Deploy destressing hydraulic puller team before 11:30.",
+                            text = if (telemetry != null) {
+                                "• Monitored Rail Surface Temp: ${telemetry.railTempC}°C\n" +
+                                "• Axle Speed: ${telemetry.axleSpeedKmh} km/h\n" +
+                                "• Vibration: ${telemetry.vibrationG} g\n" +
+                                "• Chainage: ${telemetry.chainage}\n" +
+                                "• Sensor Node: ${telemetry.nodeId} (${telemetry.status})"
+                            } else {
+                                "• Awaiting live temperature & vibration telemetry from Raspberry Pi / ESP32 gateway.\n" +
+                                "• Connect gateway to publish real-time track metrics."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp

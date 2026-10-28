@@ -662,17 +662,17 @@ fun PdfPreviewScreen(
                     ) {
                         Column {
                             Text(text = "DOCUMENT REF:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "REP-2024-W25/S14-EVIDENCE", color = Color(0xFF0F172A), fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            Text(text = "REP-${System.currentTimeMillis() % 100000}", color = Color(0xFF0F172A), fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = "SECURITY CLASS:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
                             Text(text = "OFFICIAL-SENSITIVE / IMMUTABLE", color = Color(0xFF475569), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                         Column {
                             Text(text = "DATE & TIMESTAMP:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "2024-06-18 14:32:15 UTC", color = Color(0xFF0F172A), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "See cloud records", color = Color(0xFF0F172A), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = "LEAD INSPECTOR:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "$inspectorName (IRSE-UK #849201)", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(text = inspectorName, color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -743,15 +743,15 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                             .padding(10.dp)
                     ) {
-                        Text("• Corridor / Line: North Loop Line (Section 14) · Up & Down Main Tracks", color = Color(0xFF1E293B), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Chainage Bounds: KM 14+000 to KM 15+250 (1,250 meters total surveyed)", color = Color(0xFF334155), fontSize = 10.sp)
-                        Text("• Start Geodetic GPS: 51°30'08.4\"N 0°07'31.2\"W (Lat: 51.50233°, Lon: -0.12533° · Alt 46.8m)", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                        Text("• Critical Defect GPS: 51°30'14.2\"N 0°07'42.8\"W (Lat: 51.50394°, Lon: -0.12856° · Alt 48.2m)", color = Color(0xFFB91C1C), fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                        Text("• End Geodetic GPS: 51°30'26.1\"N 0°07'59.4\"W (Lat: 51.50725°, Lon: -0.13317° · Alt 51.0m)", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                        Text("• RTK GNSS Correction: Base Station Oxford South · Mode: RTK FIXED (H: ±1.2cm, V: ±1.8cm)", color = Color(0xFF059669), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Rail Profile & Grade: 60E1 (UIC 60) Continuous Welded Rail (CWR) · R260 Grade Steel", color = Color(0xFF334155), fontSize = 10.sp)
-                        Text("• Sleeper / Fastener Type: Monobloc Concrete Tie G44 · Pandrol Fastclip FC-1500", color = Color(0xFF334155), fontSize = 10.sp)
-                        Text("• Track Geometry Parameters: Dynamic Gauge 1,438.2 mm (+3.2mm) · Cant 65mm · Twist 1.2mm/m", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Corridor / Line: N/A", color = Color(0xFF1E293B), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Chainage Bounds: N/A", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Start Geodetic GPS: N/A", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("• Critical Defect GPS: N/A", color = Color(0xFFB91C1C), fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        Text("• End Geodetic GPS: N/A", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("• RTK GNSS Correction: N/A", color = Color(0xFF059669), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Rail Profile & Grade: N/A", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Sleeper / Fastener Type: N/A", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Track Geometry Parameters: N/A", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -875,15 +875,15 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFBAE6FD), RoundedCornerShape(6.dp))
                             .padding(10.dp)
                     ) {
-                        Text("• Neural Architecture: RailVision-DeepTrack v4.2 · Edge TPU FP16 Quantized Model", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Inference Latency: 16 ms / frame @ 60 FPS real-time vision pipeline", color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Visual Tensor Confidence: 92.4% (Bounding Box: [X: 420, Y: 180, W: 310, H: 85])", color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Ultrasonic B-Scan Correlation: 88.7% internal echo flaw signature at 46mm depth", color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Thermal Core Readout: FLIR Boson Radiometric · Ambient 24.2°C · Rail 38.4°C · Hotspot 44.1°C", color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Crack Propagation Formula: Paris Law da/dN = 2.4e-11 * (ΔK)^3.2 (Cycles to critical break: 1,840)", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Nadal Derailment Ratio: Y/Q = 0.68 under current geometry (Critical threshold Y/Q = 0.80)", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Flange Climb Probabilities: 96.2% at 45 km/h · 48.7% at 35 km/h · 12.4% at 25 km/h (TSR ACTIVE)", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Continuous Welded Rail Neutral Temp: SFT 27°C · Current tension stress: +18 MPa", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Neural Architecture: N/A", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Inference Latency: N/A", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Visual Tensor Confidence: N/A", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Ultrasonic B-Scan Correlation: N/A", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Thermal Core Readout: N/A", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Crack Propagation Formula: N/A", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Nadal Derailment Ratio: N/A", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Flange Climb Probabilities: N/A", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Continuous Welded Rail Neutral Temp: N/A", color = Color(0xFF0C4A6E), fontSize = 10.sp)
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -899,7 +899,7 @@ fun PdfPreviewScreen(
                     }
 
                     Text(
-                        text = "4. Connected Train Live Telemetry (Train TR-104 Link)",
+                        text = "4. Connected Train Live Telemetry",
                         color = Color(0xFF0F172A),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
@@ -913,13 +913,13 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                             .padding(10.dp)
                     ) {
-                        Text("• Connected Locomotive: TR-104 High-Speed InterCity Express (Class 800 Locomotive)", color = Color(0xFF1E293B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Onboard Unit (OBU): Alstom Atlas 200 ETCS Level 2 · IP 10.142.8.50:50051 UDP", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                        Text("• Telemetry Uplink: 5G Train-to-Ground Radio + GSM-R Backup (-64 dBm · 12ms ping)", color = Color(0xFF059669), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Live Operational Speed: 118.4 km/h approaching Section 14 at 14:32:15 UTC", color = Color(0xFF334155), fontSize = 10.sp)
-                        Text("• Axle Load & Vibration: 18.5 tonnes/axle · Vertical vibration 0.042g RMS (Safe < 0.15g)", color = Color(0xFF334155), fontSize = 10.sp)
-                        Text("• Wheel Bearing Infrared Temp: Axle 1: 31.8°C · Axle 2: 32.4°C · Axle 3: 33.1°C (Nominal)", color = Color(0xFF334155), fontSize = 10.sp)
-                        Text("• Driver DMI Cab Display Alert: TSR 25 km/h enforced and acknowledged by Driver at 14:32:05 UTC", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Connected Locomotive: N/A", color = Color(0xFF1E293B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Onboard Unit (OBU): N/A", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("• Telemetry Uplink: N/A", color = Color(0xFF059669), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Live Operational Speed: N/A", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Axle Load & Vibration: N/A", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Wheel Bearing Infrared Temp: N/A", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Driver DMI Cab Display Alert: N/A", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -939,11 +939,14 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFFEF08A), RoundedCornerShape(6.dp))
                             .padding(10.dp)
                     ) {
-                        Text("• Work Order MT-881: Replace Rail Clip Pair & Emergency Fishplate Clamp at 14+320", color = Color(0xFF713F12), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("  - Assigned: Crew 04 (Lead: M. Ross) · Window: 01:15 - 04:30 GMT tonight · Est: 85 mins", color = Color(0xFF854D0E), fontSize = 9.sp)
-                        Text("  - Required Hardware: Pandrol FC-1500 clip pair, 6-hole emergency fishplate, torque wrench", color = Color(0xFF854D0E), fontSize = 9.sp)
-                        Text("• Work Order MT-882: Ultrasonic B-scan Re-verification at 14+108 (Ultrasonic Team B)", color = Color(0xFF713F12), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Work Order MT-883: Railhead Milling & Grinding Pass 14+000 - 14+400 (Rail Grinder RG-02)", color = Color(0xFF713F12), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        if (tasks.isEmpty()) {
+                            Text("• No active work orders", color = Color(0xFF713F12), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            tasks.forEach { task ->
+                                Text("• Work Order ${task.id}: ${task.title}", color = Color(0xFF713F12), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("  - Assigned: ${task.assignee} · Due: ${task.due}", color = Color(0xFF854D0E), fontSize = 9.sp)
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -964,12 +967,12 @@ fun PdfPreviewScreen(
                             .padding(10.dp)
                     ) {
                         Text("SHA-256 ROOT BUNDLE HASH:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                        Text("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", color = Color(0xFF38BDF8), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                        Text("N/A", color = Color(0xFF38BDF8), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text("MERKLE TREE ROOT:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                        Text("7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069", color = Color(0xFF818CF8), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                        Text("N/A", color = Color(0xFF818CF8), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("BLOCK INDEX: #849102-S14 · TIMESTAMP: 2024-06-18T14:32:15.829Z", color = Color(0xFF4ADE80), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                        Text("BLOCK INDEX: N/A", color = Color(0xFF4ADE80), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -1050,12 +1053,12 @@ fun PdfPreviewScreen(
                         }
 
                         val kpiList = listOf(
-                            ReportKpiItem("Track Health Index (THI)", "94.2% (Network Avg)", "Threshold ≥ 90.0%", "HEALTHY"),
-                            ReportKpiItem("Active Critical Fractures", "18 Logged Anomalies", "Tolerance = 0", "ACTIONABLE"),
-                            ReportKpiItem("Survey Coverage Reliability", "98.5% Ultrasonic/Vision", "Standard ≥ 95.0%", "CERTIFIED"),
-                            ReportKpiItem("Corridor Gross Tonnage", "48.6 MGT Cumulative", "Rated Cap 60.0 MGT", "NOMINAL"),
-                            ReportKpiItem("Mean Time Between Failures", "1,420 Operating Hours", "Target ≥ 1,200h", "COMPLIANT"),
-                            ReportKpiItem("Peak Nadal Derailment Ratio", "0.68 Y/Q (Section 14)", "Critical Cap 0.80 Y/Q", "TSR 25 KM/H")
+                            ReportKpiItem("Track Health Index (THI)", "N/A", "Threshold ≥ 90.0%", "N/A"),
+                            ReportKpiItem("Active Critical Fractures", "${defects.size} Logged Anomalies", "Tolerance = 0", if (defects.isEmpty()) "NOMINAL" else "ACTIONABLE"),
+                            ReportKpiItem("Survey Coverage Reliability", "N/A", "Standard ≥ 95.0%", "N/A"),
+                            ReportKpiItem("Corridor Gross Tonnage", "N/A", "Rated Cap 60.0 MGT", "N/A"),
+                            ReportKpiItem("Mean Time Between Failures", "N/A", "Target ≥ 1,200h", "N/A"),
+                            ReportKpiItem("Peak Nadal Derailment Ratio", "N/A", "Critical Cap 0.80 Y/Q", "N/A")
                         )
 
                         kpiList.forEachIndexed { idx, (kpi, value, standard, status) ->
@@ -1099,11 +1102,11 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(6.dp))
                             .padding(8.dp)
                     ) {
-                        Text("• Transverse Fissures (42% · 8 defects): Cyclic growth +0.71 mm/day · Critical danger zone", color = Color(0xFF991B1B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        Text("• Squats & Rolling Contact Fatigue (28% · 5 defects): Depth 12-28mm · Surface spalling", color = Color(0xFF854D0E), fontSize = 9.sp)
-                        Text("• Gauge Corner Head Checking (18% · 3 defects): Micro-cracks at running band radius", color = Color(0xFF334155), fontSize = 9.sp)
-                        Text("• Bolt Hole & Web Fractures (8% · 1 defect): Fishplate shear stress concentration", color = Color(0xFF334155), fontSize = 9.sp)
-                        Text("• Thermite Weld Heat Affected Zone (4% · 1 defect): Porosity at aluminothermic joint", color = Color(0xFF334155), fontSize = 9.sp)
+                        Text("• Transverse Fissures: N/A", color = Color(0xFF991B1B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text("• Squats & Rolling Contact Fatigue: N/A", color = Color(0xFF854D0E), fontSize = 9.sp)
+                        Text("• Gauge Corner Head Checking: N/A", color = Color(0xFF334155), fontSize = 9.sp)
+                        Text("• Bolt Hole & Web Fractures: N/A", color = Color(0xFF334155), fontSize = 9.sp)
+                        Text("• Thermite Weld Heat Affected Zone: N/A", color = Color(0xFF334155), fontSize = 9.sp)
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1200,7 +1203,7 @@ fun ShareReportScreen(
                         .padding(12.dp)
                 ) {
                     Text(
-                        text = "https://audit.railguard.field/dossier/rep-2024-w25?token=sha256-e3b0c44",
+                        text = "N/A",
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         color = colorScheme.onSurface
@@ -1311,21 +1314,21 @@ fun AnalyticsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 MetricTile(
-                    value = "94.2%",
+                    value = "N/A",
                     label = "Track health",
                     tone = Tone.HEALTHY,
                     modifier = Modifier.weight(1f),
                     onClick = onNavigateTrackHealth
                 )
                 MetricTile(
-                    value = "18",
+                    value = "N/A",
                     label = "Active cracks",
                     tone = Tone.CRITICAL,
                     modifier = Modifier.weight(1f),
                     onClick = onNavigateCrackAnalytics
                 )
                 MetricTile(
-                    value = "98.5%",
+                    value = "N/A",
                     label = "Coverage",
                     tone = Tone.INFO,
                     modifier = Modifier.weight(1f),
@@ -1340,19 +1343,19 @@ fun AnalyticsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 MetricTile(
-                    value = "48.6 MGT",
+                    value = "N/A",
                     label = "Load Tonnage",
                     tone = Tone.HEALTHY,
                     modifier = Modifier.weight(1f)
                 )
                 MetricTile(
-                    value = "1,420 h",
+                    value = "N/A",
                     label = "MTBF",
                     tone = Tone.HEALTHY,
                     modifier = Modifier.weight(1f)
                 )
                 MetricTile(
-                    value = "0.68 Y/Q",
+                    value = "N/A",
                     label = "Peak Nadal",
                     tone = Tone.WARNING,
                     modifier = Modifier.weight(1f),
@@ -1399,7 +1402,7 @@ fun AnalyticsScreen(
             item {
                 RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                     Text(
-                        text = "DEFECT POPULATION BREAKDOWN (18 TOTAL)",
+                        text = "DEFECT POPULATION BREAKDOWN",
                         style = MaterialTheme.typography.labelSmall,
                         color = colorScheme.primary,
                         fontWeight = FontWeight.Bold
@@ -1407,11 +1410,11 @@ fun AnalyticsScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     val defectCategories = listOf(
-                        Triple("Transverse Fissures", 42, Tone.CRITICAL),
-                        Triple("Squats & Rolling Contact Fatigue", 28, Tone.WARNING),
-                        Triple("Gauge Corner Head Checking", 18, Tone.WARNING),
-                        Triple("Bolt Hole & Web Fractures", 8, Tone.INFO),
-                        Triple("Thermite Weld HAZ Anomalies", 4, Tone.HEALTHY)
+                        Triple("Transverse Fissures", 0, Tone.CRITICAL),
+                        Triple("Squats & Rolling Contact Fatigue", 0, Tone.WARNING),
+                        Triple("Gauge Corner Head Checking", 0, Tone.WARNING),
+                        Triple("Bolt Hole & Web Fractures", 0, Tone.INFO),
+                        Triple("Thermite Weld HAZ Anomalies", 0, Tone.HEALTHY)
                     )
 
                     defectCategories.forEach { (cat, pct, tone) ->
@@ -1460,12 +1463,12 @@ fun AnalyticsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    DetailRow(label = "Stress Intensity Range (ΔK)", value = "18.4 MPa√m")
-                    DetailRow(label = "Cyclic Growth Rate (da/dN)", value = "2.40 × 10⁻⁷ mm/cycle")
-                    DetailRow(label = "Linear Growth Rate", value = "+0.71 mm/day")
-                    DetailRow(label = "Cycles to Critical Fracture", value = "1,840 wheelsets")
-                    DetailRow(label = "Estimated Time to Break", value = "72 hours (at 14+320)")
-                    DetailRow(label = "Critical Fracture Toughness (K_IC)", value = "38.0 MPa√m")
+                    DetailRow(label = "Stress Intensity Range (ΔK)", value = "N/A")
+                    DetailRow(label = "Cyclic Growth Rate (da/dN)", value = "N/A")
+                    DetailRow(label = "Linear Growth Rate", value = "N/A")
+                    DetailRow(label = "Cycles to Critical Fracture", value = "N/A")
+                    DetailRow(label = "Estimated Time to Break", value = "N/A")
+                    DetailRow(label = "Critical Fracture Toughness (K_IC)", value = "N/A")
                 }
             }
         }
@@ -1482,13 +1485,13 @@ fun AnalyticsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    DetailRow(label = "CWR Axial Thermal Stress", value = "+68.4 MPa (Tension)")
-                    DetailRow(label = "Stress Free Temperature (SFT)", value = "27.0°C Nominal")
-                    DetailRow(label = "Current Rail Surface Temp", value = "38.4°C (+11.4°C Delta)")
-                    DetailRow(label = "Dynamic Wheel Impact Load", value = "162.4 kN (Peak)")
-                    DetailRow(label = "Dynamic Track Gauge", value = "1,438.2 mm (+3.2mm variance)")
-                    DetailRow(label = "Vertical Cant Angle", value = "65 mm (Design: 68 mm)")
-                    DetailRow(label = "Sleeper Fastener Integrity", value = "96.8% Secured")
+                    DetailRow(label = "CWR Axial Thermal Stress", value = "N/A")
+                    DetailRow(label = "Stress Free Temperature (SFT)", value = "N/A")
+                    DetailRow(label = "Current Rail Surface Temp", value = "N/A")
+                    DetailRow(label = "Dynamic Wheel Impact Load", value = "N/A")
+                    DetailRow(label = "Dynamic Track Gauge", value = "N/A")
+                    DetailRow(label = "Vertical Cant Angle", value = "N/A")
+                    DetailRow(label = "Sleeper Fastener Integrity", value = "N/A")
                 }
             }
         }
@@ -1505,12 +1508,12 @@ fun AnalyticsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    DetailRow(label = "Section 14 (North Loop)", value = "92 Risk · 8 Defects · TSR 25")
-                    DetailRow(label = "Section 08 (South Yard)", value = "68 Risk · 5 Defects · TSR 40")
-                    DetailRow(label = "Section 03 (East Junction)", value = "44 Risk · 3 Defects · Clear")
-                    DetailRow(label = "Section 01 (West Cut)", value = "12 Risk · 2 Defects · Nominal")
-                    DetailRow(label = "Maintenance SLA On-Time", value = "94.8% (Target ≥ 90%)")
-                    DetailRow(label = "Mean Time to Repair (MTTR)", value = "4.2 Hours")
+                    DetailRow(label = "Section 14 (North Loop)", value = "N/A")
+                    DetailRow(label = "Section 08 (South Yard)", value = "N/A")
+                    DetailRow(label = "Section 03 (East Junction)", value = "N/A")
+                    DetailRow(label = "Section 01 (West Cut)", value = "N/A")
+                    DetailRow(label = "Maintenance SLA On-Time", value = "N/A")
+                    DetailRow(label = "Mean Time to Repair (MTTR)", value = "N/A")
                 }
             }
         }
@@ -1552,12 +1555,12 @@ fun AnalyticsScreen(
 fun TrackHealthScreen(onBack: () -> Unit) {
     val colorScheme = MaterialTheme.colorScheme
     val months = listOf(
-        Pair("Jan", 55.4f),
-        Pair("Feb", 68.2f),
-        Pair("Mar", 79.1f),
-        Pair("Apr", 86.3f),
-        Pair("May", 91.0f),
-        Pair("Jun", 94.2f)
+        Pair("Jan", 0f),
+        Pair("Feb", 0f),
+        Pair("Mar", 0f),
+        Pair("Apr", 0f),
+        Pair("May", 0f),
+        Pair("Jun", 0f)
     )
 
     LazyColumn(
@@ -1578,7 +1581,7 @@ fun TrackHealthScreen(onBack: () -> Unit) {
         item {
             RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                 Text(
-                    text = "CURRENT NETWORK HEALTH: 94.2%",
+                    text = "CURRENT NETWORK HEALTH: N/A",
                     style = MaterialTheme.typography.labelSmall,
                     color = toneColor(Tone.HEALTHY, LocalIsDark.current),
                     fontWeight = FontWeight.Bold

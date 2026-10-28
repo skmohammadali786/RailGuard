@@ -612,9 +612,9 @@ fun CrackMeasurementScreen(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 MetricRow("Crack Surface Aperture", defect?.estimatedLength ?: "0.00 mm (Nominal)")
-                MetricRow("Estimated Depth Profile", if (defect != null) "8.90 mm (Ultrasonic Verified)" else "Nominal Profile")
+                MetricRow("Estimated Depth Profile", if (defect != null) "${defect.estimatedLength} (Ultrasonic)" else "Nominal Profile")
                 MetricRow("Monitored Chainage", defect?.chainageCoordinate ?: "Active Track Corridor")
-                MetricRow("Stress Concentration K_t", if (defect != null) "3.48" else "1.00 (Standard)")
+                MetricRow("Stress Concentration K_t", if (defect != null) "K_t: N/A (requires sensor data)" else "1.00 (Standard)")
 
                 Spacer(modifier = Modifier.height(14.dp))
                 if (transmitMsg != null) {
@@ -630,7 +630,7 @@ fun CrackMeasurementScreen(
                         scope.launch {
                             RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "CRACK_MEASUREMENT",
-                                mapOf("defectId" to (defect?.id ?: "NOMINAL"), "aperture" to (defect?.estimatedLength ?: "0.0mm"), "kt" to 3.48)
+                                mapOf("defectId" to (defect?.id ?: "NOMINAL"), "aperture" to (defect?.estimatedLength ?: "0.0mm"), "kt" to "K_t: N/A (requires sensor data)")
                             )
                             isTransmitting = false
                             transmitMsg = "Measurement synced to Cloud Telemetry ✓"
@@ -667,13 +667,13 @@ fun GrowthAnalysisScreen(
                 Text("Simulated Cycles To Critical Limit", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(8.dp))
                 if (defect != null) {
-                    Text("Under 25-ton axle load, estimated critical threshold reached in 1,200 freight cycles (~14 operational days).", fontSize = 12.sp)
+                    Text("Awaiting telemetry data", fontSize = 12.sp)
                 } else {
                     Text("No active crack anomalies detected. Track rail profile is within nominal fatigue life limits.", fontSize = 12.sp)
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-                MetricRow("Delta-K Stress Intensity", if (defect != null) "24.6 MPa·m^(1/2)" else "Nominal (< 5 MPa·m^(1/2))")
-                MetricRow("Fatigue Life Remaining", if (defect != null) "14 Days at Current Tonnage" else "Standard Service Cycle")
+                MetricRow("Delta-K Stress Intensity", if (defect != null) "Awaiting telemetry data" else "Nominal (< 5 MPa·m^(1/2))")
+                MetricRow("Fatigue Life Remaining", if (defect != null) "Awaiting telemetry data" else "Standard Service Cycle")
                 MetricRow("Speed Restriction Required", if (defect != null && defect.tone == Tone.CRITICAL) "Yes (Max 25 km/h)" else "No (Nominal Speed)")
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -690,7 +690,7 @@ fun GrowthAnalysisScreen(
                         scope.launch {
                             RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "FATIGUE_GROWTH_PREDICTION",
-                                mapOf("defectId" to (defect?.id ?: "NOMINAL"), "deltaK" to 24.6, "remainingDays" to 14)
+                                mapOf("defectId" to (defect?.id ?: "NOMINAL"), "deltaK" to "N/A", "remainingDays" to "N/A")
                             )
                             isTransmitting = false
                             transmitMsg = "Fatigue simulation archived in Cloud DB ✓"
@@ -780,8 +780,8 @@ fun ObjectDetectionScreen(
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                MetricRow("Rail Head & Web", "Detected (99% conf)")
-                MetricRow("Sleeper Concrete Block", "Detected (96% conf)")
+                MetricRow("Rail Head & Web", "Detected (${defect?.aiConfidencePercent ?: 0}% conf)")
+                MetricRow("Sleeper Concrete Block", "N/A")
                 MetricRow("Pandrol Fastener Clips", if (defect != null) "Inspected (${defect.title})" else "Nominal Clearance")
                 MetricRow("Ballast Bed Level", "Normal Clearance")
 
@@ -799,7 +799,7 @@ fun ObjectDetectionScreen(
                         scope.launch {
                             RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "AI_OBJECT_SEGMENTATION",
-                                mapOf("railheadConf" to 0.99, "sleeperConf" to 0.96)
+                                mapOf("railheadConf" to "${defect?.aiConfidencePercent ?: 0}%", "sleeperConf" to "N/A")
                             )
                             isTransmitting = false
                             transmitMsg = "Segmentation telemetry saved to Cloud ✓"
@@ -833,10 +833,10 @@ fun AlignmentAnalysisScreen(
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                MetricRow("Standard Track Gauge", "1435.0 mm")
-                MetricRow("Current Measured Gauge", "1435.4 mm (Nominal)")
-                MetricRow("Cross-Level Cant", "1.2 mm (Within Tolerance)")
-                MetricRow("Twist over 3m Base", "0.8 mm/m (Safe)")
+                MetricRow("Standard Track Gauge", "N/A")
+                MetricRow("Current Measured Gauge", "Awaiting sensor data")
+                MetricRow("Cross-Level Cant", "Awaiting sensor data")
+                MetricRow("Twist over 3m Base", "Awaiting sensor data")
 
                 Spacer(modifier = Modifier.height(14.dp))
                 if (transmitMsg != null) {
@@ -852,7 +852,7 @@ fun AlignmentAnalysisScreen(
                         scope.launch {
                             RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "TRACK_ALIGNMENT_GEOMETRY",
-                                mapOf("gauge" to 1435.4, "cant" to 1.2, "twist" to 0.8)
+                                mapOf("gauge" to "N/A", "cant" to "N/A", "twist" to "N/A")
                             )
                             isTransmitting = false
                             transmitMsg = "Track geometry saved to Cloud DB ✓"
@@ -870,7 +870,7 @@ fun EngineerVerificationScreen(onSigned: () -> Unit, onBack: () -> Unit) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     var engineerNotes by remember { mutableStateOf("") }
-    var signedBy by remember { mutableStateOf(RailGuardFirebaseService.instance.currentUser?.email?.substringBefore("@")?.replace(".", " ")?.replaceFirstChar { it.uppercase() } ?: "Lead Track Inspector") }
+    var signedBy by remember { mutableStateOf(RailGuardFirebaseService.instance.currentUser?.email?.substringBefore("@")?.replace(".", " ")?.replaceFirstChar { it.uppercase() } ?: "Unknown") }
 
     Column(
         modifier = Modifier
@@ -967,8 +967,8 @@ fun CommentsScreen(onBack: () -> Unit) {
                         comments.add(0, textToSave)
                         newComment = ""
                         scope.launch {
-                            val author = RailGuardFirebaseService.instance.currentUser?.email ?: "Lead Inspector"
-                            RailGuardFirebaseService.instance.saveComment("DEF-LOG", author, textToSave)
+                            val author = RailGuardFirebaseService.instance.currentUser?.email ?: "Inspector"
+                            RailGuardFirebaseService.instance.saveComment("N/A", author, textToSave)
                         }
                     }
                 }) {

@@ -854,8 +854,8 @@ class RailGuardFirebaseService private constructor() {
                     put("action", action)
                     put("details", details)
                     put("timestamp", System.currentTimeMillis())
-                    put("actorEmail", currentUser?.email ?: "inspector@railguard.io")
-                    put("actorName", currentUser?.displayName ?: "Field Inspector")
+                    put("actorEmail", currentUser?.email ?: "unknown")
+                    put("actorName", currentUser?.displayName ?: "Unknown Inspector")
                 }
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "PUT"
@@ -1064,7 +1064,7 @@ class RailGuardFirebaseService private constructor() {
 
                 val payload = JSONObject().apply {
                     put("syncedAt", System.currentTimeMillis())
-                    put("syncedBy", currentUser?.email ?: "field-inspector@railguard.io")
+                    put("syncedBy", currentUser?.email ?: "unknown")
                     put("appVersion", "1.0.0")
 
                     // Serialize defects
@@ -1465,7 +1465,7 @@ class RailGuardFirebaseService private constructor() {
                     put("activeTsrSpeedKmH", tsrSpeedKmH)
                     put("reason", reason)
                     put("issuedAt", System.currentTimeMillis())
-                    put("issuedBy", currentUser?.email ?: "ground-safety-controller")
+                    put("issuedBy", currentUser?.email ?: "unknown")
                 }
 
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -1512,7 +1512,7 @@ class RailGuardFirebaseService private constructor() {
                     put("satellitesTracked", satellites)
                     put("chainage", chainage)
                     put("timestamp", System.currentTimeMillis())
-                    put("inspector", currentUser?.email ?: "inspector@railguard.io")
+                    put("inspector", currentUser?.email ?: "unknown")
                 }
 
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -1566,7 +1566,7 @@ class RailGuardFirebaseService private constructor() {
                     put("defectDetected", defectDetected)
                     put("notes", notes)
                     put("capturedAt", System.currentTimeMillis())
-                    put("inspector", currentUser?.email ?: "field-inspector")
+                    put("inspector", currentUser?.email ?: "unknown")
                     put("resolution", "4K-HDR (3840x2160)")
                     put("exposureMode", "Ultra-High Frequency Rail Shutter")
                     if (storageResult != null) {
@@ -1690,7 +1690,7 @@ class RailGuardFirebaseService private constructor() {
                     put("id", reportId)
                     put("title", title)
                     put("status", "PDF_UPLOADED")
-                    put("inspector", currentUser?.email ?: "field-inspector")
+                    put("inspector", currentUser?.email ?: "unknown")
                     put("generatedAt", System.currentTimeMillis())
                     put("storagePath", upload.storagePath)
                     put("downloadUrl", upload.downloadUrl)
@@ -1735,7 +1735,7 @@ class RailGuardFirebaseService private constructor() {
                 val json = JSONObject().apply {
                     put("type", analysisType)
                     put("timestamp", timestamp)
-                    put("operator", currentUser?.email ?: "ai-operator")
+                    put("operator", currentUser?.email ?: "unknown")
                     metrics.forEach { (k, v) -> put(k, v) }
                 }
 
@@ -1766,7 +1766,7 @@ class RailGuardFirebaseService private constructor() {
                 val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/settings.json$authParam"
                 val json = JSONObject().apply {
                     put("updatedAt", System.currentTimeMillis())
-                    put("userEmail", currentUser?.email ?: "inspector@railguard.io")
+                    put("userEmail", currentUser?.email ?: "unknown")
                     settingsMap.forEach { (k, v) -> put(k, v) }
                 }
 
@@ -1871,7 +1871,7 @@ class RailGuardFirebaseService private constructor() {
                     put("query", query)
                     put("response", response)
                     put("timestamp", System.currentTimeMillis())
-                    put("user", currentUser?.email ?: "rail-engineer")
+                    put("user", currentUser?.email ?: "unknown")
                 }
 
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -1927,11 +1927,11 @@ class RailGuardFirebaseService private constructor() {
 
     suspend fun saveReportPackage(title: String, hash: String, details: Map<String, Any?>) {
         val repId = "REP-${System.currentTimeMillis() % 100000}"
-        val userDisplay = currentUser?.displayName ?: "E. Chen (Senior Permanent Way)"
+        val userDisplay = currentUser?.displayName ?: "Unknown Inspector"
         saveReportPackage(
             reportId = repId,
             title = title,
-            section = "Section 14 North Loop",
+            section = "Unknown Section",
             inspector = userDisplay,
             status = "Signed & Sealed (Hash: ${hash.take(8)}...)"
         )
@@ -1962,7 +1962,7 @@ class RailGuardFirebaseService private constructor() {
                     put("axleSpeedKmh", axleSpeedKmh.toDouble())
                     put("chainage", chainage)
                     put("status", status)
-                    put("hardware", "ESP32-WROOM-32 / Piezo UT / ADXL345 / PT100")
+                    put("hardware", "Raspberry Pi sensor gateway")
                     put("timestamp", System.currentTimeMillis())
                 }
 
@@ -2009,7 +2009,7 @@ class RailGuardFirebaseService private constructor() {
                 val json = JSONObject().apply {
                     put("command", command)
                     put("issuedAt", System.currentTimeMillis())
-                    put("operator", currentUser?.displayName ?: "E. Chen")
+                    put("operator", currentUser?.displayName ?: "Unknown")
                 }
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "PUT"
@@ -2155,7 +2155,7 @@ class RailGuardFirebaseService private constructor() {
                     put("confidence", confidence.toDouble())
                     put("inputs", JSONObject(telemetryInputs))
                     put("evaluatedAt", System.currentTimeMillis())
-                    put("evaluator", currentUser?.displayName ?: "RailVision-DeepTrack Neural Core")
+                    put("evaluator", currentUser?.displayName ?: "AI Evaluator")
                 }
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "PUT"

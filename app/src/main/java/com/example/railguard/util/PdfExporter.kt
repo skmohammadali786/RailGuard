@@ -74,8 +74,8 @@ object PdfExporter {
         canvas.drawText("Inspector: $inspector", 40f, y, textPaint)
         canvas.drawText("Generated: $dateStr", 320f, y, textPaint)
         y += 18f
-        canvas.drawText("Inspection Unit: Automated Track Patrol", 40f, y, textPaint)
-        canvas.drawText("Corridor: Active Patrol Sector", 320f, y, textPaint)
+        canvas.drawText("Inspection Unit: Field Patrol", 40f, y, textPaint)
+        canvas.drawText("Corridor: Field Sector", 320f, y, textPaint)
         y += 24f
         canvas.drawLine(40f, y, 555f, y, linePaint)
         y += 32f
@@ -118,7 +118,7 @@ object PdfExporter {
 
         canvas.drawLine(40f, y, 555f, y, linePaint)
         y += 24f
-        canvas.drawText("Cryptographic Verification Signature: SHA-256 [e3b0c44298fc1c149afbf4c8996fb92427ae41e4]", 40f, y, textPaint)
+        canvas.drawText("Cryptographic Verification Signature: SHA-256 [N/A]", 40f, y, textPaint)
         y += 16f
         canvas.drawText("RailGuard Automated Inspection System - Safety Standard Compliant (EN 13848)", 40f, y, subPaint)
 

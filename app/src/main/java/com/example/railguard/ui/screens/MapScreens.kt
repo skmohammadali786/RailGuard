@@ -128,7 +128,7 @@ fun MapScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "SECTOR 4B LIVE GPS GEO-FENCE",
+                            text = "LIVE GPS GEO-FENCE",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -140,7 +140,7 @@ fun MapScreen(
                                 .background(Color(0xFF16A34A).copy(alpha = 0.2f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            Text("DGPS RTK LOCK · 1cm", fontSize = 10.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                            Text("GPS STATUS: AWAITING LOCK", fontSize = 10.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -158,7 +158,7 @@ fun MapScreen(
                             .padding(12.dp)
                     ) {
                         Column {
-                            Text("● North Line Trackway (KM 38 → KM 44)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Active Corridor (Awaiting telemetry)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             Text(if (defects.isNotEmpty()) "Monitored Segment: ${defects.first().chainageCoordinate}" else "Active Track Corridor: Nominal Line Speed", fontSize = 11.sp, color = Color(0xFF0284C7))
                         }
 
@@ -324,7 +324,7 @@ fun RiskHeatmapScreen(
                     Text("$criticalCount critical anomaly locations requiring immediate track team deployment.", fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(12.dp))
                     MetricRow("Critical Anomalies", "$criticalCount active")
-                    MetricRow("Recommended Speed Limit", "25 km/h Emergency Slow Order")
+                    MetricRow("Recommended Speed Limit", "Emergency Slow Order Active")
                 } else {
                     Text("Corridor Hazard Index: Nominal", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF16A34A))
                     Spacer(modifier = Modifier.height(8.dp))
@@ -541,10 +541,10 @@ fun GpsScreen(onBack: () -> Unit) {
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 MetricRow("Constellations", "GPS + GLONASS + Galileo")
-                MetricRow("Tracked Satellites", "18 In View / 14 Used")
-                MetricRow("HDOP / VDOP", "0.78 / 1.12 (High Precision)")
-                MetricRow("Ground Speed", "14.2 km/h (Cart Inspection Speed)")
-                MetricRow("Magnetic Heading", "142° SE")
+                MetricRow("Tracked Satellites", "Awaiting GPS")
+                MetricRow("HDOP / VDOP", "N/A")
+                MetricRow("Ground Speed", "Awaiting GPS")
+                MetricRow("Magnetic Heading", "N/A")
                 MetricRow("Chainage Segment", "Active Corridor Trackway")
                 MetricRow("Telemetry Packets", "$broadcastPushedCount transmitted")
 

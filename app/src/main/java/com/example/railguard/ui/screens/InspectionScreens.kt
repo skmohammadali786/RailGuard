@@ -526,7 +526,7 @@ fun InspectionSummaryScreen(onDone: () -> Unit, onBack: () -> Unit) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Patrol Complete", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF16A34A))
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Track corridor sweep completed with zero optical dropout. Inspection telemetry verified and saved.", fontSize = 13.sp)
+                Text("Inspection completed. Review cloud records for details.", fontSize = 13.sp)
                 Spacer(modifier = Modifier.height(16.dp))
                 PrimaryButton(title = "Done & Return Home", onClick = onDone)
             }
@@ -647,7 +647,7 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("HIGH-RES CAMERA CAPTURE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text("4K-HDR Optical Railhead Sensor", color = Color(0xFF38BDF8), fontSize = 10.sp)
+                    Text("Optical Sensor", color = Color(0xFF38BDF8), fontSize = 10.sp)
                 }
                 Box(modifier = Modifier.size(24.dp))
             }

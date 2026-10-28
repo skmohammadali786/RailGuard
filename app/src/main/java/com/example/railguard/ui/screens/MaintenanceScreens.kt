@@ -412,7 +412,7 @@ fun TaskDetailsScreen(
                 DetailRow(label = "Assignee", value = task.assignee)
                 DetailRow(label = "Due Date", value = task.due)
                 DetailRow(label = "Torque Requirement", value = task.torque)
-                DetailRow(label = "Restriction", value = "25 km/h restriction bound")
+                DetailRow(label = "Restriction", value = "TSR bound (see task details)")
             }
         }
 
@@ -422,7 +422,7 @@ fun TaskDetailsScreen(
             ListRow(
                 icon = Icons.Default.Compare,
                 title = "Before / After Evidence",
-                subtitle = "Verify sleeper clip seating & torque 220 Nm",
+                subtitle = "Verify sleeper clip seating & torque: ${task.torque}",
                 trailing = "Review",
                 tone = Tone.INFO,
                 onClick = onOpenBeforeAfter
@@ -430,7 +430,7 @@ fun TaskDetailsScreen(
             ListRow(
                 icon = Icons.Default.VerifiedUser,
                 title = "Sign-Off & Restriction Release",
-                subtitle = "Release 25 km/h limit after field completion",
+                subtitle = "Release speed restriction after field completion",
                 trailing = "Sign",
                 tone = Tone.HEALTHY,
                 onClick = onOpenVerify
@@ -627,7 +627,7 @@ fun MaintenanceAnalyticsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 MetricTile(
-                    value = if (tasks.isEmpty()) "0.0h" else "4.2h",
+                    value = "N/A",
                     label = "Mean fix time",
                     tone = Tone.HEALTHY,
                     modifier = Modifier.weight(1f)
@@ -676,7 +676,7 @@ fun MaintenanceAnalyticsScreen(
                         scope.launch {
                             com.example.railguard.data.RailGuardFirebaseService.instance.recordAiAnalysis(
                                 "MAINTENANCE_KPIS",
-                                mapOf("meanFixTimeHours" to 18.4, "closedInSla" to 0.91, "monthlyTickets" to 38)
+                                mapOf("totalTasks" to tasks.size, "criticalTasks" to criticalCount, "closedInSla" to slaAdherence)
                             )
                             isSyncingKpi = false
                             kpiSyncMsg = "KPI metrics persisted to Cloud DB ✓"

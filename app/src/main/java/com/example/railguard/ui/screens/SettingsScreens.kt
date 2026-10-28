@@ -652,7 +652,7 @@ fun AboutScreen(onBack: () -> Unit) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("RailGuard Autonomous Track AI", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0284C7))
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("Version 2.4.0 (Enterprise Hardware Build)", fontSize = 12.sp, color = Color.Gray)
+                Text("Version 1.0.0 (Connected to Firebase Cloud)", fontSize = 12.sp, color = Color.Gray)
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("Enterprise mobile inspection platform for automated track surveillance, flaw detection, and predictive maintenance.", fontSize = 12.sp)
             }
