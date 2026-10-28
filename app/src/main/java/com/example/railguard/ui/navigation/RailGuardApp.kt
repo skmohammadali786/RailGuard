@@ -362,7 +362,17 @@ fun RailGuardApp() {
                             },
                             onViewObservations = { navigateTo(Screen.AllObservations.route) },
                             onOpenDefectMap = { navigateTo(Screen.DefectMap.route) },
-                            onOpenCrackGrowth = { navigateTo(Screen.GrowthAnalysis.route) }
+                            onOpenCrackGrowth = { navigateTo(Screen.GrowthAnalysis.route) },
+                            onAddDefect = { newDefect ->
+                                defects.add(0, newDefect)
+                                scope.launch {
+                                    firebaseService.uploadDefectToFirebase(newDefect)
+                                    firebaseService.logSafetyAuditEvent(
+                                        action = "DEFECT_LOGGED",
+                                        details = "Defect ${newDefect.id} logged on ${newDefect.section}"
+                                    )
+                                }
+                            }
                         )
                         Screen.Map.route -> MapScreen(
                             onNavigateToDefectMap = { navigateTo(Screen.DefectMap.route) },

@@ -45,7 +45,12 @@ fun HardwareTelemetryScreen(onBack: () -> Unit) {
         val latest = service.fetchLatestSensorTelemetry()
         if (latest != null) {
             telemetry = latest
-            statusMessage = "Live packet received from ${latest.nodeId}"
+            val ageSec = if (latest.timestamp > 0L) (System.currentTimeMillis() - latest.timestamp) / 1000L else 0L
+            statusMessage = if (ageSec > 30L) {
+                "⚠️ Telemetry Stale: Last seen ${ageSec}s ago from ${latest.nodeId}"
+            } else {
+                "Live Telemetry Stream Active: ${latest.nodeId} (${latest.status}) ✓"
+            }
         } else {
             statusMessage = "No live hardware packet available in Firebase"
         }
@@ -60,6 +65,8 @@ fun HardwareTelemetryScreen(onBack: () -> Unit) {
     }
 
     val current = telemetry
+    val isStale = current != null && current.timestamp > 0L && (System.currentTimeMillis() - current.timestamp > 30_000L)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -74,7 +81,22 @@ fun HardwareTelemetryScreen(onBack: () -> Unit) {
 
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp)) {
-                Text(statusMessage, fontSize = 12.sp, color = Color(0xFF0284C7))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    Text(
+                        statusMessage,
+                        fontSize = 12.sp,
+                        color = if (isStale) Color(0xFFEAB308) else Color(0xFF0284C7),
+                        modifier = Modifier.weight(1f)
+                    )
+                    com.example.railguard.components.StatusPill(
+                        label = if (current == null) "OFFLINE" else if (isStale) "STALE" else "LIVE",
+                        tone = if (current == null) com.example.railguard.model.Tone.NEUTRAL else if (isStale) com.example.railguard.model.Tone.WARNING else com.example.railguard.model.Tone.HEALTHY
+                    )
+                }
                 Spacer(modifier = Modifier.height(10.dp))
                 if (current == null) {
                     Text(

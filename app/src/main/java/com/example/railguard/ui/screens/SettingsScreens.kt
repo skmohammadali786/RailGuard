@@ -722,6 +722,45 @@ fun NotificationsScreen(
     ) {
         SubScreenHeader(title = "Dispatch & System Alerts", subtitle = "${notifications.size} notifications", onBack = onBack)
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (notifications.isEmpty()) {
+            RailCard(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                Column(
+                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF16A34A).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF16A34A),
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "No System Alerts",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "All corridor sections and telemetry streams are nominal. Emergency slow orders or track hazard alerts will appear here.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
+
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(notifications, key = { it.id }) { notif ->
                 RailCard(modifier = Modifier.fillMaxWidth()) {

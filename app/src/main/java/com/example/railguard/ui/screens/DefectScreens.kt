@@ -42,11 +42,13 @@ fun DefectsListScreen(
     onSelectDefect: (Defect) -> Unit,
     onViewObservations: () -> Unit,
     onOpenDefectMap: () -> Unit,
-    onOpenCrackGrowth: () -> Unit
+    onOpenCrackGrowth: () -> Unit,
+    onAddDefect: ((Defect) -> Unit)? = null
 ) {
     val isDark = LocalIsDark.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") }
+    var showAddDefectDialog by remember { mutableStateOf(false) }
 
     val filteredDefects = defects.filter {
         val matchesSearch = it.title.contains(searchQuery, ignoreCase = true) ||
@@ -61,6 +63,81 @@ fun DefectsListScreen(
         matchesSearch && matchesFilter
     }
 
+    if (showAddDefectDialog) {
+        var newTitle by remember { mutableStateOf("") }
+        var newSection by remember { mutableStateOf("") }
+        var newSeverity by remember { mutableStateOf("CRITICAL") }
+        var newLength by remember { mutableStateOf("") }
+        var newDetail by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showAddDefectDialog = false },
+            title = { Text("Log Track Anomaly") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = newTitle,
+                        onValueChange = { newTitle = it },
+                        label = { Text("Defect Title (e.g. Transverse Fissure)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newSection,
+                        onValueChange = { newSection = it },
+                        label = { Text("Corridor / Chainage (e.g. KM 14+320)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newLength,
+                        onValueChange = { newLength = it },
+                        label = { Text("Crack Length / Depth (e.g. 24 mm)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newDetail,
+                        onValueChange = { newDetail = it },
+                        label = { Text("Prescribed Action / Notes") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newTitle.isNotBlank() && newSection.isNotBlank()) {
+                            val newDefect = Defect(
+                                id = "DEF-${System.currentTimeMillis() % 10000}",
+                                title = newTitle.trim(),
+                                section = newSection.trim(),
+                                score = if (newSeverity == "CRITICAL") "Risk 90/100" else "Risk 50/100",
+                                tone = if (newSeverity == "CRITICAL") Tone.CRITICAL else Tone.WARNING,
+                                time = "Just now",
+                                detail = newDetail.ifBlank { "Field logged anomaly" },
+                                estimatedLength = newLength.ifBlank { "Unknown" },
+                                chainageCoordinate = newSection.trim(),
+                                aiConfidencePercent = 95,
+                                aiPrescribedAction = newDetail.ifBlank { "Inspect and verify" }
+                            )
+                            onAddDefect?.invoke(newDefect)
+                            showAddDefectDialog = false
+                        }
+                    }
+                ) {
+                    Text("Save to Cloud")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showAddDefectDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -69,10 +146,27 @@ fun DefectsListScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            ScreenHeader(
-                title = "Defect Registry",
-                subtitle = "${defects.size} active anomalies detected across corridors"
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    ScreenHeader(
+                        title = "Defect Registry",
+                        subtitle = "${defects.size} active anomalies detected across corridors"
+                    )
+                }
+                Button(
+                    onClick = { showAddDefectDialog = true },
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Log Defect", fontSize = 12.sp)
+                }
+            }
         }
 
         item {

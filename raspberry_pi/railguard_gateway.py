@@ -68,13 +68,19 @@ def number(packet: Dict[str, Any], key: str, default: float = 0.0) -> float:
 
 def normalize_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
     now_ms = int(time.time() * 1000)
+    ut = packet.get("ultrasonicDepthMm") or packet.get("ut_depth_mm") or packet.get("ultrasonic_mm") or 0.0
+    vib = packet.get("vibrationG") or packet.get("vib_g") or packet.get("vibration_g") or 0.0
+    temp = packet.get("railTempC") or packet.get("rail_temp_c") or packet.get("temp_c") or 0.0
+    speed = packet.get("axleSpeedKmh") or packet.get("speed_kmh") or packet.get("train_speed_kmh") or 0.0
+    chainage = packet.get("chainage") or packet.get("milepost") or "--"
+
     return {
-        "nodeId": str(packet.get("nodeId", DEVICE_ID)),
-        "ultrasonicDepthMm": number(packet, "ultrasonicDepthMm"),
-        "vibrationG": number(packet, "vibrationG"),
-        "railTempC": number(packet, "railTempC"),
-        "axleSpeedKmh": number(packet, "axleSpeedKmh"),
-        "chainage": str(packet.get("chainage", "--")),
+        "nodeId": str(packet.get("nodeId", packet.get("device_id", DEVICE_ID))),
+        "ultrasonicDepthMm": number({"v": ut}, "v"),
+        "vibrationG": number({"v": vib}, "v"),
+        "railTempC": number({"v": temp}, "v"),
+        "axleSpeedKmh": number({"v": speed}, "v"),
+        "chainage": str(chainage),
         "hardware": str(packet.get("hardware", "Raspberry Pi sensor gateway")),
         "status": str(packet.get("status", "ACTIVE_SYNC")),
         "timestamp": int(packet.get("timestamp", now_ms)),
@@ -93,10 +99,40 @@ def device_ref():
     )
 
 
+def history_ref():
+    return db.reference(
+        f"railguard/users/{USER_UID}/devices/{DEVICE_ID}/telemetry_history"
+    )
+
+
+def heartbeat_ref():
+    return db.reference(
+        f"railguard/users/{USER_UID}/devices/{DEVICE_ID}/heartbeat"
+    )
+
+
+def send_heartbeat(status: str = "ONLINE") -> None:
+    try:
+        heartbeat_ref().set({
+            "deviceId": DEVICE_ID,
+            "status": status,
+            "lastSeen": int(time.time() * 1000),
+            "serialPort": SERIAL_PORT,
+            "baudRate": BAUD_RATE
+        })
+    except Exception as e:
+        log.warning("Heartbeat sync warning: %s", e)
+
+
 def publish_telemetry(packet: Dict[str, Any]) -> None:
     normalized = normalize_packet(packet)
     telemetry_ref().set(normalized)
     device_ref().set(normalized)
+    try:
+        history_ref().push(normalized)
+    except Exception as e:
+        log.warning("History logging warning: %s", e)
+    send_heartbeat()
     log.info(
         "Published %s: depth=%.2fmm temp=%.2fC speed=%.2fkm/h chainage=%s",
         normalized["nodeId"],
@@ -139,21 +175,34 @@ class CommandCursor:
 
 
 def poll_commands(cursor: CommandCursor) -> None:
+    now_ms = int(time.time() * 1000)
+    MAX_COMMAND_AGE_MS = 600_000  # 10 minutes expiry window
+
     train_path = f"railguard/users/{USER_UID}/trains/{DEVICE_ID}/tsr"
     calibration_path = f"railguard/users/{USER_UID}/esp_sensors/{DEVICE_ID}/command"
 
     tsr = db.reference(train_path).get() or {}
     tsr_timestamp = int(tsr.get("issuedAt", 0) or 0)
-    if tsr_timestamp > cursor.last_tsr_timestamp:
-        apply_tsr(tsr)
-        acknowledge(train_path, tsr, "ACKNOWLEDGED_BY_GATEWAY")
+    tsr_status = tsr.get("gatewayStatus", "")
+    if tsr_timestamp > cursor.last_tsr_timestamp and tsr_status != "EXECUTED":
+        if now_ms - tsr_timestamp > MAX_COMMAND_AGE_MS:
+            log.warning("TSR command expired (issued %d ms ago)", now_ms - tsr_timestamp)
+            acknowledge(train_path, tsr, "EXPIRED")
+        else:
+            apply_tsr(tsr)
+            acknowledge(train_path, tsr, "EXECUTED")
         cursor.last_tsr_timestamp = tsr_timestamp
 
     calibration = db.reference(calibration_path).get() or {}
     calibration_timestamp = int(calibration.get("issuedAt", 0) or 0)
-    if calibration_timestamp > cursor.last_calibration_timestamp:
-        apply_calibration(calibration)
-        acknowledge(calibration_path, calibration, "ACKNOWLEDGED_BY_GATEWAY")
+    cal_status = calibration.get("gatewayStatus", "")
+    if calibration_timestamp > cursor.last_calibration_timestamp and cal_status != "EXECUTED":
+        if now_ms - calibration_timestamp > MAX_COMMAND_AGE_MS:
+            log.warning("Calibration command expired (issued %d ms ago)", now_ms - calibration_timestamp)
+            acknowledge(calibration_path, calibration, "EXPIRED")
+        else:
+            apply_calibration(calibration)
+            acknowledge(calibration_path, calibration, "EXECUTED")
         cursor.last_calibration_timestamp = calibration_timestamp
 
 
