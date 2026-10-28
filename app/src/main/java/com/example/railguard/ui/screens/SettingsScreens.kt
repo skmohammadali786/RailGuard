@@ -204,11 +204,11 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.DarkMode, contentDescription = null, tint = Color(0xFF38BDF8))
+                            Icon(Icons.Default.LightMode, contentDescription = null, tint = Color(0xFF0284C7))
                             Spacer(modifier = Modifier.width(12.dp))
-                            Text("Dark Mission Control Theme", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("Theme: High-Visibility Field Light Mode", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         }
-                        Switch(checked = isDarkMode, onCheckedChange = onToggleDarkMode)
+                        com.example.railguard.components.StatusPill(label = "ACTIVE", tone = com.example.railguard.model.Tone.HEALTHY)
                     }
 
                     SettingsRowTile(

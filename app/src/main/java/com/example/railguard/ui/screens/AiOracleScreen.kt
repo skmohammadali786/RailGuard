@@ -599,7 +599,10 @@ fun AiOracleScreen(
                                 color = colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
-                            StatusPill(label = "CRITICAL 72H", tone = Tone.CRITICAL)
+                            StatusPill(
+                                label = if (defects.isNotEmpty()) defects.first().score else "NOMINAL",
+                                tone = if (defects.isNotEmpty()) defects.first().tone else Tone.HEALTHY
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))

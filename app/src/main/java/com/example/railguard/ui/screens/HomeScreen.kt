@@ -262,12 +262,126 @@ fun HomeScreen(
             }
         }
 
+        // Dedicated Live Hardware & Sensor Telemetry Hub (No separate screen needed)
+        item {
+            val scope = rememberCoroutineScope()
+            var tsrFeedback by remember { mutableStateOf<String?>(null) }
+            val isStale = telemetry != null && telemetry.timestamp > 0L && (System.currentTimeMillis() - telemetry.timestamp > 30_000L)
+
+            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Sensors, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "LIVE TRACK SENSOR TELEMETRY",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF0284C7)
+                            )
+                        }
+                        StatusPill(
+                            label = if (telemetry == null) "OFFLINE" else if (isStale) "STALE" else "LIVE",
+                            tone = if (telemetry == null) Tone.NEUTRAL else if (isStale) Tone.WARNING else Tone.HEALTHY
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 4-Sensor Live Grid
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        MetricTile(
+                            value = telemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "Awaiting sensor",
+                            label = "Ultrasonic Depth",
+                            tone = if (telemetry != null && telemetry.ultrasonicDepthMm in 40.0..55.0) Tone.WARNING else Tone.HEALTHY,
+                            modifier = Modifier.weight(1f)
+                        )
+                        MetricTile(
+                            value = telemetry?.let { "${it.vibrationG} g" } ?: "Awaiting sensor",
+                            label = "Vibration Shock",
+                            tone = if (telemetry != null && telemetry.vibrationG > 0.2) Tone.WARNING else Tone.HEALTHY,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        MetricTile(
+                            value = telemetry?.let { "${it.railTempC} °C" } ?: "Awaiting sensor",
+                            label = "Rail Temp (CWR)",
+                            tone = if (telemetry != null && telemetry.railTempC > 45.0) Tone.WARNING else Tone.HEALTHY,
+                            modifier = Modifier.weight(1f)
+                        )
+                        MetricTile(
+                            value = telemetry?.let { "${it.axleSpeedKmh} km/h" } ?: "Awaiting sensor",
+                            label = "Patrol / Axle Speed",
+                            tone = Tone.INFO,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Quick TSR Interlock Dispatch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("TSR Speed Order:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurfaceVariant)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(25, 60, 120).forEach { speed ->
+                                OutlinedButton(
+                                    onClick = {
+                                        scope.launch {
+                                            com.example.railguard.data.RailGuardFirebaseService.instance.dispatchTsrToFirebase(
+                                                trainId = telemetry?.nodeId ?: "RPI-TRACK-01",
+                                                speedKmH = speed,
+                                                reason = "Operator speed order: $speed km/h"
+                                            )
+                                            tsrFeedback = "TSR $speed km/h sent to hardware ✓"
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = if (speed == 25) Color(0xFFDC2626) else Color(0xFF0284C7)
+                                    )
+                                ) {
+                                    Text("$speed", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    if (tsrFeedback != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(tsrFeedback ?: "", fontSize = 11.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
         // Network Pulse
         item {
             SectionLabel(
                 title = "NETWORK PULSE",
-                action = "Live hardware",
-                onAction = { onNavigate("train_connection") }
+                action = "View all",
+                onAction = { onNavigate("defects") }
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -513,10 +627,10 @@ fun HomeScreen(
                     modifier = Modifier.weight(1f)
                 )
                 WorkspaceTile(
-                    title = "Hardware & Pi",
-                    subtitle = "IoT telemetry & TSR",
+                    title = "Live Patrol",
+                    subtitle = "Camera & sensor sweep",
                     icon = Icons.Default.Sensors,
-                    onClick = { onNavigate("train_connection") },
+                    onClick = { onNavigate("live_inspection") },
                     modifier = Modifier.weight(1f)
                 )
                 WorkspaceTile(

@@ -365,29 +365,9 @@ fun LiveInspectionScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("INSPECTION", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
-                        Text(
-                            inspection.status,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF4ADE80)
-                        )
-                    }
-                    Column {
-                        Text("CHAINAGE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
-                        Text(
-                            telemetry?.chainage ?: "Unknown",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF38BDF8)
-                        )
-                    }
-                    Column {
                         Text("ULTRASONIC", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
                         Text(
-                            telemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "Unknown",
+                            telemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "--",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -395,13 +375,33 @@ fun LiveInspectionScreen(
                         )
                     }
                     Column {
-                        Text("BACKEND", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text("VIBRATION", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
                         Text(
-                            if (telemetry != null && firebaseService.isConnectedToFirebase) "ONLINE" else "WAITING",
+                            telemetry?.let { "${it.vibrationG} g" } ?: "--",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFA78BFA)
+                            color = Color(0xFF4ADE80)
+                        )
+                    }
+                    Column {
+                        Text("RAIL TEMP", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text(
+                            telemetry?.let { "${it.railTempC} °C" } ?: "--",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFFFB923C)
+                        )
+                    }
+                    Column {
+                        Text("CHAINAGE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text(
+                            telemetry?.chainage ?: "--",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFF38BDF8)
                         )
                     }
                 }

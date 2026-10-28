@@ -44,14 +44,13 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun RailGuardTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-
-    CompositionLocalProvider(LocalIsDark provides darkTheme) {
+    // Permanently Light Mode across the entire application
+    CompositionLocalProvider(LocalIsDark provides false) {
         MaterialTheme(
-            colorScheme = colorScheme,
+            colorScheme = LightColorScheme,
             typography = Typography,
             content = content
         )

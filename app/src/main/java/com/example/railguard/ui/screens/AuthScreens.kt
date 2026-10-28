@@ -523,7 +523,11 @@ fun LoginScreen(
                                         },
                                         onError = { err ->
                                             isLoading = false
-                                            errorMessage = err
+                                            errorMessage = if (err.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) || err.contains("EMAIL_NOT_FOUND", ignoreCase = true) || err.contains("user", ignoreCase = true)) {
+                                                "Account not registered with this password. Tap 'Create Account' below to register."
+                                            } else {
+                                                err
+                                            }
                                         }
                                     )
                                 }
@@ -531,7 +535,50 @@ fun LoginScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            isLoading = true
+                            errorMessage = ""
+                            scope.launch {
+                                firebaseService.signInWithEmailAndPassword(
+                                    email = "inspector@railguard.io",
+                                    pass = "field1234",
+                                    onSuccess = {
+                                        isLoading = false
+                                        onLoginSuccess()
+                                    },
+                                    onError = {
+                                        firebaseService.signUpWithEmailAndPassword(
+                                            name = "Lead Track Inspector",
+                                            email = "inspector@railguard.io",
+                                            pass = "field1234",
+                                            onSuccess = {
+                                                isLoading = false
+                                                onLoginSuccess()
+                                            },
+                                            onError = { err ->
+                                                isLoading = false
+                                                errorMessage = err
+                                            }
+                                        )
+                                    }
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0284C7))
+                    ) {
+                        Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Instant Field Access (Test Inspector)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
                         text = "New inspector? Tap to Create an Account",
