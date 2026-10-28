@@ -416,18 +416,24 @@ fun RailGuardApp() {
                             },
                             onBack = { navigateBack() }
                         )
-                        Screen.LiveInspection.route -> selectedInspection?.let { inspection ->
+                        Screen.LiveInspection.route -> {
+                            val activeInspection = selectedInspection ?: inspections.firstOrNull() ?: InspectionRecord(
+                                id = "INSP-${System.currentTimeMillis() % 10000}",
+                                section = latestSensorTelemetry?.chainage ?: "Active Track Corridor",
+                                date = "Today",
+                                inspector = firebaseService.currentUser?.displayName ?: "Field Inspector",
+                                status = "Active Live Stream",
+                                framesCount = 0,
+                                detectionsCount = 0
+                            )
                             LiveInspectionScreen(
-                            inspection = inspection,
-                            telemetry = latestSensorTelemetry,
-                            cloudDefectCount = defects.size,
-                            onEndInspection = {
-                                selectedInspection?.let { inspection ->
-                                    val completed = inspection.copy(
-                                        status = "Completed · Pending Sign-off"
-                                    )
-                                    val idx = inspections.indexOfFirst { it.id == inspection.id }
-                                    if (idx >= 0) inspections[idx] = completed
+                                inspection = activeInspection,
+                                telemetry = latestSensorTelemetry,
+                                cloudDefectCount = defects.size,
+                                onEndInspection = {
+                                    val completed = activeInspection.copy(status = "Completed · Pending Sign-off")
+                                    val idx = inspections.indexOfFirst { it.id == activeInspection.id }
+                                    if (idx >= 0) inspections[idx] = completed else inspections.add(0, completed)
                                     selectedInspection = completed
                                     scope.launch {
                                         firebaseService.uploadInspectionToFirebase(completed)
@@ -437,25 +443,24 @@ fun RailGuardApp() {
                                         )
                                     }
                                     navigateTo(Screen.InspectionSummary.route)
-                                }
-                            },
-                            onDefectDetected = {
-                                selectedDefect = defects.firstOrNull()
-                                if (selectedDefect != null) navigateTo(Screen.DefectDetails.route)
-                            },
-                            onOpenGps = { navigateTo(Screen.Gps.route) },
-                            onOpenCamera = { navigateTo(Screen.Camera.route) },
-                            onBack = { navigateBack() }
+                                },
+                                onDefectDetected = {
+                                    selectedDefect = defects.firstOrNull()
+                                    if (selectedDefect != null) navigateTo(Screen.DefectDetails.route)
+                                },
+                                onOpenGps = { navigateTo(Screen.Gps.route) },
+                                onOpenCamera = { navigateTo(Screen.Camera.route) },
+                                onBack = { navigateBack() }
                             )
-                        } ?: CloudDataRequiredScreen("Start a cloud inspection before opening the live viewfinder", ::navigateBack)
-                        Screen.InspectionDetails.route -> selectedInspection?.let { inspection ->
+                        }
+                        Screen.InspectionDetails.route -> (selectedInspection ?: inspections.firstOrNull())?.let { inspection ->
                             InspectionDetailsScreen(
                                 inspection = inspection,
                                 onOpenLive = { navigateTo(Screen.LiveInspection.route) },
                                 onOpenSummary = { navigateTo(Screen.InspectionSummary.route) },
                                 onBack = { navigateBack() }
                             )
-                        } ?: CloudDataRequiredScreen("Select a cloud inspection before opening details", ::navigateBack)
+                        } ?: CloudDataRequiredScreen("No inspection records found in cloud database", ::navigateBack)
                         Screen.InspectionSummary.route -> InspectionSummaryScreen(
                             onDone = {
                                 navigateBack()
@@ -476,7 +481,7 @@ fun RailGuardApp() {
                         )
 
                         // Sub-screens: Defects
-                        Screen.DefectDetails.route -> selectedDefect?.let { defect ->
+                        Screen.DefectDetails.route -> (selectedDefect ?: defects.firstOrNull())?.let { defect ->
                             DefectDetailsScreen(
                                 defect = defect,
                                 onOpenMeasurement = { navigateTo(Screen.CrackMeasurement.route) },
@@ -488,25 +493,25 @@ fun RailGuardApp() {
                                 onOpenComments = { navigateTo(Screen.Comments.route) },
                                 onBack = { navigateBack() }
                             )
-                        } ?: CloudDataRequiredScreen("Select a cloud defect before opening details", ::navigateBack)
+                        } ?: CloudDataRequiredScreen("No defect records found in cloud database", ::navigateBack)
                         Screen.CrackMeasurement.route -> CrackMeasurementScreen(
-                            defect = selectedDefect,
+                            defect = selectedDefect ?: defects.firstOrNull(),
                             onBack = { navigateBack() }
                         )
                         Screen.GrowthAnalysis.route -> GrowthAnalysisScreen(
-                            defect = selectedDefect,
+                            defect = selectedDefect ?: defects.firstOrNull(),
                             onBack = { navigateBack() }
                         )
                         Screen.ImageComparison.route -> ImageComparisonScreen(
-                            defect = selectedDefect,
+                            defect = selectedDefect ?: defects.firstOrNull(),
                             onBack = { navigateBack() }
                         )
                         Screen.ObjectDetection.route -> ObjectDetectionScreen(
-                            defect = selectedDefect,
+                            defect = selectedDefect ?: defects.firstOrNull(),
                             onBack = { navigateBack() }
                         )
                         Screen.Alignment.route -> AlignmentAnalysisScreen(
-                            defect = selectedDefect,
+                            defect = selectedDefect ?: defects.firstOrNull(),
                             onBack = { navigateBack() }
                         )
                         Screen.EngineerVerification.route -> EngineerVerificationScreen(
@@ -577,27 +582,28 @@ fun RailGuardApp() {
                             },
                             onBack = { navigateBack() }
                         )
-                        Screen.TaskDetails.route -> selectedTask?.let { task ->
+                        Screen.TaskDetails.route -> (selectedTask ?: tasks.firstOrNull())?.let { task ->
                             TaskDetailsScreen(
                                 task = task,
                                 onOpenBeforeAfter = { navigateTo(Screen.BeforeAfter.route) },
                                 onOpenVerify = { navigateTo(Screen.MaintenanceVerification.route) },
                                 onBack = { navigateBack() }
                             )
-                        } ?: CloudDataRequiredScreen("Select a cloud maintenance task before opening details", ::navigateBack)
+                        } ?: CloudDataRequiredScreen("No maintenance tasks found in cloud database", ::navigateBack)
                         Screen.BeforeAfter.route -> BeforeAfterScreen(onBack = { navigateBack() })
                         Screen.MaintenanceVerification.route -> MaintenanceVerificationScreen(
+                            task = selectedTask ?: tasks.firstOrNull(),
                             onVerified = {
                                 scope.launch {
-                                     selectedTask?.let { task ->
-                                         val verifiedTask = task.copy(
-                                             status = "Completed · Verified",
-                                             tone = Tone.HEALTHY
-                                         )
-                                         val idx = tasks.indexOfFirst { it.id == task.id }
-                                         if (idx >= 0) tasks[idx] = verifiedTask
-                                         selectedTask = verifiedTask
-                                         firebaseService.uploadTaskToFirebase(verifiedTask)
+                                     val task = selectedTask ?: tasks.firstOrNull() ?: return@launch
+                                     val verifiedTask = task.copy(
+                                         status = "Completed · Verified",
+                                         tone = Tone.HEALTHY
+                                     )
+                                     val idx = tasks.indexOfFirst { it.id == task.id }
+                                     if (idx >= 0) tasks[idx] = verifiedTask
+                                     selectedTask = verifiedTask
+                                     firebaseService.uploadTaskToFirebase(verifiedTask)
                                          firebaseService.logSafetyAuditEvent(
                                              action = "MAINTENANCE_VERIFIED",
                                              details = "Task ${verifiedTask.id} completed and verified for ${verifiedTask.section}"

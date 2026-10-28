@@ -266,8 +266,8 @@ fun HomeScreen(
         item {
             SectionLabel(
                 title = "NETWORK PULSE",
-                action = "Live telemetry",
-                onAction = { onNavigate("analytics") }
+                action = "Live hardware",
+                onAction = { onNavigate("train_connection") }
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -513,10 +513,10 @@ fun HomeScreen(
                     modifier = Modifier.weight(1f)
                 )
                 WorkspaceTile(
-                    title = "Observations",
-                    subtitle = "Field log",
-                    icon = Icons.Default.Visibility,
-                    onClick = { onNavigate("all_observations") },
+                    title = "Hardware & Pi",
+                    subtitle = "IoT telemetry & TSR",
+                    icon = Icons.Default.Sensors,
+                    onClick = { onNavigate("train_connection") },
                     modifier = Modifier.weight(1f)
                 )
                 WorkspaceTile(

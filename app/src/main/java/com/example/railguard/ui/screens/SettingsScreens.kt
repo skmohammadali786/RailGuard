@@ -144,6 +144,13 @@ fun SettingsScreen(
                         subtitle = if (firebaseService.isConnectedToFirebase) "Firebase Realtime DB Synced" else "Offline Cache Mode",
                         onClick = { showCloudDataDialog = true }
                     )
+
+                    SettingsRowTile(
+                        icon = Icons.Default.Sensors,
+                        title = "Hardware & Train Corridor Link",
+                        subtitle = "Raspberry Pi / ESP32 sensor telemetry & TSR control",
+                        onClick = { onNavigate("train_connection") }
+                    )
                 }
             }
         }
