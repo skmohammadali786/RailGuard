@@ -154,8 +154,8 @@ fun SettingsScreen(
                     onClick = onLockApp,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
-                        contentColor = if (isDark) Color.White else Color(0xFF0F172A)
+                        containerColor = Color(0xFFE2E8F0),
+                        contentColor = Color(0xFF0F172A)
                     )
                 ) {
                     Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))

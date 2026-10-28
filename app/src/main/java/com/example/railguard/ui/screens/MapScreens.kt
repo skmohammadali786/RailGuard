@@ -146,19 +146,29 @@ fun MapScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Simulated Map Container
+                    // Simulated Map Container in Clean High-Tech Light Mode
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(220.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isDark) Color(0xFF090D15) else Color(0xFFE2E8F0))
-                            .border(1.dp, if (isDark) Color(0xFF1E2D44) else Color(0xFFCBD5E1), RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFF0F9FF))
+                            .border(1.5.dp, Color(0xFFBAE6FD), RoundedCornerShape(10.dp))
                             .clickable { onNavigateToLocationDetails() }
-                            .padding(12.dp)
+                            .padding(14.dp)
                     ) {
                         Column {
-                            Text("Active Corridor (Awaiting telemetry)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF0284C7))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Active Corridor (Real-time GPS Tracking)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(if (defects.isNotEmpty()) "Monitored Segment: ${defects.first().chainageCoordinate}" else "Active Track Corridor: Nominal Line Speed", fontSize = 11.sp, color = Color(0xFF0284C7))
                         }
 
@@ -181,9 +191,10 @@ fun MapScreen(
                         }
 
                         Text(
-                            text = "Tap for high-precision satellite coordinates",
-                            fontSize = 10.sp,
-                            color = Color.Gray,
+                            text = "Tap to open high-precision satellite coordinates →",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF0369A1),
                             modifier = Modifier.align(Alignment.BottomCenter)
                         )
                     }

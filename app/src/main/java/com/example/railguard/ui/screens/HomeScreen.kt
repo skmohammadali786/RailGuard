@@ -670,9 +670,9 @@ fun DedicatedHomepageAiOracle(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isDark) Color(0xFF0F1B2B) else Color(0xFF132338))
+            .background(Color(0xFFF0F9FF))
             .border(1.dp, Color(0xFF0284C7).copy(alpha = aiGlow), RoundedCornerShape(12.dp))
-            .padding(12.dp)
+            .padding(14.dp)
     ) {
         // AI Header Bar
         Row(
@@ -683,7 +683,7 @@ fun DedicatedHomepageAiOracle(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(26.dp)
+                        .size(28.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(Color(0xFF0284C7)),
                     contentAlignment = Alignment.Center
@@ -692,23 +692,24 @@ fun DedicatedHomepageAiOracle(
                         imageVector = Icons.Default.Psychology,
                         contentDescription = "AI Oracle",
                         tint = Color.White,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
                     Text(
                         text = "RAILGUARD AI ORACLE",
-                        color = Color.White,
-                        fontSize = 11.sp,
+                        color = Color(0xFF0F172A),
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
                         letterSpacing = 0.5.sp
                     )
                     Text(
                         text = "Real-time Tensor Kinetics & Failure Window",
-                        color = Color(0xFF7DD3FC),
-                        fontSize = 9.sp
+                        color = Color(0xFF0284C7),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
@@ -716,14 +717,14 @@ fun DedicatedHomepageAiOracle(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF0284C7).copy(alpha = 0.25f))
-                    .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                    .background(Color(0xFFBAE6FD))
+                    .border(1.dp, Color(0xFF0284C7).copy(alpha = 0.6f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
-                val conf = if (defects.isNotEmpty()) "${defects.first().aiConfidencePercent}% CONF" else "ACTIVE CONF"
+                val conf = if (defects.isNotEmpty()) "${defects.first().aiConfidencePercent}% CONF" else "NOMINAL"
                 Text(
                     text = conf,
-                    color = Color(0xFF38BDF8),
+                    color = Color(0xFF0369A1),
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
@@ -731,26 +732,27 @@ fun DedicatedHomepageAiOracle(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         val topDefect = defects.firstOrNull()
         if (topDefect != null) {
             Text(
                 text = "⚡ ${topDefect.id} (${topDefect.estimatedLength}) at ${topDefect.chainageCoordinate}. Action: ${topDefect.aiPrescribedAction}",
-                color = Color(0xFFE2E8F0),
-                fontSize = 11.sp,
-                lineHeight = 15.sp
+                color = Color(0xFF1E293B),
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium
             )
         } else {
             Text(
-                text = "⚡ Real-time tensor kinetics active. No active structural track anomalies detected. Awaiting live sensor telemetry and camera frames from Raspberry Pi / ESP32.",
-                color = Color(0xFFE2E8F0),
-                fontSize = 11.sp,
-                lineHeight = 15.sp
+                text = "⚡ Real-time tensor kinetics active. No active structural track anomalies detected. Sensor gateway online and monitoring corridor.",
+                color = Color(0xFF334155),
+                fontSize = 12.sp,
+                lineHeight = 16.sp
             )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Navigation Action Buttons
         Row(
@@ -764,7 +766,7 @@ fun DedicatedHomepageAiOracle(
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 modifier = Modifier
                     .weight(1f)
-                    .height(32.dp)
+                    .height(34.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Psychology,
@@ -773,25 +775,25 @@ fun DedicatedHomepageAiOracle(
                     tint = Color.White
                 )
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Open Full AI Oracle →", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Open AI Oracle →", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
 
             if (topDefect != null) {
                 OutlinedButton(
                     onClick = { onDefectClick(topDefect) },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFCA5A5)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDC2626)),
                     shape = RoundedCornerShape(6.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(32.dp)
+                        .height(34.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Warning,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
-                        tint = Color(0xFFEF4444)
+                        tint = Color(0xFFDC2626)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Inspect ${topDefect.id}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
@@ -799,19 +801,19 @@ fun DedicatedHomepageAiOracle(
             } else {
                 OutlinedButton(
                     onClick = { onNavigate("live_inspection") },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0284C7)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7)),
                     shape = RoundedCornerShape(6.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(32.dp)
+                        .height(34.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.CameraAlt,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
-                        tint = Color(0xFF38BDF8)
+                        tint = Color(0xFF0284C7)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Live Track Scan", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)

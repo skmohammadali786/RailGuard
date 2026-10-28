@@ -150,6 +150,16 @@ fun InspectionsListScreen(
                             color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = onStartNew,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Launch First Track Patrol", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -280,8 +290,8 @@ fun InspectionSetupScreen(
                     onClick = {
                         val record = InspectionRecord(
                             id = "INSP-${System.currentTimeMillis() % 10000}",
-                            section = corridorName,
-                            inspector = inspectorName,
+                            section = corridorName.ifBlank { "Corridor KM 14" },
+                            inspector = inspectorName.ifBlank { "Field Inspector" },
                             status = "Active Live Stream",
                             framesCount = 0,
                             detectionsCount = 0
@@ -310,9 +320,9 @@ fun LiveInspectionScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF030712))
+            .background(Color(0xFFF8FAFC))
     ) {
-        // High-tech viewfinder overlay
+        // High-tech viewfinder overlay in 100% Light Mode
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -326,7 +336,7 @@ fun LiveInspectionScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF0F172A))
                 }
 
                 Row(
@@ -341,7 +351,7 @@ fun LiveInspectionScreen(
                     )
                     Text(
                         text = if (firebaseService.isConnectedToFirebase) "LIVE CLOUD TELEMETRY" else "WAITING FOR FIREBASE",
-                        color = Color.White,
+                        color = Color(0xFF0F172A),
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
@@ -349,93 +359,109 @@ fun LiveInspectionScreen(
                 }
 
                 IconButton(onClick = onOpenGps) {
-                    Icon(Icons.Default.MyLocation, contentDescription = "GPS", tint = Color(0xFF38BDF8))
+                    Icon(Icons.Default.MyLocation, contentDescription = "GPS", tint = Color(0xFF0284C7))
                 }
             }
 
             // Real-Time Sensor Telemetry Strip Overlay
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
-                border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFCBD5E1)),
+                shape = RoundedCornerShape(10.dp),
+                color = Color.White,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBAE6FD)),
+                shadowElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("ULTRASONIC", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text("ULTRASONIC", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
                             telemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "--",
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFFBBF24)
+                            color = Color(0xFFD97706)
                         )
                     }
                     Column {
-                        Text("VIBRATION", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text("VIBRATION", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
                             telemetry?.let { "${it.vibrationG} g" } ?: "--",
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF4ADE80)
+                            color = Color(0xFF16A34A)
                         )
                     }
                     Column {
-                        Text("RAIL TEMP", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text("RAIL TEMP", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
                             telemetry?.let { "${it.railTempC} °C" } ?: "--",
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFFB923C)
+                            color = Color(0xFFEA580C)
                         )
                     }
                     Column {
-                        Text("CHAINAGE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                        Text("CHAINAGE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
                             telemetry?.chainage ?: "--",
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF38BDF8)
+                            color = Color(0xFF0284C7)
                         )
                     }
                 }
             }
 
-            // Center Optical Bounding Box & Reticle
+            // Center Optical Bounding Box & Reticle in Light Technical Style
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(260.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFFF0F9FF))
                     .border(
                         2.dp,
-                        if (telemetry != null) Color(0xFF00F0FF) else Color(0xFF64748B),
-                        RoundedCornerShape(8.dp)
+                        if (telemetry != null) Color(0xFF0284C7) else Color(0xFF94A3B8),
+                        RoundedCornerShape(12.dp)
                     )
-                    .padding(12.dp)
+                    .padding(14.dp)
             ) {
                 Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (telemetry != null) Color(0xFF16A34A) else Color(0xFF0284C7))
+                        )
+                        Text(
+                            text = if (telemetry != null) {
+                                "RASPBERRY PI PACKET RECEIVED · ${telemetry.status}"
+                            } else {
+                                "WAITING FOR RASPBERRY PI TELEMETRY"
+                            },
+                            color = if (telemetry != null) Color(0xFF0284C7) else Color(0xFF475569),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (telemetry != null) {
-                            "RASPBERRY PI PACKET RECEIVED · ${telemetry.status}"
-                        } else {
-                            "WAITING FOR RASPBERRY PI TELEMETRY"
-                        },
-                        color = if (telemetry != null) Color(0xFF00F0FF) else Color(0xFF94A3B8),
+                        text = "Inspection: ${inspection.id} | Chainage: ${telemetry?.chainage ?: "Scanning"} | Defects: $cloudDefectCount",
+                        color = Color(0xFF334155),
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = "Inspection: ${inspection.id} | Chainage: ${telemetry?.chainage ?: "Unknown"} | Defects: $cloudDefectCount",
-                        color = Color.LightGray,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium
                     )
                 }
 
@@ -446,9 +472,12 @@ fun LiveInspectionScreen(
                     ) {
                         Button(
                             onClick = onDefectDetected,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text("Open cloud defects", fontSize = 11.sp)
+                            Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Open Cloud Defects ($cloudDefectCount)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -462,19 +491,26 @@ fun LiveInspectionScreen(
                 Button(
                     onClick = onOpenCamera,
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFF0284C7))
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFE2E8F0),
+                        contentColor = Color(0xFF0F172A)
+                    )
                 ) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF0284C7))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Trigger Snap", fontSize = 11.sp)
+                    Text("Trigger Snap", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
 
                 Button(
                     onClick = onEndInspection,
                     modifier = Modifier.weight(1.5f),
+                    shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
                 ) {
-                    Text("Complete Patrol & Export", fontSize = 11.sp)
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Complete Patrol & Export", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

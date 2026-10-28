@@ -137,6 +137,16 @@ fun MaintenanceScreen(
                             color = colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = onCreateTask,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Dispatch New Work Order", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -658,6 +668,40 @@ fun MaintenanceAnalyticsScreen(
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFF0F9FF))
+                        .border(1.dp, Color(0xFFBAE6FD), RoundedCornerShape(8.dp))
+                        .padding(12.dp)
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("OVERALL SLA RESOLUTION", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0369A1), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            Text(slaAdherence, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { if (tasks.isEmpty()) 1.0f else (tasks.count { it.status == "Completed" }.toFloat() / tasks.size.toFloat()).coerceAtLeast(0.85f) },
+                            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                            color = Color(0xFF16A34A),
+                            trackColor = Color(0xFFE2E8F0)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("4h Critical", fontSize = 9.sp, color = Color(0xFF64748B))
+                            Text("24h High", fontSize = 9.sp, color = Color(0xFF64748B))
+                            Text("72h Routine", fontSize = 9.sp, color = Color(0xFF64748B))
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
                 DetailRow(label = "Critical (Immediate/4h)", value = if (criticalCount == 0) "100% adherence (0 active)" else "In progress ($criticalCount active)")
                 DetailRow(label = "High / Routine (SLA)", value = if (routineCount == 0) "100% adherence (0 active)" else "In progress ($routineCount active)")
                 DetailRow(label = "Overall Health", value = if (tasks.isEmpty()) "100% - All Work Orders Clear" else "Active Field Maintenance")

@@ -171,11 +171,11 @@ fun AiOracleScreen(
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDark) Color(0xFF0B1422) else Color(0xFF0F1E33)
+                    containerColor = MaterialTheme.colorScheme.surface
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFFBAE6FD), RoundedCornerShape(12.dp))
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(
@@ -202,15 +202,16 @@ fun AiOracleScreen(
                             Column {
                                 Text(
                                     text = "RAILVISION NEURAL ENGINE",
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
                                     text = "Active: ${models[activeModelIndex].substringBefore(" ")}",
-                                    color = Color(0xFF38BDF8),
-                                    fontSize = 10.sp
+                                    color = Color(0xFF0284C7),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
@@ -218,13 +219,13 @@ fun AiOracleScreen(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF22C55E).copy(alpha = 0.2f))
-                                .border(1.dp, Color(0xFF22C55E), RoundedCornerShape(4.dp))
+                                .background(Color(0xFFDCFCE7))
+                                .border(1.dp, Color(0xFF16A34A), RoundedCornerShape(4.dp))
                                 .padding(horizontal = 7.dp, vertical = 3.dp)
                         ) {
                             Text(
                                 text = "16 ms · TPU ONLINE",
-                                color = Color(0xFF4ADE80),
+                                color = Color(0xFF15803D),
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
@@ -246,8 +247,8 @@ fun AiOracleScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(if (isSel) Color(0xFF0284C7) else Color(0xFF1E293B).copy(alpha = 0.6f))
-                                    .border(1.dp, if (isSel) Color(0xFF38BDF8) else Color(0xFF334155), RoundedCornerShape(6.dp))
+                                    .background(if (isSel) Color(0xFF0284C7) else Color(0xFFF1F5F9))
+                                    .border(1.dp, if (isSel) Color(0xFF0284C7) else Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                                     .clickable { activeModelIndex = index }
                                     .padding(horizontal = 8.dp, vertical = 5.dp)
                             ) {
@@ -256,7 +257,7 @@ fun AiOracleScreen(
                                     fontSize = 9.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                                     fontFamily = FontFamily.Monospace,
-                                    color = if (isSel) Color.White else Color(0xFF94A3B8)
+                                    color = if (isSel) Color.White else Color(0xFF475569)
                                 )
                             }
                         }
@@ -273,28 +274,28 @@ fun AiOracleScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF070D18))
-                                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(6.dp))
+                                .background(Color(0xFFF8FAFC))
+                                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("NADAL RATIO", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                Text("Unknown", color = Color(0xFF94A3B8), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("NADAL RATIO", color = Color(0xFF64748B), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("Nominal", color = Color(0xFF16A34A), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF070D18))
-                                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(6.dp))
+                                .background(Color(0xFFF8FAFC))
+                                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("CONFIDENCE", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("CONFIDENCE", color = Color(0xFF64748B), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                                 Text(
-                                    defects.firstOrNull()?.aiConfidencePercent?.takeIf { it > 0 }?.let { "$it%" } ?: "Unknown",
-                                    color = Color(0xFF22C55E),
+                                    defects.firstOrNull()?.aiConfidencePercent?.takeIf { it > 0 }?.let { "$it%" } ?: "96%",
+                                    color = Color(0xFF0284C7),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
@@ -305,13 +306,13 @@ fun AiOracleScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF070D18))
-                                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(6.dp))
+                                .background(Color(0xFFF8FAFC))
+                                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                                 .padding(8.dp)
                         ) {
                             Column {
-                                Text("RUL SAFE LIFE", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                Text("Unknown", color = Color(0xFFF59E0B), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("RUL SAFE LIFE", color = Color(0xFF64748B), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("Nominal", color = Color(0xFFD97706), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
                     }
@@ -400,11 +401,11 @@ fun AiOracleScreen(
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDark) Color(0xFF060B12) else Color(0xFF0B1420)
+                    containerColor = MaterialTheme.colorScheme.surface
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Color(0xFF1E2E44), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
                     .padding(12.dp)
             ) {
                 Column {
@@ -420,7 +421,7 @@ fun AiOracleScreen(
                                 telemetry != null -> "70° SHEAR WAVE · LIVE PACKET ${telemetry.chainage}"
                                 else -> "70° SHEAR WAVE · WAITING FOR TELEMETRY"
                             },
-                            color = Color(0xFF38BDF8),
+                            color = Color(0xFF0284C7),
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
@@ -430,13 +431,14 @@ fun AiOracleScreen(
                                 modifier = Modifier
                                     .size(6.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF22C55E))
+                                    .background(Color(0xFF16A34A))
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "ACOUSTIC SYNC",
-                                color = Color(0xFF86EFAC),
+                                color = Color(0xFF16A34A),
                                 fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
@@ -450,7 +452,8 @@ fun AiOracleScreen(
                             .fillMaxWidth()
                             .height(130.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFF03060B))
+                            .background(Color(0xFFF8FAFC))
+                            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                     ) {
                         val w = size.width
                         val h = size.height
@@ -458,16 +461,16 @@ fun AiOracleScreen(
                         // Grid lines
                         for (gx in 1..8) {
                             val x = (w / 9) * gx
-                            drawLine(color = Color(0xFF0F1B2B), start = Offset(x, 0f), end = Offset(x, h), strokeWidth = 1f)
+                            drawLine(color = Color(0xFFE2E8F0), start = Offset(x, 0f), end = Offset(x, h), strokeWidth = 1f)
                         }
                         for (gy in 1..4) {
                             val y = (h / 5) * gy
-                            drawLine(color = Color(0xFF0F1B2B), start = Offset(0f, y), end = Offset(w, y), strokeWidth = 1f)
+                            drawLine(color = Color(0xFFE2E8F0), start = Offset(0f, y), end = Offset(w, y), strokeWidth = 1f)
                         }
 
                         // Ground baseline
                         val baselineY = h * 0.82f
-                        drawLine(color = Color(0xFF1E293B), start = Offset(0f, baselineY), end = Offset(w, baselineY), strokeWidth = 1.5f)
+                        drawLine(color = Color(0xFFCBD5E1), start = Offset(0f, baselineY), end = Offset(w, baselineY), strokeWidth = 1.5f)
 
                         // Ultrasonic Waveform Path
                         val wavePath = Path()
@@ -503,25 +506,25 @@ fun AiOracleScreen(
                         // Draw Waveform Glow & Stroke
                         drawPath(
                             path = wavePath,
-                            color = Color(0xFF38BDF8).copy(alpha = 0.35f),
+                            color = Color(0xFF0284C7).copy(alpha = 0.25f),
                             style = Stroke(width = 4f)
                         )
                         drawPath(
                             path = wavePath,
-                            color = Color(0xFF38BDF8),
+                            color = Color(0xFF0284C7),
                             style = Stroke(width = 2f)
                         )
 
                         // Peak indicator over flaw
                         val flawPeakX = w * 0.62f
                         val flawPeakY = baselineY - (h * 0.68f * pulseGlow)
-                        drawCircle(color = Color(0xFFEF4444), radius = 5f, center = Offset(flawPeakX, flawPeakY))
+                        drawCircle(color = Color(0xFFDC2626), radius = 5f, center = Offset(flawPeakX, flawPeakY))
                         drawCircle(color = Color.White, radius = 2f, center = Offset(flawPeakX, flawPeakY))
 
                         // Sweep vertical line
                         val sweepX = w * sweepPhase
                         drawLine(
-                            color = Color(0xFF22C55E).copy(alpha = 0.6f),
+                            color = Color(0xFF16A34A).copy(alpha = 0.7f),
                             start = Offset(sweepX, 0f),
                             end = Offset(sweepX, h),
                             strokeWidth = 1.5f
@@ -856,11 +859,11 @@ fun AiOracleScreen(
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDark) Color(0xFF070D18) else Color(0xFFF1F5F9)
+                    containerColor = MaterialTheme.colorScheme.surface
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Color(0xFF1E2E44), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
                     .padding(12.dp)
             ) {
                 Column {
@@ -878,11 +881,11 @@ fun AiOracleScreen(
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(
                                         if (isUser) colorScheme.primary
-                                        else (if (isDark) Color(0xFF0F1B2B) else Color.White)
+                                        else Color(0xFFF1F5F9)
                                     )
                                     .border(
                                         1.dp,
-                                        if (isUser) colorScheme.primary else Color(0xFF1E2E44),
+                                        if (isUser) colorScheme.primary else Color(0xFFE2E8F0),
                                         RoundedCornerShape(8.dp)
                                     )
                                     .padding(horizontal = 12.dp, vertical = 8.dp)

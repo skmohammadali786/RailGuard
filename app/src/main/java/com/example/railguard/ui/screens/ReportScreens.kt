@@ -76,13 +76,13 @@ fun ReportsScreen(
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDark) Color(0xFF0C243C) else Color(0xFFE0F2FE)
+                    containerColor = Color(0xFFF0F9FF)
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .border(
                         1.dp,
-                        if (isDark) Color(0xFF0284C7) else Color(0xFF38BDF8),
+                        Color(0xFFBAE6FD),
                         RoundedCornerShape(12.dp)
                     )
             ) {
@@ -527,19 +527,17 @@ fun PdfPreviewScreen(
                 }
             }
             if (cloudStatus != null) {
-                item {
-                    Text(
-                        text = cloudStatus ?: "",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (cloudStatus?.contains("failed", ignoreCase = true) == true) {
-                            colorScheme.error
-                        } else {
-                            Color(0xFF16A34A)
-                        },
-                        modifier = Modifier.padding(vertical = 6.dp)
-                    )
-                }
+                Text(
+                    text = cloudStatus ?: "",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (cloudStatus?.contains("failed", ignoreCase = true) == true) {
+                        colorScheme.error
+                    } else {
+                        Color(0xFF16A34A)
+                    },
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -1254,11 +1252,11 @@ fun AnalyticsScreen(
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDark) Color(0xFF0F2537) else Color(0xFFE0F2FE)
+                    containerColor = Color(0xFFF0F9FF)
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFFBAE6FD), RoundedCornerShape(12.dp))
             ) {
                 Row(
                     modifier = Modifier
