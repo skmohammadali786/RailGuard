@@ -284,6 +284,14 @@ fun RailGuardApp() {
                         ) { targetRoute ->
                             when (targetRoute) {
                                 Screen.Splash.route -> SplashScreen(
+                                    onNavigateHome = {
+                                        backStack.clear()
+                                        currentRoute = Screen.Home.route
+                                    },
+                                    onNavigateLogin = {
+                                        backStack.clear()
+                                        currentRoute = Screen.Login.route
+                                    },
                                     onContinue = { navigateTo(Screen.Onboarding.route) },
                                     onLoginClick = { navigateTo(Screen.Login.route) },
                                     onRegisterClick = { navigateTo(Screen.Register.route) }
@@ -385,7 +393,8 @@ fun RailGuardApp() {
                                 selectedDefect = it
                                 navigateTo(Screen.DefectDetails.route)
                             },
-                            defects = defects
+                            defects = defects,
+                            telemetry = latestSensorTelemetry
                         )
                         Screen.Settings.route -> SettingsScreen(
                             isDarkMode = isDarkMode,
@@ -471,9 +480,13 @@ fun RailGuardApp() {
                         } ?: CloudDataRequiredScreen("No inspection records found in cloud database", ::navigateBack)
                         Screen.InspectionSummary.route -> InspectionSummaryScreen(
                             onDone = {
-                                navigateBack()
+                                backStack.clear()
+                                currentRoute = Screen.Home.route
                             },
-                            onBack = { navigateBack() }
+                            onBack = {
+                                backStack.clear()
+                                currentRoute = Screen.Home.route
+                            }
                         )
                         Screen.InspectionCalendar.route -> InspectionCalendarScreen(
                             inspections = inspections,
@@ -753,9 +766,9 @@ fun RailGuardApp() {
             }
         }
 
-        if (isAppLocked && appPreferences.passcodeEnabled) {
+        if (isAppLocked) {
             PasscodeLockScreen(
-                expectedPin = appPreferences.passcodePin,
+                expectedPin = appPreferences.passcodePin.ifBlank { "1234" },
                 allowBiometric = appPreferences.isBiometricEnabled,
                 onUnlock = { isAppLocked = false }
             )

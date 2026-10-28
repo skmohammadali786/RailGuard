@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -68,9 +70,17 @@ fun MapScreen(
     onNavigateToHeatmap: () -> Unit,
     onNavigateToLocationDetails: () -> Unit,
     onSelectDefect: (Defect) -> Unit,
-    defects: List<Defect>
+    defects: List<Defect>,
+    telemetry: RailGuardFirebaseService.LiveSensorTelemetry? = null
 ) {
     val isDark = LocalIsDark.current
+    val currentChainage = telemetry?.chainage?.takeIf { it != "Unknown" && it.isNotBlank() }
+        ?: if (defects.isNotEmpty()) defects.first().chainageCoordinate else "KM 14+320"
+    val axleSpeed = telemetry?.axleSpeedKmh ?: 45.0f
+    val railTemp = telemetry?.railTempC ?: 31.4f
+    val ultrasonicDepth = telemetry?.ultrasonicDepthMm ?: 68.2f
+    val statusText = telemetry?.status ?: "ACTIVE_SYNC"
+    val isAnomaly = statusText.contains("ANOMALY", ignoreCase = true) || ultrasonicDepth < 55.0f
 
     LazyColumn(
         modifier = Modifier
@@ -81,7 +91,7 @@ fun MapScreen(
     ) {
         item {
             ScreenHeader(
-                title = "Corridor GIS & Live GPS",
+                title = "Corridor GIS & Live Track",
                 subtitle = "Sub-meter satellite mapping and track defect geolocation"
             )
         }
@@ -99,26 +109,26 @@ fun MapScreen(
                 ) {
                     Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Defect Pins", fontSize = 12.sp)
+                    Text("Defect Pins", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Button(
                     onClick = onNavigateToHeatmap,
                     modifier = Modifier.weight(1f).testTag("risk_heatmap_btn"),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
-                        contentColor = if (isDark) Color.White else Color(0xFF0F172A)
+                        containerColor = Color(0xFFE2E8F0),
+                        contentColor = Color(0xFF0F172A)
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(Icons.Default.Whatshot, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Whatshot, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFFEA580C))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Risk Heatmap", fontSize = 12.sp)
+                    Text("Risk Heatmap", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // Live Simulated Track Map Canvas
+        // Live Corridor HUD Card
         item {
             RailCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp)) {
@@ -127,76 +137,219 @@ fun MapScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "LIVE GPS GEO-FENCE",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF0284C7)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isAnomaly) Color(0xFFEF4444) else Color(0xFF16A34A))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "CORRIDOR SECTOR 4B TELEMETRY",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF0284C7)
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF16A34A).copy(alpha = 0.2f))
+                                .background(
+                                    if (isAnomaly) Color(0xFFEF4444).copy(alpha = 0.15f)
+                                    else Color(0xFF16A34A).copy(alpha = 0.15f)
+                                )
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            Text("GPS STATUS: AWAITING LOCK", fontSize = 10.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (isAnomaly) "ANOMALY FLAGGED" else "PATROL LOCK · NOMINAL",
+                                fontSize = 10.sp,
+                                color = if (isAnomaly) Color(0xFFDC2626) else Color(0xFF16A34A),
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Simulated Map Container in Clean High-Tech Light Mode
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Current Chainage", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Text(currentChainage, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        }
+                        Column {
+                            Text("Line Speed", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Text("${axleSpeed.toInt()} km/h", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        }
+                        Column {
+                            Text("Railhead Temp", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Text("%.1f °C".format(railTemp), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        }
+                        Column {
+                            Text("UT Depth", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Text(
+                                "%.1f mm".format(ultrasonicDepth),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (ultrasonicDepth < 55.0f) Color(0xFFDC2626) else Color(0xFF0F172A)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Interactive Railway Track Canvas
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(220.dp)
+                            .height(190.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFFF0F9FF))
-                            .border(1.5.dp, Color(0xFFBAE6FD), RoundedCornerShape(10.dp))
+                            .background(Color(0xFFF1F5F9))
+                            .border(1.5.dp, Color(0xFFCBD5E1), RoundedCornerShape(10.dp))
                             .clickable { onNavigateToLocationDetails() }
-                            .padding(14.dp)
+                            .padding(12.dp)
                     ) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF0284C7))
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val w = size.width
+                            val h = size.height
+
+                            val upperRailY = h * 0.44f
+                            val lowerRailY = h * 0.58f
+
+                            // Draw sleeper ties
+                            val tieCount = 14
+                            val tieSpacing = w / (tieCount + 1)
+                            for (i in 1..tieCount) {
+                                val x = i * tieSpacing
+                                drawLine(
+                                    color = Color(0xFFCBD5E1),
+                                    start = Offset(x, upperRailY - 14f),
+                                    end = Offset(x, lowerRailY + 14f),
+                                    strokeWidth = 7f
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Active Corridor (Real-time GPS Tracking)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                             }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(if (defects.isNotEmpty()) "Monitored Segment: ${defects.first().chainageCoordinate}" else "Active Track Corridor: Nominal Line Speed", fontSize = 11.sp, color = Color(0xFF0284C7))
+
+                            // Draw two parallel steel rails
+                            drawLine(
+                                color = Color(0xFF475569),
+                                start = Offset(0f, upperRailY),
+                                end = Offset(w, upperRailY),
+                                strokeWidth = 5f
+                            )
+                            drawLine(
+                                color = Color(0xFF475569),
+                                start = Offset(0f, lowerRailY),
+                                end = Offset(w, lowerRailY),
+                                strokeWidth = 5f
+                            )
+
+                            // Chainage tick markers along track
+                            val ticks = listOf("KM 14+000", "KM 14+200", "KM 14+400", "KM 14+600", "KM 14+800")
+                            ticks.forEachIndexed { idx, _ ->
+                                val tx = (idx + 1) * (w / 6f)
+                                drawCircle(
+                                    color = Color(0xFF94A3B8),
+                                    radius = 3.5f,
+                                    center = Offset(tx, upperRailY - 24f)
+                                )
+                            }
+
+                            // Train / Patrol Cart position (approx 45% along corridor)
+                            val trainX = w * 0.45f
+                            val trainY = (upperRailY + lowerRailY) / 2f
+
+                            // Outer pulse
+                            drawCircle(
+                                color = Color(0xFF0284C7).copy(alpha = 0.25f),
+                                radius = 18f,
+                                center = Offset(trainX, trainY)
+                            )
+                            // Train vehicle icon body
+                            drawCircle(
+                                color = Color(0xFF0284C7),
+                                radius = 10f,
+                                center = Offset(trainX, trainY)
+                            )
+                            drawCircle(
+                                color = Color.White,
+                                radius = 4f,
+                                center = Offset(trainX, trainY)
+                            )
+
+                            // Defect marker at KM 14+320
+                            if (defects.isNotEmpty() || isAnomaly) {
+                                val defX = w * 0.58f
+                                val defY = upperRailY
+                                drawCircle(
+                                    color = Color(0xFFEF4444).copy(alpha = 0.3f),
+                                    radius = 16f,
+                                    center = Offset(defX, defY)
+                                )
+                                drawCircle(
+                                    color = Color(0xFFEF4444),
+                                    radius = 8f,
+                                    center = Offset(defX, defY)
+                                )
+                                drawCircle(
+                                    color = Color.White,
+                                    radius = 3f,
+                                    center = Offset(defX, defY)
+                                )
+                            }
                         }
 
-                        // Defect pin badges
+                        // Overlay labels
+                        Column(modifier = Modifier.align(Alignment.TopStart)) {
+                            Text("Active Track Corridor: KM 14+000 → KM 14+800", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                            Text("Patrol Cart at $currentChainage", fontSize = 10.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.SemiBold)
+                        }
+
+                        // Chainage Ticks Label Overlay at Top
                         Row(
-                            modifier = Modifier.align(Alignment.Center),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.TopCenter)
+                                .padding(top = 28.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            defects.take(3).forEach { d ->
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(toneColor(d.tone, isDark))
-                                        .clickable { onSelectDefect(d) }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(d.id, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("KM 14+000", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
+                            Text("KM 14+200", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
+                            Text("KM 14+400", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
+                            Text("KM 14+600", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
+                            Text("KM 14+800", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
+                        }
+
+                        // Clickable Defect Badges
+                        if (defects.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                defects.take(3).forEach { d ->
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(toneColor(d.tone, isDark))
+                                            .clickable { onSelectDefect(d) }
+                                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    ) {
+                                        Text("${d.id}: ${d.chainageCoordinate}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
+                        } else {
+                            Text(
+                                text = "Tap map canvas to open satellite geodesy & coordinates →",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF0369A1),
+                                modifier = Modifier.align(Alignment.BottomCenter)
+                            )
                         }
-
-                        Text(
-                            text = "Tap to open high-precision satellite coordinates →",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF0369A1),
-                            modifier = Modifier.align(Alignment.BottomCenter)
-                        )
                     }
                 }
             }

@@ -75,6 +75,19 @@ data class TrackAnomaly(
     val tone: Tone
 )
 
+data class PatrolSchedule(
+    val id: String,
+    val section: String,
+    val date: String,
+    val time: String,
+    val shift: String,
+    val inspector: String,
+    val patrolType: String,
+    val frequency: String = "Once",
+    val status: String = "Scheduled",
+    val notes: String = ""
+)
+
 // ==========================================
 // RAIL DATA REPOSITORY
 // ==========================================
@@ -85,4 +98,5 @@ object RailDataRepository {
     val initialInspections = emptyList<InspectionRecord>()
     val initialObservations = emptyList<ObservationItem>()
     val initialNotifications = emptyList<NotificationItem>()
+    val initialSchedules = emptyList<PatrolSchedule>()
 }

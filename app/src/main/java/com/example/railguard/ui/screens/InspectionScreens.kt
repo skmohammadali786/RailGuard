@@ -38,6 +38,7 @@ import com.example.railguard.components.*
 import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.Defect
 import com.example.railguard.model.InspectionRecord
+import com.example.railguard.model.PatrolSchedule
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import androidx.core.content.ContextCompat
@@ -575,30 +576,309 @@ fun InspectionCalendarScreen(
     inspections: List<InspectionRecord> = emptyList(),
     onBack: () -> Unit
 ) {
+    val firebaseService = remember { RailGuardFirebaseService.instance }
+    val scope = rememberCoroutineScope()
+    var showDialog by remember { mutableStateOf(false) }
+    var schedules by remember { mutableStateOf<List<PatrolSchedule>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    // Form inputs for new schedule
+    var newSection by remember { mutableStateOf("Sector 4B North Loop (KM 14+000 - KM 18+500)") }
+    var newDate by remember { mutableStateOf("Tomorrow") }
+    var newTime by remember { mutableStateOf("06:00") }
+    var newShift by remember { mutableStateOf("Morning Shift") }
+    var newInspector by remember {
+        mutableStateOf(firebaseService.currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "Lead Inspector")
+    }
+    var newPatrolType by remember { mutableStateOf("Automated Optical & Ultrasonic") }
+    var newFrequency by remember { mutableStateOf("Daily") }
+    var newNotes by remember { mutableStateOf("") }
+
+    fun refreshSchedules() {
+        isLoading = true
+        scope.launch {
+            firebaseService.pullSchedules(
+                onSuccess = {
+                    schedules = it
+                    isLoading = false
+                },
+                onError = {
+                    isLoading = false
+                }
+            )
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshSchedules()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xFFF8FAFC))
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "Patrol Calendar", subtitle = "Scheduled track maintenance runs", onBack = onBack)
-        Spacer(modifier = Modifier.height(16.dp))
-        RailCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("Scheduled Patrol Sweeps", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(12.dp))
-                if (inspections.isEmpty()) {
+        SubScreenHeader(
+            title = "Track Patrol Scheduler",
+            subtitle = "Corridor maintenance & automated inspection calendar",
+            onBack = onBack
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Action banner
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(
+                onClick = { showDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Icon(Icons.Default.AddAlarm, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Schedule New Patrol", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+
+            IconButton(onClick = { refreshSchedules() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color(0xFF0284C7))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(modifier = Modifier.size(28.dp), color = Color(0xFF0284C7))
+            }
+        } else if (schedules.isEmpty()) {
+            RailCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE0F2FE)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = null,
+                            tint = Color(0xFF0284C7),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("No Scheduled Patrols Pending", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFF0F172A))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "No scheduled patrols pending. Initiate a 'New Patrol' from the Inspections menu for real-time corridor surveillance.",
+                        "Plan future corridor sweeps and automated camera/ultrasonic patrols using the button above.",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = Color(0xFF64748B),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
-                } else {
-                    inspections.take(5).forEach { insp ->
-                        MetricRow(insp.section, insp.status)
+                }
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(schedules) { item ->
+                    RailCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(item.section, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0F172A), modifier = Modifier.weight(1f))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            when (item.status) {
+                                                "Completed" -> Color(0xFF16A34A).copy(alpha = 0.15f)
+                                                "In Progress" -> Color(0xFFF59E0B).copy(alpha = 0.15f)
+                                                else -> Color(0xFF0284C7).copy(alpha = 0.15f)
+                                            }
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = item.status.uppercase(),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = when (item.status) {
+                                            "Completed" -> Color(0xFF16A34A)
+                                            "In Progress" -> Color(0xFFD97706)
+                                            else -> Color(0xFF0284C7)
+                                        }
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            MetricRow("Shift / Window", "${item.shift} (${item.time}) · ${item.date}")
+                            MetricRow("Patrol Mode", item.patrolType)
+                            MetricRow("Inspector", item.inspector)
+                            MetricRow("Recurrence", item.frequency)
+                            if (item.notes.isNotBlank()) {
+                                MetricRow("Notes", item.notes)
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (item.status != "Completed") {
+                                    TextButton(
+                                        onClick = {
+                                            scope.launch {
+                                                val completed = item.copy(status = "Completed")
+                                                firebaseService.saveSchedule(completed)
+                                                refreshSchedules()
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF16A34A))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Mark Completed", color = Color(0xFF16A34A), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            firebaseService.deleteSchedule(item.id)
+                                            refreshSchedules()
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFFEF4444))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Cancel", color = Color(0xFFEF4444), fontSize = 12.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    // Schedule Creation Dialog
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Schedule Track Patrol", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(
+                        value = newSection,
+                        onValueChange = { newSection = it },
+                        label = { Text("Corridor Track Section") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = newDate,
+                            onValueChange = { newDate = it },
+                            label = { Text("Date") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = newTime,
+                            onValueChange = { newTime = it },
+                            label = { Text("Time") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = newShift,
+                        onValueChange = { newShift = it },
+                        label = { Text("Shift Window") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = newPatrolType,
+                        onValueChange = { newPatrolType = it },
+                        label = { Text("Patrol Type") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = newInspector,
+                        onValueChange = { newInspector = it },
+                        label = { Text("Assigned Inspector") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = newNotes,
+                        onValueChange = { newNotes = it },
+                        label = { Text("Optional Dispatch Notes") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val scheduleId = "SCHED-${System.currentTimeMillis() % 100000}"
+                        val schedule = PatrolSchedule(
+                            id = scheduleId,
+                            section = newSection.ifBlank { "Corridor Sector 4B" },
+                            date = newDate.ifBlank { "Today" },
+                            time = newTime.ifBlank { "08:00" },
+                            shift = newShift.ifBlank { "Morning Shift" },
+                            inspector = newInspector.ifBlank { "Lead Inspector" },
+                            patrolType = newPatrolType.ifBlank { "Automated Optical & Ultrasonic" },
+                            frequency = newFrequency,
+                            status = "Scheduled",
+                            notes = newNotes
+                        )
+                        scope.launch {
+                            firebaseService.saveSchedule(schedule)
+                            refreshSchedules()
+                        }
+                        showDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                ) {
+                    Text("Save Schedule")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

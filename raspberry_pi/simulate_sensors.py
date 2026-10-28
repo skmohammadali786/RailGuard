@@ -103,6 +103,67 @@ def main():
                 status = "✓ Pushed" if ok else "✗ Failed"
                 print(f"[{step}] {status} -> {packet['chainage']} | Depth: {packet['ultrasonicDepthMm']}mm | Vib: {packet['vibrationG']}g | Temp: {packet['railTempC']}°C")
 
+                # If anomaly/crack flagged, auto-log defect, incident report & alert notification
+                if packet.get("status") == "ANOMALY_FLAGGED":
+                    now_ms = int(time.time() * 1000)
+                    now_str = time.strftime("%H:%M · %d %b")
+                    defect_id = f"DEF-SIM-{now_ms % 100000}"
+                    clean_db = args.db.rstrip("/")
+                    auth_q = f"?auth={args.auth}" if args.auth else ""
+
+                    defect_body = {
+                        "id": defect_id,
+                        "title": "Transverse Rail Fissure (Sensor Flagged)",
+                        "section": f"Corridor Sector 4B ({packet['chainage']})",
+                        "score": "CRITICAL (96% AI Flaw Match)",
+                        "tone": "CRITICAL",
+                        "time": now_str,
+                        "detail": f"Piezoelectric ultrasonic depth depression ({packet['ultrasonicDepthMm']}mm) and vibration ({packet['vibrationG']}g) flagged railhead flaw at {packet['chainage']}.",
+                        "estimatedLength": "14.8 mm",
+                        "latitude": 51.5074,
+                        "longitude": -0.1278,
+                        "riskScore": 94,
+                        "chainageCoordinate": packet["chainage"],
+                        "aiConfidencePercent": 96,
+                        "aiPrescribedAction": "Emergency Slow Order (TSR 25 km/h) & immediate track verification.",
+                        "timestamp": now_ms
+                    }
+                    report_body = {
+                        "id": f"REP-SIM-{now_ms % 100000}",
+                        "title": "Automated Sensor Crack Detection Incident Report",
+                        "section": defect_body["section"],
+                        "inspector": f"Sensor Node ({args.device})",
+                        "status": "CRITICAL INCIDENT LOGGED - IMMEDIATE ACTION REQUIRED",
+                        "generatedAt": now_ms,
+                        "defectId": defect_id,
+                        "chainage": packet["chainage"]
+                    }
+                    notif_body = {
+                        "id": f"NOTIF-SIM-{now_ms % 100000}",
+                        "title": "CRITICAL: Rail Crack Auto-Detected",
+                        "message": f"Track anomaly flagged at {packet['chainage']}. Defect logged & incident report generated.",
+                        "time": now_str,
+                        "tone": "CRITICAL",
+                        "read": False,
+                        "timestamp": now_ms
+                    }
+
+                    # Push defect, report, and notification in parallel
+                    for sub_path, payload in [
+                        (f"railguard/users/{args.uid}/defects/{defect_id}", defect_body),
+                        (f"railguard/users/{args.uid}/reports/{report_body['id']}", report_body),
+                        (f"railguard/users/{args.uid}/notifications/{notif_body['id']}", notif_body)
+                    ]:
+                        try:
+                            ep = f"{clean_db}/{sub_path}.json{auth_q}"
+                            r = urllib.request.Request(ep, data=json.dumps(payload).encode("utf-8"), method="PUT")
+                            r.add_header("Content-Type", "application/json")
+                            urllib.request.urlopen(r, timeout=5)
+                        except Exception as e:
+                            print(f"[!] Auto-log sync warning ({sub_path}): {e}")
+
+                    print(f"     [⚡ AUTO-PIPELINE] Defect {defect_id}, Incident Report & Alert Notification logged to Firebase RTDB!")
+
             if args.count > 0 and step >= args.count:
                 break
             time.sleep(args.interval)

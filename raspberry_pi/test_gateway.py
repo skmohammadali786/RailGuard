@@ -81,5 +81,29 @@ class TestCommandLifecycle(unittest.TestCase):
         self.assertEqual(cursor.last_calibration_timestamp, 0)
 
 
+class TestCameraCrackDetector(unittest.TestCase):
+    def test_defect_and_report_generation(self):
+        import camera_crack_detector as ccd
+        defect = ccd.build_camera_defect("KM 14+320", 14.8, 96)
+        self.assertTrue(defect["id"].startswith("DEF-CAM-"))
+        self.assertEqual(defect["tone"], "CRITICAL")
+        self.assertEqual(defect["chainageCoordinate"], "KM 14+320")
+        self.assertEqual(defect["aiConfidencePercent"], 96)
+
+        report = ccd.build_incident_report(defect)
+        self.assertTrue(report["id"].startswith("REP-CAM-"))
+        self.assertIn("CRITICAL", report["status"])
+
+        notif = ccd.build_safety_notification(defect)
+        self.assertTrue(notif["id"].startswith("NOTIF-"))
+        self.assertEqual(notif["tone"], "CRITICAL")
+        self.assertIn("KM 14+320", notif["message"])
+
+        telem = ccd.build_anomaly_telemetry("KM 14+320")
+        self.assertEqual(telem["status"], "ANOMALY_FLAGGED")
+        self.assertAlmostEqual(telem["ultrasonicDepthMm"], 46.2)
+
+
 if __name__ == "__main__":
     unittest.main()
+
