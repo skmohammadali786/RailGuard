@@ -371,6 +371,11 @@ fun RailGuardApp() {
                                         action = "DEFECT_LOGGED",
                                         details = "Defect ${newDefect.id} logged on ${newDefect.section}"
                                     )
+                                    firebaseService.postNotification(
+                                        title = "Defect Logged: ${newDefect.id}",
+                                        message = "${newDefect.title} on ${newDefect.section} (${newDefect.score})",
+                                        tone = newDefect.tone
+                                    )
                                 }
                             }
                         )
@@ -441,6 +446,11 @@ fun RailGuardApp() {
                                             action = "PATROL_COMPLETED",
                                             details = "Inspection ${completed.id} completed on ${completed.section}"
                                         )
+                                        firebaseService.postNotification(
+                                            title = "Patrol Completed",
+                                            message = "Inspection ${completed.id} completed on ${completed.section}",
+                                            tone = Tone.HEALTHY
+                                        )
                                     }
                                     navigateTo(Screen.InspectionSummary.route)
                                 },
@@ -475,7 +485,11 @@ fun RailGuardApp() {
                         Screen.Camera.route -> CameraScreen(
                             onCaptureDefect = {
                                 selectedDefect = defects.firstOrNull()
-                                if (selectedDefect != null) navigateTo(Screen.DefectDetails.route)
+                                if (selectedDefect != null) {
+                                    navigateTo(Screen.DefectDetails.route)
+                                } else {
+                                    navigateTo(Screen.Defects.route)
+                                }
                             },
                             onBack = { navigateBack() }
                         )
@@ -604,11 +618,16 @@ fun RailGuardApp() {
                                      if (idx >= 0) tasks[idx] = verifiedTask
                                      selectedTask = verifiedTask
                                      firebaseService.uploadTaskToFirebase(verifiedTask)
-                                         firebaseService.logSafetyAuditEvent(
-                                             action = "MAINTENANCE_VERIFIED",
-                                             details = "Task ${verifiedTask.id} completed and verified for ${verifiedTask.section}"
-                                         )
-                                     }
+                                     firebaseService.logSafetyAuditEvent(
+                                         action = "MAINTENANCE_VERIFIED",
+                                         details = "Task ${verifiedTask.id} completed and verified for ${verifiedTask.section}"
+                                     )
+                                     firebaseService.postNotification(
+                                         title = "Maintenance Verified",
+                                         message = "Task ${verifiedTask.id} (${verifiedTask.title}) verified for ${verifiedTask.section}",
+                                         tone = Tone.HEALTHY
+                                     )
+                                }
                                 }
                                 navigateBack()
                             },

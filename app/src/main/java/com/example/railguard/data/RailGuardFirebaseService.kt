@@ -350,6 +350,46 @@ class RailGuardFirebaseService private constructor() {
         }
     }
 
+    suspend fun postNotification(
+        title: String,
+        message: String,
+        tone: Tone = Tone.INFO
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val authParam = authenticatedQueryParam()
+                val notifId = "NOTIF-${System.currentTimeMillis() % 100000}"
+                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/notifications/$notifId.json$authParam"
+                val timeStr = java.text.SimpleDateFormat("HH:mm · dd MMM", java.util.Locale.getDefault()).format(java.util.Date())
+                val json = JSONObject().apply {
+                    put("id", notifId)
+                    put("title", title)
+                    put("message", message)
+                    put("time", timeStr)
+                    put("tone", tone.name)
+                    put("read", false)
+                    put("timestamp", System.currentTimeMillis())
+                }
+
+                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "PUT"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+
+                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                conn.responseCode in 200..299
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RailGuardFirebase", "Post notification error: ${e.message}")
+                false
+            }
+        }
+    }
+
     suspend fun pullObservations(
         onSuccess: (List<ObservationItem>) -> Unit,
         onError: (String) -> Unit = {}
@@ -1477,7 +1517,15 @@ class RailGuardFirebaseService private constructor() {
                 }
 
                 OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
-                conn.responseCode in 200..299
+                val isSuccess = conn.responseCode in 200..299
+                if (isSuccess) {
+                    postNotification(
+                        title = "TSR Speed Order Issued ($tsrSpeedKmH km/h)",
+                        message = "Train/Node $trainId: $reason",
+                        tone = if (tsrSpeedKmH <= 25) Tone.CRITICAL else Tone.WARNING
+                    )
+                }
+                isSuccess
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

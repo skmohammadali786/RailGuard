@@ -356,8 +356,8 @@ fun LiveInspectionScreen(
             // Real-Time Sensor Telemetry Strip Overlay
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = Color.Black.copy(alpha = 0.7f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f)),
+                color = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFCBD5E1)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -462,7 +462,7 @@ fun LiveInspectionScreen(
                 Button(
                     onClick = onOpenCamera,
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                    colors = ButtonDefaults.buttonColors(containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFF0284C7))
                 ) {
                     Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -628,7 +628,7 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Column(
             modifier = Modifier
@@ -643,19 +643,21 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("HIGH-RES CAMERA CAPTURE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text("Optical Sensor", color = Color(0xFF38BDF8), fontSize = 10.sp)
+                    Text("HIGH-RES CAMERA CAPTURE", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Optical Railhead Sensor", color = Color(0xFF0284C7), fontSize = 11.sp)
                 }
                 Box(modifier = Modifier.size(24.dp))
             }
 
             Box(
                 modifier = Modifier
-                    .size(240.dp)
-                    .border(2.dp, Color(0xFF00F0FF), CircleShape),
+                    .size(260.dp)
+                    .border(2.dp, Color(0xFF0284C7), CircleShape)
+                    .clip(CircleShape)
+                    .background(Color(0xFFF1F5F9)),
                 contentAlignment = Alignment.Center
             ) {
                 if (capturedBitmap != null) {
@@ -668,8 +670,13 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("ALIGN RAILHEAD CRACK", color = Color(0xFF00F0FF), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(40.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("ALIGN RAILHEAD CRACK", color = Color(0xFF0284C7), fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         if (uploadStatusMsg != null) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(uploadStatusMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -678,11 +685,54 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                 }
             }
 
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (isUploadingCapture) {
-                    CircularProgressIndicator(color = Color(0xFF00F0FF), modifier = Modifier.size(36.dp))
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (uploadStatusMsg != null) {
+                    Text(
+                        uploadStatusMsg ?: "",
+                        color = if (uploadStatusMsg?.contains("failed") == true || uploadStatusMsg?.contains("denied") == true) Color(0xFFDC2626) else Color(0xFF16A34A),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text("Syncing Frame & Telemetry to Cloud...", color = Color.White, fontSize = 11.sp)
+                }
+
+                if (isUploadingCapture) {
+                    CircularProgressIndicator(color = Color(0xFF0284C7), modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("Syncing Frame & Telemetry to Cloud...", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
+                } else if (capturedBitmap != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                    cameraLauncher.launch(null)
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Retake", fontSize = 12.sp)
+                        }
+
+                        Button(
+                            onClick = onCaptureDefect,
+                            modifier = Modifier.weight(1.5f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Log Defect", fontSize = 12.sp)
+                        }
+                    }
                 } else {
                     Button(
                         onClick = {
@@ -699,12 +749,12 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
                         },
                         shape = CircleShape,
                         modifier = Modifier.size(72.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
                     ) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = "Capture", tint = Color.Black)
+                        Icon(Icons.Default.CameraAlt, contentDescription = "Capture", tint = Color.White)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Tap to Capture & Transmit to Cloud", color = Color.Gray, fontSize = 11.sp)
+                    Text("Tap to Capture & Transmit to Cloud", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                 }
             }
         }
