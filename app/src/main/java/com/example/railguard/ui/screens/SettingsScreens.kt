@@ -323,13 +323,127 @@ fun AppSettingsScreen(
     var tsrInterlockEnabled by remember { mutableStateOf(preferences.tsrInterlockEnabled) }
     var syncFeedbackMsg by remember { mutableStateOf<String?>(null) }
 
+    val firebaseService = RailGuardFirebaseService.instance
+    var rpiIp by remember { mutableStateOf(firebaseService.localWifiIp) }
+    var pingResultMsg by remember { mutableStateOf<String?>(null) }
+    var isPinging by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "System & Sensor Configurations", subtitle = "ESP32, RTDB & Safety Directives", onBack = onBack)
+        SubScreenHeader(title = "System & Sensor Configurations", subtitle = "Raspberry Pi, Wi-Fi & Safety Directives", onBack = onBack)
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Direct Raspberry Pi Hardware & Wi-Fi Gateway Card
+        RailCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Wifi, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("RASPBERRY PI WI-FI LINK", fontWeight = FontWeight.Bold, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF0284C7))
+                    }
+                    com.example.railguard.components.StatusPill(
+                        label = if (firebaseService.isDirectWifiConnected) "CONNECTED (${firebaseService.directWifiLatencyMs}ms)" else "DISCONNECTED",
+                        tone = if (firebaseService.isDirectWifiConnected) com.example.railguard.model.Tone.HEALTHY else com.example.railguard.model.Tone.WARNING
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = rpiIp,
+                    onValueChange = {
+                        rpiIp = it
+                        firebaseService.updateLocalWifiIp(it)
+                    },
+                    label = { Text("Raspberry Pi Wi-Fi IP Address") },
+                    placeholder = { Text("192.168.4.1") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            isPinging = true
+                            pingResultMsg = null
+                            scope.launch {
+                                val (ok, latency) = firebaseService.testDirectWifiConnection(rpiIp)
+                                isPinging = false
+                                pingResultMsg = if (ok) {
+                                    "✓ Successfully connected to Raspberry Pi (:8080)! Latency: ${latency}ms"
+                                } else {
+                                    "✗ Cannot reach http://$rpiIp:8080. Check Pi Wi-Fi & port 8080."
+                                }
+                            }
+                        },
+                        enabled = !isPinging,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (isPinging) "Testing..." else "Test Wi-Fi Ping", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            rpiIp = "192.168.4.1"
+                            firebaseService.updateLocalWifiIp("192.168.4.1")
+                        },
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Reset AP IP", fontSize = 11.sp)
+                    }
+                }
+
+                if (pingResultMsg != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = pingResultMsg ?: "",
+                        color = if (pingResultMsg?.startsWith("✓") == true) Color(0xFF16A34A) else Color(0xFFDC2626),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                // Live Sensor Diagnostics
+                val hw = firebaseService.hardwareHealth
+                if (hw != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("ACTIVE HARDWARE SENSORS", fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Camera: ${hw.cameraSensor} (${hw.cameraFps} FPS)", fontSize = 11.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.SemiBold)
+                        Text("Battery: ${hw.batteryPercent}% (${hw.batteryVoltage}V)", fontSize = 11.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Sensors: ${hw.ultrasonicSensor} | ${hw.vibrationSensor} | ${hw.temperatureSensor}", fontSize = 10.sp, color = Color(0xFF475569))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Operational Mode: Rail Safety Standards EN 13848-1", fontWeight = FontWeight.Bold, fontSize = 13.sp)

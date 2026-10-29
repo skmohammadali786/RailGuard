@@ -123,7 +123,27 @@ class TestCameraCrackDetector(unittest.TestCase):
             data = json.loads(res.read().decode())
             self.assertIn("status", data)
 
-        # 3. TSR emergency slow order POST
+        # 3. All Data snapshot endpoint
+        with urllib.request.urlopen("http://127.0.0.1:18080/api/all_data", timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "ONLINE")
+            self.assertIn("telemetry", data)
+            self.assertIn("defects", data)
+            self.assertIn("tasks", data)
+            self.assertIn("inspections", data)
+            self.assertIn("hardware", data)
+            self.assertIn("aiOracle", data)
+
+        # 4. Hardware diagnostics endpoint
+        with urllib.request.urlopen("http://127.0.0.1:18080/api/hardware", timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "OPERATIONAL")
+            self.assertEqual(data["camera"]["status"], "ONLINE")
+            self.assertEqual(data["ultrasonic"]["status"], "ONLINE")
+
+        # 5. TSR emergency slow order POST
         req = urllib.request.Request(
             "http://127.0.0.1:18080/api/tsr",
             data=json.dumps({"speed": 25}).encode(),

@@ -351,7 +351,13 @@ fun LiveInspectionScreen(
                             .background(if (firebaseService.isConnectedToFirebase) Color(0xFF16A34A) else Color(0xFFF59E0B))
                     )
                     Text(
-                        text = if (firebaseService.isConnectedToFirebase) "LIVE CLOUD TELEMETRY" else "WAITING FOR FIREBASE",
+                        text = if (firebaseService.isDirectWifiConnected) {
+                            "PI DIRECT WI-FI · ${firebaseService.directWifiLatencyMs}ms"
+                        } else if (firebaseService.isConnectedToFirebase) {
+                            "LIVE CLOUD TELEMETRY"
+                        } else {
+                            "WAITING FOR RASPBERRY PI"
+                        },
                         color = Color(0xFF0F172A),
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,

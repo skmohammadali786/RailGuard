@@ -238,25 +238,39 @@ fun HomeScreen(
                             .background(Color(0xFF16A34A).copy(alpha = 0.1f))
                             .border(1.dp, Color(0xFF16A34A).copy(alpha = 0.3f), RoundedCornerShape(6.dp))
                             .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = Color(0xFF16A34A),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (gatewayOnline) {
-                                "Gateway connected: ${telemetry?.status}"
-                            } else {
-                                "No current gateway telemetry"
-                            },
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF16A34A)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (gatewayOnline) Icons.Default.CheckCircle else Icons.Default.Info,
+                                contentDescription = null,
+                                tint = if (gatewayOnline) Color(0xFF16A34A) else Color(0xFF64748B),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (gatewayOnline) {
+                                    "Gateway connected: ${telemetry?.status}"
+                                } else {
+                                    "No current gateway telemetry"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (gatewayOnline) Color(0xFF16A34A) else Color(0xFF64748B)
+                            )
+                        }
+
+                        val fbService = com.example.railguard.data.RailGuardFirebaseService.instance
+                        if (fbService.isDirectWifiConnected) {
+                            Text(
+                                text = "Wi-Fi Direct (${fbService.directWifiLatencyMs}ms)",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF0284C7)
+                            )
+                        }
                     }
                 }
             }
@@ -371,6 +385,31 @@ fun HomeScreen(
                     if (tsrFeedback != null) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(tsrFeedback ?: "", fontSize = 11.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                    }
+
+                    val hw = com.example.railguard.data.RailGuardFirebaseService.instance.hardwareHealth
+                    if (hw != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Camera: ${hw.cameraFps} FPS · UT: 5MHz · Battery: ${hw.batteryPercent}%",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF0284C7)
+                            )
+                            Text(
+                                text = "Pi Node: RPI-TRACK-01",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF64748B)
+                            )
+                        }
                     }
                 }
             }

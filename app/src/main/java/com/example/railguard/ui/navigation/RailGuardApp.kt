@@ -212,13 +212,34 @@ fun RailGuardApp() {
         }
     }
 
-    // High-speed real-time telemetry & automated crack detection polling (1.2s cadence)
+    // High-speed real-time telemetry, full Pi system sync & automated crack detection (1.2s cadence)
     // Direct Raspberry Pi Wi-Fi LAN query (< 50ms) with seamless Firebase cloud fallback
     LaunchedEffect(firebaseService.currentUser?.localId) {
         while (true) {
-            val liveTelemetry = firebaseService.fetchDirectWifiOrCloudTelemetry()
-            if (liveTelemetry != null) {
-                latestSensorTelemetry = liveTelemetry
+            val wifiSynced = firebaseService.syncDirectWifiAllData(
+                onSuccess = { rDefects, rTasks, rInspections ->
+                    if (rDefects.isNotEmpty()) {
+                        defects.clear()
+                        defects.addAll(rDefects)
+                    }
+                    if (rTasks.isNotEmpty()) {
+                        tasks.clear()
+                        tasks.addAll(rTasks)
+                    }
+                    if (rInspections.isNotEmpty()) {
+                        inspections.clear()
+                        inspections.addAll(rInspections)
+                    }
+                }
+            )
+
+            if (!wifiSynced) {
+                val liveTelemetry = firebaseService.fetchLatestSensorTelemetry()
+                if (liveTelemetry != null) {
+                    latestSensorTelemetry = liveTelemetry
+                }
+            } else {
+                latestSensorTelemetry = firebaseService.latestSensorTelemetry
             }
             delay(1200)
         }

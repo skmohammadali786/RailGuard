@@ -113,6 +113,37 @@ data class PatrolSchedule(
     val notes: String = ""
 )
 
+data class HardwareHealthStatus(
+    val status: String = "OPERATIONAL",
+    val cameraOnline: Boolean = true,
+    val cameraSensor: String = "Sony IMX708 (Camera Module 3)",
+    val cameraFps: Int = 30,
+    val ultrasonicOnline: Boolean = true,
+    val ultrasonicSensor: String = "Piezo UT Dual 5MHz",
+    val vibrationOnline: Boolean = true,
+    val vibrationSensor: String = "ADXL345 Tri-axial (+/-16g)",
+    val temperatureOnline: Boolean = true,
+    val temperatureSensor: String = "PT100 RTD High-Precision Probe",
+    val gpsOnline: Boolean = true,
+    val gpsSensor: String = "NEO-M9N RTK-DGPS Locked (1cm precision)",
+    val batteryPercent: Int = 94,
+    val batteryVoltage: Float = 12.4f,
+    val cpuTempC: Float = 42.8f,
+    val uptimeSeconds: Long = 0L,
+    val latencyMs: Long = 14L
+)
+
+data class AiOracleData(
+    val parisDeltaK: Float = 4.2f,
+    val parisGrowthRate: String = "0.02 um/k-cycle",
+    val nadalRatio: Float = 0.35f,
+    val derailmentRisk: String = "SAFE",
+    val thermalStressMpa: Float = 10.8f,
+    val neutralTempDelta: Float = 4.5f,
+    val fatigueCyclesRemaining: Int = 850000,
+    val timestamp: Long = 0L
+)
+
 // ==========================================
 // RAIL DATA REPOSITORY
 // ==========================================

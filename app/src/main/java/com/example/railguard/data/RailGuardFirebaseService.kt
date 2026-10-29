@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.example.railguard.model.Defect
 import com.example.railguard.model.CrackAlertData
+import com.example.railguard.model.HardwareHealthStatus
+import com.example.railguard.model.AiOracleData
 import com.example.railguard.model.AppLanguage
 import com.example.railguard.model.AppPreferences
 import com.example.railguard.model.InspectionRecord
@@ -100,6 +102,7 @@ class RailGuardFirebaseService private constructor() {
         private const val KEY_ESP32_LINK = "app_esp32_link"
         private const val KEY_HIGH_PRECISION_AI = "app_high_precision_ai"
         private const val KEY_TSR_INTERLOCK = "app_tsr_interlock"
+        private const val KEY_RPI_WIFI_IP = "rpi_wifi_ip"
 
         // Server-Side Pre-Configured Firebase Cloud Project Credentials
         const val DEFAULT_PROJECT_NAME = "railguard"
@@ -128,6 +131,12 @@ class RailGuardFirebaseService private constructor() {
     var syncStatusMessage by mutableStateOf("Ready to connect with central safety cloud database")
     var isConnectedToFirebase by mutableStateOf(false)
     var lastTestResult by mutableStateOf<ConnectionTestResult?>(null)
+
+    // Hardware & Direct Wi-Fi Gateway States
+    var hardwareHealth by mutableStateOf<HardwareHealthStatus?>(null)
+    var liveAiOracle by mutableStateOf<AiOracleData?>(null)
+    var isDirectWifiConnected by mutableStateOf(false)
+    var directWifiLatencyMs by mutableStateOf(0L)
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -159,6 +168,8 @@ class RailGuardFirebaseService private constructor() {
             } catch (e: Exception) {
                 DatabaseBackendType.REALTIME_DATABASE
             }
+
+            localWifiIp = prefs.getString(KEY_RPI_WIFI_IP, "192.168.4.1") ?: "192.168.4.1"
 
             // Restore user session if saved
             val savedUserId = prefs.getString(KEY_USER_ID, null)
@@ -2315,6 +2326,238 @@ class RailGuardFirebaseService private constructor() {
                 }
             }
             null
+        }
+    }
+
+    fun updateLocalWifiIp(newIp: String) {
+        val clean = newIp.trim()
+        if (clean.isNotBlank()) {
+            localWifiIp = clean
+            sharedPreferences?.edit()?.putString(KEY_RPI_WIFI_IP, clean)?.apply()
+        }
+    }
+
+    suspend fun testDirectWifiConnection(ip: String = localWifiIp): Pair<Boolean, Long> {
+        return withContext(Dispatchers.IO) {
+            val startMs = System.currentTimeMillis()
+            try {
+                val conn = (URL("http://$ip:8080/api/health").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 1200
+                    readTimeout = 1200
+                }
+                val code = conn.responseCode
+                val latency = System.currentTimeMillis() - startMs
+                if (code in 200..299) {
+                    withContext(Dispatchers.Main) {
+                        isDirectWifiConnected = true
+                        directWifiLatencyMs = latency
+                    }
+                    Pair(true, latency)
+                } else {
+                    Pair(false, 0L)
+                }
+            } catch (_: Exception) {
+                Pair(false, 0L)
+            }
+        }
+    }
+
+    /**
+     * Complete live system sync over direct Wi-Fi:
+     * Pulls telemetry, hardware health, defects, work orders, inspections, reports, and AI physics metrics
+     */
+    suspend fun syncDirectWifiAllData(
+        onSuccess: (List<Defect>, List<MaintenanceTask>, List<InspectionRecord>) -> Unit = { _, _, _ -> }
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
+            val candidateHosts = listOf(localWifiIp, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            for (candidate in candidateHosts) {
+                val startMs = System.currentTimeMillis()
+                try {
+                    val conn = (URL("http://$candidate:8080/api/all_data").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 1000
+                        readTimeout = 1000
+                    }
+                    if (conn.responseCode in 200..299) {
+                        val roundTripMs = System.currentTimeMillis() - startMs
+                        val body = conn.inputStream.bufferedReader().use { it.readText() }
+                        if (body.isNotBlank() && body != "null") {
+                            val json = JSONObject(body)
+
+                            // 1. Telemetry
+                            val telemObj = json.optJSONObject("telemetry")
+                            if (telemObj != null) {
+                                val statusStr = telemObj.optString("status", "Unknown")
+                                val isAnomalyFlagged = telemObj.optBoolean("hasCrack", false) || statusStr.contains("ANOMALY", ignoreCase = true)
+                                val telem = LiveSensorTelemetry(
+                                    nodeId = telemObj.optString("nodeId", "RPI-TRACK-01"),
+                                    ultrasonicDepthMm = telemObj.optDouble("ultrasonicDepthMm", 0.0).toFloat(),
+                                    vibrationG = telemObj.optDouble("vibrationG", 0.0).toFloat(),
+                                    railTempC = telemObj.optDouble("railTempC", 0.0).toFloat(),
+                                    axleSpeedKmh = telemObj.optDouble("axleSpeedKmh", 0.0).toFloat(),
+                                    chainage = telemObj.optString("chainage", "KM 14+320"),
+                                    hardware = telemObj.optString("hardware", "Raspberry Pi 4 / Camera Module 3 / Piezo UT"),
+                                    status = statusStr,
+                                    timestamp = telemObj.optLong("timestamp", System.currentTimeMillis()),
+                                    hasCrack = isAnomalyFlagged,
+                                    flawType = telemObj.optString("flawType", if (isAnomalyFlagged) "Transverse Gauge Corner Fissure" else ""),
+                                    crackLengthMm = telemObj.optDouble("crackLengthMm", if (isAnomalyFlagged) 14.8 else 0.0).toFloat(),
+                                    aiConfidencePercent = telemObj.optInt("aiConfidencePercent", if (isAnomalyFlagged) 96 else 0),
+                                    recommendedTsrKmh = telemObj.optDouble("recommendedTsrKmh", 25.0).toFloat(),
+                                    crackBoundingBox = telemObj.optString("crackBoundingBox", if (isAnomalyFlagged) "x:140,y:88,w:120,h:45" else "")
+                                )
+                                withContext(Dispatchers.Main) {
+                                    latestSensorTelemetry = telem
+                                    isConnectedToFirebase = true
+                                }
+                                autoProcessDetectedCrack(telem)
+                            }
+
+                            // 2. Hardware Diagnostics
+                            val hwObj = json.optJSONObject("hardware")
+                            if (hwObj != null) {
+                                val cam = hwObj.optJSONObject("camera")
+                                val ut = hwObj.optJSONObject("ultrasonic")
+                                val vib = hwObj.optJSONObject("vibration")
+                                val temp = hwObj.optJSONObject("temperature")
+                                val gnss = hwObj.optJSONObject("encoderGps")
+                                val bat = hwObj.optJSONObject("battery")
+                                val sys = hwObj.optJSONObject("system")
+                                val hwStatus = HardwareHealthStatus(
+                                    status = hwObj.optString("status", "OPERATIONAL"),
+                                    cameraOnline = cam?.optString("status") == "ONLINE",
+                                    cameraSensor = cam?.optString("sensor", "Sony IMX708") ?: "Sony IMX708",
+                                    cameraFps = cam?.optInt("fps", 30) ?: 30,
+                                    ultrasonicOnline = ut?.optString("status") == "ONLINE",
+                                    ultrasonicSensor = ut?.optString("sensor", "Piezo UT 5MHz") ?: "Piezo UT 5MHz",
+                                    vibrationOnline = vib?.optString("status") == "ONLINE",
+                                    vibrationSensor = vib?.optString("sensor", "ADXL345 Tri-axial") ?: "ADXL345 Tri-axial",
+                                    temperatureOnline = temp?.optString("status") == "ONLINE",
+                                    temperatureSensor = temp?.optString("sensor", "PT100 RTD") ?: "PT100 RTD",
+                                    gpsOnline = gnss?.optString("status") == "ONLINE",
+                                    gpsSensor = gnss?.optString("gnss", "RTK-DGPS Locked") ?: "RTK-DGPS Locked",
+                                    batteryPercent = bat?.optInt("percent", 94) ?: 94,
+                                    batteryVoltage = bat?.optDouble("voltage", 12.4)?.toFloat() ?: 12.4f,
+                                    cpuTempC = sys?.optDouble("cpuTempC", 42.8)?.toFloat() ?: 42.8f,
+                                    uptimeSeconds = sys?.optLong("uptimeSeconds", 0L) ?: 0L,
+                                    latencyMs = roundTripMs
+                                )
+                                withContext(Dispatchers.Main) {
+                                    hardwareHealth = hwStatus
+                                }
+                            }
+
+                            // 3. AI Oracle Physics
+                            val aiObj = json.optJSONObject("aiOracle")
+                            if (aiObj != null) {
+                                val aiOracle = AiOracleData(
+                                    parisDeltaK = aiObj.optDouble("parisDeltaK", 4.2).toFloat(),
+                                    parisGrowthRate = aiObj.optString("parisGrowthRate", "0.02 um/k-cycle"),
+                                    nadalRatio = aiObj.optDouble("nadalRatio", 0.35).toFloat(),
+                                    derailmentRisk = aiObj.optString("derailmentRisk", "SAFE"),
+                                    thermalStressMpa = aiObj.optDouble("thermalStressMpa", 10.8).toFloat(),
+                                    neutralTempDelta = aiObj.optDouble("neutralTempDelta", 4.5).toFloat(),
+                                    fatigueCyclesRemaining = aiObj.optInt("fatigueCyclesRemaining", 850000),
+                                    timestamp = aiObj.optLong("timestamp", System.currentTimeMillis())
+                                )
+                                withContext(Dispatchers.Main) {
+                                    liveAiOracle = aiOracle
+                                }
+                            }
+
+                            // 4. Defects, Tasks, Inspections
+                            val rDefects = mutableListOf<Defect>()
+                            val defectsArr = json.optJSONArray("defects")
+                            if (defectsArr != null) {
+                                for (i in 0 until defectsArr.length()) {
+                                    val item = defectsArr.getJSONObject(i)
+                                    rDefects.add(
+                                        Defect(
+                                            id = item.optString("id", "DEF-$i"),
+                                            title = item.optString("title", "Track Defect"),
+                                            section = item.optString("section", "Mainline"),
+                                            score = item.optString("score", "CRITICAL"),
+                                            tone = try { Tone.valueOf(item.optString("tone", "CRITICAL")) } catch (_: Exception) { Tone.CRITICAL },
+                                            time = item.optString("time", "Now"),
+                                            detail = item.optString("detail", ""),
+                                            estimatedLength = item.optString("estimatedLength", "14.8 mm"),
+                                            latitude = item.optDouble("latitude", 51.5074),
+                                            longitude = item.optDouble("longitude", -0.1278),
+                                            riskScore = item.optInt("riskScore", 94),
+                                            chainageCoordinate = item.optString("chainageCoordinate", "KM 14+320"),
+                                            aiConfidencePercent = item.optInt("aiConfidencePercent", 96),
+                                            aiPrescribedAction = item.optString("aiPrescribedAction", "Emergency Slow Order (TSR 25 km/h)"),
+                                            flawType = item.optString("flawType", "Transverse Gauge Corner Fissure"),
+                                            ultrasonicDepthMm = item.optDouble("ultrasonicDepthMm", 46.2).toFloat(),
+                                            vibrationG = item.optDouble("vibrationG", 0.425).toFloat(),
+                                            railTempC = item.optDouble("railTempC", 32.8).toFloat(),
+                                            speedKmh = item.optDouble("speedKmh", 45.0).toFloat(),
+                                            boundingBox = item.optString("boundingBox", "x:140,y:88,w:120,h:45")
+                                        )
+                                    )
+                                }
+                            }
+
+                            val rTasks = mutableListOf<MaintenanceTask>()
+                            val tasksArr = json.optJSONArray("tasks")
+                            if (tasksArr != null) {
+                                for (i in 0 until tasksArr.length()) {
+                                    val item = tasksArr.getJSONObject(i)
+                                    rTasks.add(
+                                        MaintenanceTask(
+                                            id = item.optString("id", "TSK-$i"),
+                                            title = item.optString("title", "Maintenance Work Order"),
+                                            section = item.optString("section", "Mainline"),
+                                            due = item.optString("due", "Within 4 Hours"),
+                                            tone = try { Tone.valueOf(item.optString("tone", "CRITICAL")) } catch (_: Exception) { Tone.CRITICAL },
+                                            assignee = item.optString("assignee", "Track Response Crew"),
+                                            status = item.optString("status", "Dispatched"),
+                                            torque = item.optString("torque", "220 Nm verified")
+                                        )
+                                    )
+                                }
+                            }
+
+                            val rInspections = mutableListOf<InspectionRecord>()
+                            val inspArr = json.optJSONArray("inspections")
+                            if (inspArr != null) {
+                                for (i in 0 until inspArr.length()) {
+                                    val item = inspArr.getJSONObject(i)
+                                    rInspections.add(
+                                        InspectionRecord(
+                                            id = item.optString("id", "INSP-$i"),
+                                            section = item.optString("section", "Sector 4B"),
+                                            date = item.optString("date", "Today"),
+                                            inspector = item.optString("inspector", "RailGuard Vision AI (Raspberry Pi)"),
+                                            status = item.optString("status", "Active"),
+                                            framesCount = item.optInt("framesCount", 1420),
+                                            detectionsCount = item.optInt("detectionsCount", rDefects.size),
+                                            detectedCrackTitle = item.optString("detectedCrackTitle", "Rail Surface"),
+                                            recommendedMaintenanceAction = item.optString("recommendedMaintenanceAction", "Nominal Track Condition")
+                                        )
+                                    )
+                                }
+                            }
+
+                            withContext(Dispatchers.Main) {
+                                isDirectWifiConnected = true
+                                directWifiLatencyMs = roundTripMs
+                                if (rDefects.isNotEmpty() || rTasks.isNotEmpty() || rInspections.isNotEmpty()) {
+                                    onSuccess(rDefects, rTasks, rInspections)
+                                }
+                            }
+                            return@withContext true
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            withContext(Dispatchers.Main) {
+                isDirectWifiConnected = false
+            }
+            false
         }
     }
 
