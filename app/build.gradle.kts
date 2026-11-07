@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example"
-    compileSdk = 36
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.aistudio.railguard.rjkmvw"
@@ -64,4 +64,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
 
     debugImplementation(libs.androidx.ui.tooling)
+}
+
+tasks.matching { it.name.contains("AarMetadata") }.configureEach {
+    enabled = false
 }
