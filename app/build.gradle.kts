@@ -50,6 +50,9 @@ android {
     buildFeatures {
         compose = true
     }
+    androidResources {
+        additionalParameters += listOf("--no-compile-sdk-metadata")
+    }
 }
 
 dependencies {
