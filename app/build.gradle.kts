@@ -12,10 +12,13 @@ android {
         applicationId = "com.railguard.app"
         minSdk = 26
         targetSdk = 33
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
     }
 
+    // Keep the existing key for this repair build so it can update an
+    // installation that was signed by the current repository build.
+    // Replace this with a private release keystore before public distribution.
     signingConfigs {
         getByName("debug") {
             storeFile = file("${rootDir}/debug.keystore")
@@ -24,6 +27,7 @@ android {
             keyPassword = "android"
             enableV1Signing = true
             enableV2Signing = true
+            enableV3Signing = true
         }
     }
 
@@ -40,6 +44,7 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
