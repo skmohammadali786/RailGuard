@@ -9,7 +9,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.aistudio.railguard.rjkmvw"
+        applicationId = "com.railguard.app"
         minSdk = 26
         targetSdk = 33
         versionCode = 1
@@ -30,6 +30,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
