@@ -1,0 +1,108 @@
+name: Build RailGuard APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Ensure debug keystore exists
+        run: |
+          if [ ! -f debug.keystore ]; then
+            keytool -genkey -v \
+              -keystore debug.keystore \
+              -alias androiddebugkey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+
+      - name: Build Release APK (unsigned)
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        continue-on-error: true
+
+      - name: Find APK files
+        run: find . -name "*.apk" -type f | sort
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RailGuard-Debug-APK
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RailGuard-Release-APK
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: RailGuard v1.0.${{ github.run_number }}
+          body: |
+            ## RailGuard Android APK — Build ${{ github.run_number }}
+            
+            ### What's included:
+            - ✅ Full Firebase Authentication (Sign Up / Sign In)
+            - ✅ Real-time crack detection via Raspberry Pi Wi-Fi
+            - ✅ Live sensor telemetry (Camera, UT, Vibration, GPS, Temperature)
+            - ✅ Defect management with AI risk scoring
+            - ✅ Interactive corridor map with live GPS pins
+            - ✅ Maintenance work order management
+            - ✅ AI Oracle (Paris fracture kinetics, Nadal derailment ratio)
+            - ✅ Report generation
+            - ✅ PIN security lock
+            
+            ### How to install:
+            1. Download `RailGuard-debug.apk` below
+            2. Enable "Install from unknown sources" in Android Settings → Security
+            3. Open the APK file and install
+            4. Sign up with your email and start using
+            
+            ### To connect to Raspberry Pi:
+            Go to Settings → Raspberry Pi Wi-Fi Link → Enter Pi IP address
+          files: app/build/outputs/apk/debug/*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
