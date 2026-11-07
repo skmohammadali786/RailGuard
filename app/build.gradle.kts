@@ -11,7 +11,7 @@ android {
     defaultConfig {
         applicationId = "com.aistudio.railguard.rjkmvw"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 33
         versionCode = 1
         versionName = "1.0.0"
     }
@@ -22,6 +22,8 @@ android {
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 
