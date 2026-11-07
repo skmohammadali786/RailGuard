@@ -2,6 +2,7 @@ package com.example.railguard.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,6 +47,7 @@ fun HomeScreen(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDark.current
+    val scope = rememberCoroutineScope()
     val gatewayOnline = telemetry != null &&
         (telemetry.timestamp == 0L || System.currentTimeMillis() - telemetry.timestamp < 30_000L)
 
@@ -363,7 +365,7 @@ fun HomeScreen(
                                         scope.launch {
                                             com.example.railguard.data.RailGuardFirebaseService.instance.dispatchTsrToFirebase(
                                                 trainId = telemetry?.nodeId ?: "RPI-TRACK-01",
-                                                speedKmH = speed,
+                                                tsrSpeedKmH = speed,
                                                 reason = "Operator speed order: $speed km/h"
                                             )
                                             tsrFeedback = "TSR $speed km/h sent to hardware ✓"

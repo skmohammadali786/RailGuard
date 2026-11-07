@@ -67,9 +67,9 @@ fun AiOracleScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    val liveAiOracle by RailGuardFirebaseService.instance.liveAiOracle.collectAsState()
-    val isDirectWifiConnected by RailGuardFirebaseService.instance.isDirectWifiConnected.collectAsState()
-    val directWifiLatencyMs by RailGuardFirebaseService.instance.directWifiLatencyMs.collectAsState()
+    val liveAiOracle = RailGuardFirebaseService.instance.liveAiOracle
+    val isDirectWifiConnected = RailGuardFirebaseService.instance.isDirectWifiConnected
+    val directWifiLatencyMs = RailGuardFirebaseService.instance.directWifiLatencyMs
 
     // Active Neural Model
     var activeModelIndex by remember { mutableIntStateOf(0) }

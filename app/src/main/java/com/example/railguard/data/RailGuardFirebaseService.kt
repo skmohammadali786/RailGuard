@@ -1368,7 +1368,7 @@ class RailGuardFirebaseService private constructor() {
                                     title = item.optString("title", "Track Defect"),
                                     section = item.optString("section", "Mainline"),
                                      score = item.optString("score", "Unknown"),
-                                     tone = try { Tone.valueOf(item.optString("tone", Tone.UNKNOWN.name)) } catch (e: Exception) { Tone.UNKNOWN },
+                                     tone = try { Tone.valueOf(item.optString("tone", Tone.NEUTRAL.name)) } catch (e: Exception) { Tone.NEUTRAL },
                                      time = item.optString("time", "Unknown"),
                                     detail = item.optString("detail", ""),
                                      estimatedLength = item.optString("estimatedLength", "Unknown"),

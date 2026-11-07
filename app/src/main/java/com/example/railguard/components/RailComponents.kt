@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.railguard.model.Defect
 import com.example.railguard.model.LocalAppSettings
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
@@ -468,6 +469,7 @@ fun RealTimeTrainLineMap(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDark.current
+    val settings = LocalAppSettings.current
 
     var isCompactView by remember(compact) { mutableStateOf(compact) }
 

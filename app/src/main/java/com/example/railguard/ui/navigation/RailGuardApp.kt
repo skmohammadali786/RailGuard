@@ -683,7 +683,6 @@ fun RailGuardApp() {
                                          tone = Tone.HEALTHY
                                      )
                                 }
-                                }
                                 navigateBack()
                             },
                             onBack = { navigateBack() }
