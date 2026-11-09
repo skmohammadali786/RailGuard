@@ -637,7 +637,7 @@ fun InspectionCalendarScreen(
     var isLoading by remember { mutableStateOf(true) }
 
     // Form inputs for new schedule
-    var newSection by remember { mutableStateOf("Sector 4B North Loop (KM 14+000 - KM 18+500)") }
+    var newSection by remember { mutableStateOf("Mainline Track Corridor") }
     var newDate by remember { mutableStateOf("Tomorrow") }
     var newTime by remember { mutableStateOf("06:00") }
     var newShift by remember { mutableStateOf("Morning Shift") }
@@ -906,7 +906,7 @@ fun InspectionCalendarScreen(
                         val scheduleId = "SCHED-${System.currentTimeMillis() % 100000}"
                         val schedule = PatrolSchedule(
                             id = scheduleId,
-                            section = newSection.ifBlank { "Corridor Sector 4B" },
+                            section = newSection.ifBlank { "Mainline Track Corridor" },
                             date = newDate.ifBlank { "Today" },
                             time = newTime.ifBlank { "08:00" },
                             shift = newShift.ifBlank { "Morning Shift" },

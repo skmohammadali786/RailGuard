@@ -330,45 +330,40 @@ fun LoginScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Header Brand Icon & Firebase Cloud Status
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Centered Brand Shield Logo
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colorScheme.primary),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(colorScheme.primary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = null,
-                            tint = colorScheme.onPrimary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(colorScheme.primaryContainer.copy(alpha = 0.5f))
-                            .border(1.dp, colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "FIELD TERMINAL",
-                            color = colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Shield,
+                        contentDescription = "RailGuard Shield",
+                        tint = colorScheme.onPrimary,
+                        modifier = Modifier.size(32.dp)
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "RAILGUARD",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    color = colorScheme.onBackground,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "AUTONOMOUS TRACK SAFETY & FIELD INSPECTION",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Prominent Mode Switcher Tabs: Sign In / Create Account
                 TabRow(
@@ -671,6 +666,26 @@ fun LoginScreen(
                             .clickable { authMode = 0 }
                     )
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = colorScheme.outline.copy(alpha = 0.25f))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        keyboardController?.hide()
+                        focusManager.clearFocus(force = true)
+                        onLoginSuccess()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0284C7)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Direct Raspberry Pi Wi-Fi Mode (Offline)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -716,44 +731,40 @@ fun RegistrationScreen(
                 verticalArrangement = Arrangement.Center
             ) {
                 // Header Brand Icon & Firebase Cloud Status
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Centered Brand Icon
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colorScheme.primary),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(colorScheme.primary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PersonAdd,
-                            contentDescription = null,
-                            tint = colorScheme.onPrimary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(colorScheme.primaryContainer.copy(alpha = 0.5f))
-                            .border(1.dp, colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "NEW REGISTRATION",
-                            color = colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.PersonAdd,
+                        contentDescription = "New Inspector Registration",
+                        tint = colorScheme.onPrimary,
+                        modifier = Modifier.size(32.dp)
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "RAILGUARD",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    color = colorScheme.onBackground,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "FIELD INSPECTOR REGISTRATION",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Prominent Mode Switcher Tabs
                 TabRow(

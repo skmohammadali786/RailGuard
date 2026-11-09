@@ -2302,7 +2302,7 @@ class RailGuardFirebaseService private constructor() {
                                 vibrationG = json.optDouble("vibrationG", 0.0).toFloat(),
                                 railTempC = json.optDouble("railTempC", 0.0).toFloat(),
                                 axleSpeedKmh = json.optDouble("axleSpeedKmh", 0.0).toFloat(),
-                                chainage = json.optString("chainage", "KM 14+320"),
+                                chainage = json.optString("chainage", "Awaiting Chainage"),
                                 hardware = json.optString("hardware", "Raspberry Pi 4 / Camera Module 3 / Piezo UT"),
                                 status = statusStr,
                                 timestamp = json.optLong("timestamp", System.currentTimeMillis()),
@@ -2343,8 +2343,8 @@ class RailGuardFirebaseService private constructor() {
             try {
                 val conn = (URL("http://$ip:8080/api/health").openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
-                    connectTimeout = 1200
-                    readTimeout = 1200
+                    connectTimeout = 1500
+                    readTimeout = 1500
                 }
                 val code = conn.responseCode
                 val latency = System.currentTimeMillis() - startMs
@@ -2361,6 +2361,32 @@ class RailGuardFirebaseService private constructor() {
                 Pair(false, 0L)
             }
         }
+    }
+
+    suspend fun connectDirectWifi(targetIp: String = localWifiIp): Pair<Boolean, String> {
+        return withContext(Dispatchers.IO) {
+            val cleanIp = targetIp.trim().ifBlank { "192.168.4.1" }
+            updateLocalWifiIp(cleanIp)
+            val (ok, latency) = testDirectWifiConnection(cleanIp)
+            if (ok) {
+                syncDirectWifiAllData()
+                withContext(Dispatchers.Main) {
+                    isDirectWifiConnected = true
+                    directWifiLatencyMs = latency
+                }
+                Pair(true, "Successfully connected to Raspberry Pi on $cleanIp:8080 (${latency}ms)")
+            } else {
+                withContext(Dispatchers.Main) {
+                    isDirectWifiConnected = false
+                }
+                Pair(false, "Cannot reach http://$cleanIp:8080. Check Pi Wi-Fi hotspot & port 8080.")
+            }
+        }
+    }
+
+    fun disconnectDirectWifi() {
+        isDirectWifiConnected = false
+        directWifiLatencyMs = 0L
     }
 
     /**
@@ -2397,7 +2423,7 @@ class RailGuardFirebaseService private constructor() {
                                     vibrationG = telemObj.optDouble("vibrationG", 0.0).toFloat(),
                                     railTempC = telemObj.optDouble("railTempC", 0.0).toFloat(),
                                     axleSpeedKmh = telemObj.optDouble("axleSpeedKmh", 0.0).toFloat(),
-                                    chainage = telemObj.optString("chainage", "KM 14+320"),
+                                    chainage = telemObj.optString("chainage", "Awaiting Chainage"),
                                     hardware = telemObj.optString("hardware", "Raspberry Pi 4 / Camera Module 3 / Piezo UT"),
                                     status = statusStr,
                                     timestamp = telemObj.optLong("timestamp", System.currentTimeMillis()),
@@ -2486,7 +2512,7 @@ class RailGuardFirebaseService private constructor() {
                                             latitude = item.optDouble("latitude", 51.5074),
                                             longitude = item.optDouble("longitude", -0.1278),
                                             riskScore = item.optInt("riskScore", 94),
-                                            chainageCoordinate = item.optString("chainageCoordinate", "KM 14+320"),
+                                            chainageCoordinate = item.optString("chainageCoordinate", "Awaiting Chainage"),
                                             aiConfidencePercent = item.optInt("aiConfidencePercent", 96),
                                             aiPrescribedAction = item.optString("aiPrescribedAction", "Emergency Slow Order (TSR 25 km/h)"),
                                             flawType = item.optString("flawType", "Transverse Gauge Corner Fissure"),
@@ -2528,7 +2554,7 @@ class RailGuardFirebaseService private constructor() {
                                     rInspections.add(
                                         InspectionRecord(
                                             id = item.optString("id", "INSP-$i"),
-                                            section = item.optString("section", "Sector 4B"),
+                                            section = item.optString("section", "Active Corridor"),
                                             date = item.optString("date", "Today"),
                                             inspector = item.optString("inspector", "RailGuard Vision AI (Raspberry Pi)"),
                                             status = item.optString("status", "Active"),
@@ -2627,7 +2653,7 @@ class RailGuardFirebaseService private constructor() {
 
         try {
             val defectId = "DEF-AUTO-${System.currentTimeMillis() % 100000}"
-            val sectionName = if (telemetry.chainage.isNotBlank() && telemetry.chainage != "Unknown") "Corridor Sector 4B (${telemetry.chainage})" else "Corridor Sector 4B"
+            val sectionName = if (telemetry.chainage.isNotBlank() && telemetry.chainage != "Unknown" && telemetry.chainage != "Awaiting Chainage") "Active Corridor (${telemetry.chainage})" else "Active Corridor"
             val crackDefect = Defect(
                 id = defectId,
                 title = "Transverse Rail Fissure (Auto-Detected)",
@@ -2635,7 +2661,7 @@ class RailGuardFirebaseService private constructor() {
                 score = "CRITICAL (${if (telemetry.aiConfidencePercent > 0) telemetry.aiConfidencePercent else 96}% AI Flaw Match)",
                 tone = Tone.CRITICAL,
                 time = java.text.SimpleDateFormat("HH:mm · dd MMM", java.util.Locale.getDefault()).format(java.util.Date()),
-                detail = "Automated camera & ultrasonic edge scan flagged surface rail crack at ${telemetry.chainage}. Flaw depth: ${telemetry.ultrasonicDepthMm} mm (-22.0 mm drop from nominal 68.2 mm). Impact vibration: ${telemetry.vibrationG} g.",
+                detail = "Automated camera & ultrasonic edge scan flagged surface rail crack at ${telemetry.chainage}. Flaw depth: ${telemetry.ultrasonicDepthMm} mm. Impact vibration: ${telemetry.vibrationG} g.",
                 estimatedLength = if (telemetry.crackLengthMm > 0) "${telemetry.crackLengthMm} mm" else "14.8 mm",
                 latitude = 51.5074,
                 longitude = -0.1278,

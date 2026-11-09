@@ -25,11 +25,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.Defect
 import com.example.railguard.model.LocalAppSettings
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
 import com.example.railguard.theme.toneColor
+import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.launch
 
 @Composable
 fun Header(
@@ -115,25 +118,66 @@ fun Header(
             }
         }
 
-        if (actions != null) {
-            actions()
-        } else if (onNotificationClick != null) {
+        var showHeaderWifiDialog by remember { mutableStateOf(false) }
+        val fbService = RailGuardFirebaseService.instance
+        val isWifiOnline = fbService.isDirectWifiConnected
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Wi-Fi Quick Access Chip
             Box(
                 modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colorScheme.surfaceVariant.copy(alpha = 0.7f))
-                    .border(1.dp, colorScheme.outline, RoundedCornerShape(10.dp))
-                    .clickable { onNotificationClick() },
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isWifiOnline) Color(0xFF16A34A).copy(alpha = 0.12f) else colorScheme.surfaceVariant.copy(alpha = 0.7f))
+                    .border(1.dp, if (isWifiOnline) Color(0xFF16A34A).copy(alpha = 0.4f) else colorScheme.outline, RoundedCornerShape(8.dp))
+                    .clickable { showHeaderWifiDialog = true }
+                    .padding(horizontal = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Notifications,
-                    contentDescription = "Notifications",
-                    tint = colorScheme.onSurface,
-                    modifier = Modifier.size(20.dp)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Wifi,
+                        contentDescription = "Pi Wi-Fi",
+                        tint = if (isWifiOnline) Color(0xFF16A34A) else colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (isWifiOnline) "${fbService.directWifiLatencyMs}ms" else "Pi Wi-Fi",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isWifiOnline) Color(0xFF16A34A) else colorScheme.onSurfaceVariant
+                    )
+                }
             }
+
+            if (actions != null) {
+                actions()
+            } else if (onNotificationClick != null) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(colorScheme.surfaceVariant.copy(alpha = 0.7f))
+                        .border(1.dp, colorScheme.outline, RoundedCornerShape(8.dp))
+                        .clickable { onNotificationClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Notifications,
+                        contentDescription = "Notifications",
+                        tint = colorScheme.onSurface,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        if (showHeaderWifiDialog) {
+            RaspberryPiWifiDialog(onDismiss = { showHeaderWifiDialog = false })
         }
     }
 }
@@ -477,7 +521,7 @@ fun RealTimeTrainLineMap(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(if (isDark) Color(0xFF0F1722) else Color(0xFF1E293B))
+            .background(Color(0xFFF8FAFC))
             .border(1.dp, colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
             .padding(if (isCompactView) 8.dp else 14.dp)
     ) {
@@ -492,12 +536,12 @@ fun RealTimeTrainLineMap(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF64748B))
+                        .background(Color(0xFF0284C7))
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = if (isCompactView) "CORRIDOR SCHEMATIC (MINI)" else "CORRIDOR LINE SCHEMATIC",
-                    color = Color.White,
+                    color = Color(0xFF0F172A),
                     fontSize = if (isCompactView) 9.5.sp else 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
@@ -512,14 +556,14 @@ fun RealTimeTrainLineMap(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .background(if (isCompactView) Color(0xFF0284C7).copy(alpha = 0.25f) else Color(0xFF334155))
-                        .border(1.dp, if (isCompactView) Color(0xFF38BDF8) else Color(0xFF64748B), RoundedCornerShape(4.dp))
+                        .background(if (isCompactView) Color(0xFF0284C7).copy(alpha = 0.15f) else Color(0xFFE2E8F0))
+                        .border(1.dp, if (isCompactView) Color(0xFF0284C7) else Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
                         .clickable { isCompactView = !isCompactView }
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = if (isCompactView) "EXPAND" else "MINI",
-                        color = if (isCompactView) Color(0xFF38BDF8) else Color.White,
+                        color = if (isCompactView) Color(0xFF0284C7) else Color(0xFF334155),
                         fontSize = 8.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
@@ -530,12 +574,12 @@ fun RealTimeTrainLineMap(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFFEF4444).copy(alpha = 0.2f))
+                            .background(Color(0xFFEF4444).copy(alpha = 0.15f))
                             .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = "${settings.formatSpeed(25)} ZONE",
-                            color = Color(0xFFFCA5A5),
+                            color = Color(0xFFDC2626),
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -544,18 +588,18 @@ fun RealTimeTrainLineMap(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF16A34A).copy(alpha = 0.2f))
+                            .background(Color(0xFF16A34A).copy(alpha = 0.15f))
                             .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
-                        text = "NO CLOUD RECORDS",
-                        color = Color(0xFFCBD5E1),
+                        text = "NOMINAL PATROL",
+                        color = Color(0xFF16A34A),
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
-                Text("SCHEMATIC", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                Text("SCHEMATIC", color = Color(0xFF64748B), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
         }
 
@@ -567,7 +611,7 @@ fun RealTimeTrainLineMap(
                 .fillMaxWidth()
                 .height(if (isCompactView) 96.dp else 190.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF0B131E))
+                .background(Color(0xFFF1F5F9))
                 .padding(horizontal = 8.dp, vertical = if (isCompactView) 4.dp else 8.dp)
         ) {
             // Speed restriction zone highlight band only when critical defects exist
@@ -590,7 +634,7 @@ fun RealTimeTrainLineMap(
                     .height(2.dp)
                     .align(Alignment.Center)
                     .offset(y = if (isCompactView) (-12).dp else (-18).dp)
-                    .background(Color(0xFF38BDF8).copy(alpha = 0.8f))
+                    .background(Color(0xFF0284C7).copy(alpha = 0.8f))
             )
             // Down Line (Southbound)
             Box(
@@ -599,7 +643,7 @@ fun RealTimeTrainLineMap(
                     .height(2.dp)
                     .align(Alignment.Center)
                     .offset(y = if (isCompactView) 12.dp else 18.dp)
-                    .background(Color(0xFF94A3B8).copy(alpha = 0.6f))
+                    .background(Color(0xFF64748B).copy(alpha = 0.6f))
             )
 
             // Cross ties / sleepers
@@ -614,7 +658,7 @@ fun RealTimeTrainLineMap(
                         modifier = Modifier
                             .width(2.5.dp)
                             .height(if (isCompactView) 34.dp else 46.dp)
-                            .background(Color.White.copy(alpha = 0.12f))
+                            .background(Color(0xFFCBD5E1))
                     )
                 }
             }
@@ -685,7 +729,8 @@ fun RealTimeTrainLineMap(
             }
         }
 
-        // Backend telemetry is rendered directly on operational screens (HomeScreen, LiveInspectionScreen)
+        // Live Raspberry Pi / Cloud Telemetry Status
+        val liveTelem = RailGuardFirebaseService.instance.latestSensorTelemetry
         Spacer(modifier = Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -693,14 +738,14 @@ fun RealTimeTrainLineMap(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Telemetry values are available only when returned by Firebase.",
+                text = if (liveTelem != null) "Pi Gateway: ${liveTelem.nodeId} · Chainage ${liveTelem.chainage}" else "Awaiting Raspberry Pi telemetry stream",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "NO TELEMETRY",
-                color = Color(0xFF94A3B8),
+                text = if (liveTelem != null) "%.1f km/h".format(liveTelem.axleSpeedKmh) else "STANDBY",
+                color = if (liveTelem != null) Color(0xFF0284C7) else Color(0xFF94A3B8),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
@@ -784,4 +829,418 @@ fun StatusChip(
         modifier = modifier
     )
 }
+
+@Composable
+fun RaspberryPiWifiGatewayCard(
+    modifier: Modifier = Modifier,
+    onOpenConfig: () -> Unit = {}
+) {
+    val firebaseService = remember { RailGuardFirebaseService.instance }
+    val scope = rememberCoroutineScope()
+    val isConnected = firebaseService.isDirectWifiConnected
+    val latency = firebaseService.directWifiLatencyMs
+    val telem = firebaseService.latestSensorTelemetry
+    val hw = firebaseService.hardwareHealth
+    var isConnecting by remember { mutableStateOf(false) }
+    var connectionMsg by remember { mutableStateOf<String?>(null) }
+    var ipInput by remember { mutableStateOf(firebaseService.localWifiIp) }
+
+    RailCard(
+        modifier = modifier.fillMaxWidth(),
+        onClick = onOpenConfig
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(if (isConnected) Color(0xFF16A34A) else Color(0xFFE11D48))
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isConnected) "PI WI-FI GATEWAY · ONLINE" else "PI WI-FI GATEWAY · STANDBY",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (isConnected) Color(0xFF16A34A) else Color(0xFFE11D48)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isConnected) Color(0xFF16A34A).copy(alpha = 0.12f) else Color(0xFF0284C7).copy(alpha = 0.12f))
+                        .border(1.dp, if (isConnected) Color(0xFF16A34A).copy(alpha = 0.3f) else Color(0xFF0284C7).copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = if (isConnected) "${latency}ms · sub-50ms LAN" else "DIRECT WI-FI",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isConnected) Color(0xFF16A34A) else Color(0xFF0284C7)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (isConnected) {
+                // Connected View
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("Node IP", fontSize = 10.sp, color = Color(0xFF64748B))
+                        Text("http://${firebaseService.localWifiIp}:8080", fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color(0xFF0F172A))
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Hardware", fontSize = 10.sp, color = Color(0xFF64748B))
+                        Text(hw?.cameraSensor ?: "IMX708 Camera + UT", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0284C7))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Telemetry Quick Badges
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFF1F5F9))
+                            .padding(6.dp)
+                    ) {
+                        Column {
+                            Text("Speed", fontSize = 9.sp, color = Color(0xFF64748B))
+                            Text(if (telem != null) "${telem.axleSpeedKmh.toInt()} km/h" else "--", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFF1F5F9))
+                            .padding(6.dp)
+                    ) {
+                        Column {
+                            Text("UT Depth", fontSize = 9.sp, color = Color(0xFF64748B))
+                            Text(if (telem != null) "%.1f mm".format(telem.ultrasonicDepthMm) else "--", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFF1F5F9))
+                            .padding(6.dp)
+                    ) {
+                        Column {
+                            Text("Temp", fontSize = 9.sp, color = Color(0xFF64748B))
+                            Text(if (telem != null) "%.1f°C".format(telem.railTempC) else "--", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFF1F5F9))
+                            .padding(6.dp)
+                    ) {
+                        Column {
+                            Text("Vib G", fontSize = 9.sp, color = Color(0xFF64748B))
+                            Text(if (telem != null) "%.3f".format(telem.vibrationG) else "--", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                firebaseService.syncDirectWifiAllData()
+                            }
+                        },
+                        modifier = Modifier.weight(1f).height(34.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Sync All Data", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = { firebaseService.disconnectDirectWifi() },
+                        modifier = Modifier.weight(1f).height(34.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDC2626).copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(Icons.Default.PowerSettingsNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Disconnect", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                // Disconnected View - Easy Connect
+                Text(
+                    text = "Connect directly to the Raspberry Pi Wi-Fi / Hotspot to stream optical crack detections, ultrasonic A-scans, and live signals.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF475569)
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Presets chip row
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        "192.168.4.1" to "Pi Hotspot",
+                        "192.168.1.100" to "Home LAN",
+                        "raspberrypi.local" to "mDNS",
+                        "10.0.2.2" to "Emulator",
+                        "127.0.0.1" to "Local"
+                    ).forEach { (ip, label) ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (ipInput == ip) Color(0xFF0284C7).copy(alpha = 0.15f) else Color(0xFFF1F5F9))
+                                .border(1.dp, if (ipInput == ip) Color(0xFF0284C7) else Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
+                                .clickable { ipInput = ip }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("$label ($ip)", fontSize = 10.sp, fontWeight = if (ipInput == ip) FontWeight.Bold else FontWeight.Normal, color = if (ipInput == ip) Color(0xFF0284C7) else Color(0xFF334155))
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = ipInput,
+                        onValueChange = { ipInput = it },
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        singleLine = true,
+                        placeholder = { Text("e.g. 192.168.4.1", fontSize = 11.sp) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White
+                        )
+                    )
+
+                    Button(
+                        onClick = {
+                            isConnecting = true
+                            connectionMsg = null
+                            scope.launch {
+                                val (ok, msg) = firebaseService.connectDirectWifi(ipInput)
+                                isConnecting = false
+                                connectionMsg = msg
+                            }
+                        },
+                        enabled = !isConnecting && ipInput.isNotBlank(),
+                        modifier = Modifier.height(46.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        if (isConnecting) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Connect", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                if (connectionMsg != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = connectionMsg ?: "",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isConnected) Color(0xFF16A34A) else Color(0xFFDC2626)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RaspberryPiWifiDialog(
+    onDismiss: () -> Unit
+) {
+    val firebaseService = remember { RailGuardFirebaseService.instance }
+    val scope = rememberCoroutineScope()
+    var ipInput by remember { mutableStateOf(firebaseService.localWifiIp) }
+    var isTesting by remember { mutableStateOf(false) }
+    var statusMsg by remember { mutableStateOf<String?>(null) }
+    val isConnected = firebaseService.isDirectWifiConnected
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            modifier = Modifier.fillMaxWidth().padding(8.dp)
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF0284C7).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Wifi, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text("Raspberry Pi Wi-Fi", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0F172A))
+                            Text("Direct sensor link (<50ms)", fontSize = 11.sp, color = Color(0xFF64748B))
+                        }
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("Enter the IP address of your Raspberry Pi Gateway:", fontSize = 12.sp, color = Color(0xFF334155))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = ipInput,
+                    onValueChange = { ipInput = it },
+                    label = { Text("Raspberry Pi IP Address") },
+                    placeholder = { Text("192.168.4.1") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFFF8FAFC),
+                        unfocusedContainerColor = Color(0xFFF8FAFC)
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text("Presets:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        "192.168.4.1" to "Pi Hotspot",
+                        "192.168.1.100" to "Local Wi-Fi",
+                        "raspberrypi.local" to "mDNS",
+                        "10.0.2.2" to "Emulator",
+                        "127.0.0.1" to "Localhost"
+                    ).forEach { (ip, label) ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (ipInput == ip) Color(0xFF0284C7).copy(alpha = 0.15f) else Color(0xFFF1F5F9))
+                                .border(1.dp, if (ipInput == ip) Color(0xFF0284C7) else Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
+                                .clickable { ipInput = ip }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("$label ($ip)", fontSize = 10.sp, fontWeight = if (ipInput == ip) FontWeight.Bold else FontWeight.Normal, color = if (ipInput == ip) Color(0xFF0284C7) else Color(0xFF334155))
+                        }
+                    }
+                }
+
+                if (statusMsg != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = statusMsg ?: "",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isConnected) Color(0xFF16A34A) else Color(0xFFDC2626)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (isConnected) {
+                        OutlinedButton(
+                            onClick = {
+                                firebaseService.disconnectDirectWifi()
+                                statusMsg = "Disconnected from Pi"
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDC2626)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Disconnect", fontSize = 12.sp)
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            isTesting = true
+                            statusMsg = null
+                            scope.launch {
+                                val (ok, msg) = firebaseService.connectDirectWifi(ipInput)
+                                isTesting = false
+                                statusMsg = msg
+                            }
+                        },
+                        enabled = !isTesting && ipInput.isNotBlank(),
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        if (isTesting) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text(if (isConnected) "Re-test Connection" else "Connect Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 

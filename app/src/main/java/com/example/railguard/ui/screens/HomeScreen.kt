@@ -50,6 +50,7 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val gatewayOnline = telemetry != null &&
         (telemetry.timestamp == 0L || System.currentTimeMillis() - telemetry.timestamp < 30_000L)
+    var showWifiDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -65,6 +66,14 @@ fun HomeScreen(
                 isHome = true,
                 onNotificationClick = { onNavigate("notifications") }
             )
+        }
+
+        // Direct Raspberry Pi Wi-Fi Gateway Card
+        item {
+            RaspberryPiWifiGatewayCard(
+                onOpenConfig = { showWifiDialog = true }
+            )
+            Spacer(modifier = Modifier.height(10.dp))
         }
 
         // Dedicated AI Predictive Safety Engine - Compact Summary
@@ -683,6 +692,12 @@ fun HomeScreen(
                 )
             }
         }
+    }
+
+    if (showWifiDialog) {
+        RaspberryPiWifiDialog(
+            onDismiss = { showWifiDialog = false }
+        )
     }
 }
 

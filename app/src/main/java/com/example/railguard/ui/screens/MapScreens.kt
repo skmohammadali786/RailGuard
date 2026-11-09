@@ -75,12 +75,12 @@ fun MapScreen(
 ) {
     val isDark = LocalIsDark.current
     val currentChainage = telemetry?.chainage?.takeIf { it != "Unknown" && it.isNotBlank() }
-        ?: if (defects.isNotEmpty()) defects.first().chainageCoordinate else "KM 14+320"
-    val axleSpeed = telemetry?.axleSpeedKmh ?: 45.0f
-    val railTemp = telemetry?.railTempC ?: 31.4f
-    val ultrasonicDepth = telemetry?.ultrasonicDepthMm ?: 68.2f
-    val statusText = telemetry?.status ?: "ACTIVE_SYNC"
-    val isAnomaly = statusText.contains("ANOMALY", ignoreCase = true) || ultrasonicDepth < 55.0f
+        ?: if (defects.isNotEmpty()) defects.first().chainageCoordinate else "--"
+    val axleSpeed = telemetry?.axleSpeedKmh
+    val railTemp = telemetry?.railTempC
+    val ultrasonicDepth = telemetry?.ultrasonicDepthMm
+    val statusText = telemetry?.status ?: "STANDBY"
+    val isAnomaly = statusText.contains("ANOMALY", ignoreCase = true) || (ultrasonicDepth != null && ultrasonicDepth < 55.0f)
 
     LazyColumn(
         modifier = Modifier
@@ -142,11 +142,11 @@ fun MapScreen(
                                 modifier = Modifier
                                     .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(if (isAnomaly) Color(0xFFEF4444) else Color(0xFF16A34A))
+                                    .background(if (isAnomaly) Color(0xFFEF4444) else if (telemetry != null) Color(0xFF16A34A) else Color(0xFF64748B))
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "CORRIDOR SECTOR 4B TELEMETRY",
+                                text = "CORRIDOR GIS · ${telemetry?.nodeId ?: "STANDBY"}",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
@@ -158,14 +158,17 @@ fun MapScreen(
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(
                                     if (isAnomaly) Color(0xFFEF4444).copy(alpha = 0.15f)
-                                    else Color(0xFF16A34A).copy(alpha = 0.15f)
+                                    else if (telemetry != null) Color(0xFF16A34A).copy(alpha = 0.15f)
+                                    else Color(0xFF64748B).copy(alpha = 0.15f)
                                 )
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = if (isAnomaly) "ANOMALY FLAGGED" else "PATROL LOCK · NOMINAL",
+                                text = if (isAnomaly) "ANOMALY FLAGGED"
+                                else if (telemetry != null) "PATROL LOCK · NOMINAL"
+                                else "AWAITING TELEMETRY",
                                 fontSize = 10.sp,
-                                color = if (isAnomaly) Color(0xFFDC2626) else Color(0xFF16A34A),
+                                color = if (isAnomaly) Color(0xFFDC2626) else if (telemetry != null) Color(0xFF16A34A) else Color(0xFF64748B),
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -183,19 +186,19 @@ fun MapScreen(
                         }
                         Column {
                             Text("Line Speed", fontSize = 11.sp, color = Color(0xFF64748B))
-                            Text("${axleSpeed.toInt()} km/h", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Text(if (axleSpeed != null) "${axleSpeed.toInt()} km/h" else "--", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                         }
                         Column {
                             Text("Railhead Temp", fontSize = 11.sp, color = Color(0xFF64748B))
-                            Text("%.1f °C".format(railTemp), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Text(if (railTemp != null) "%.1f °C".format(railTemp) else "--", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                         }
                         Column {
                             Text("UT Depth", fontSize = 11.sp, color = Color(0xFF64748B))
                             Text(
-                                "%.1f mm".format(ultrasonicDepth),
+                                if (ultrasonicDepth != null) "%.1f mm".format(ultrasonicDepth) else "--",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (ultrasonicDepth < 55.0f) Color(0xFFDC2626) else Color(0xFF0F172A)
+                                color = if (ultrasonicDepth != null && ultrasonicDepth < 55.0f) Color(0xFFDC2626) else Color(0xFF0F172A)
                             )
                         }
                     }
@@ -247,10 +250,9 @@ fun MapScreen(
                                 strokeWidth = 5f
                             )
 
-                            // Chainage tick markers along track
-                            val ticks = listOf("KM 14+000", "KM 14+200", "KM 14+400", "KM 14+600", "KM 14+800")
-                            ticks.forEachIndexed { idx, _ ->
-                                val tx = (idx + 1) * (w / 6f)
+                            // Chainage tick markers along track (5 equidistant survey points)
+                            for (idx in 1..5) {
+                                val tx = idx * (w / 6f)
                                 drawCircle(
                                     color = Color(0xFF94A3B8),
                                     radius = 3.5f,
@@ -258,31 +260,33 @@ fun MapScreen(
                                 )
                             }
 
-                            // Train / Patrol Cart position (approx 45% along corridor)
-                            val trainX = w * 0.45f
-                            val trainY = (upperRailY + lowerRailY) / 2f
+                            // Train / Patrol Cart position (rendered only when active Pi telemetry exists)
+                            if (telemetry != null) {
+                                val trainX = w * 0.5f
+                                val trainY = (upperRailY + lowerRailY) / 2f
 
-                            // Outer pulse
-                            drawCircle(
-                                color = Color(0xFF0284C7).copy(alpha = 0.25f),
-                                radius = 18f,
-                                center = Offset(trainX, trainY)
-                            )
-                            // Train vehicle icon body
-                            drawCircle(
-                                color = Color(0xFF0284C7),
-                                radius = 10f,
-                                center = Offset(trainX, trainY)
-                            )
-                            drawCircle(
-                                color = Color.White,
-                                radius = 4f,
-                                center = Offset(trainX, trainY)
-                            )
+                                // Outer pulse
+                                drawCircle(
+                                    color = Color(0xFF0284C7).copy(alpha = 0.25f),
+                                    radius = 18f,
+                                    center = Offset(trainX, trainY)
+                                )
+                                // Train vehicle icon body
+                                drawCircle(
+                                    color = Color(0xFF0284C7),
+                                    radius = 10f,
+                                    center = Offset(trainX, trainY)
+                                )
+                                drawCircle(
+                                    color = Color.White,
+                                    radius = 4f,
+                                    center = Offset(trainX, trainY)
+                                )
+                            }
 
-                            // Defect marker at KM 14+320
-                            if (defects.isNotEmpty() || isAnomaly) {
-                                val defX = w * 0.58f
+                            // Defect marker (rendered only when actual defect records are loaded)
+                            if (defects.isNotEmpty()) {
+                                val defX = w * 0.65f
                                 val defY = upperRailY
                                 drawCircle(
                                     color = Color(0xFFEF4444).copy(alpha = 0.3f),
@@ -304,23 +308,18 @@ fun MapScreen(
 
                         // Overlay labels
                         Column(modifier = Modifier.align(Alignment.TopStart)) {
-                            Text("Active Track Corridor: KM 14+000 → KM 14+800", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
-                            Text("Patrol Cart at $currentChainage", fontSize = 10.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.SemiBold)
-                        }
-
-                        // Chainage Ticks Label Overlay at Top
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .align(Alignment.TopCenter)
-                                .padding(top = 28.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("KM 14+000", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                            Text("KM 14+200", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                            Text("KM 14+400", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                            Text("KM 14+600", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                            Text("KM 14+800", fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
+                            Text(
+                                text = if (telemetry != null) "Corridor: ${telemetry.chainage}" else "Track Corridor GIS",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF334155)
+                            )
+                            Text(
+                                text = if (telemetry != null) "Pi Gateway active · ${telemetry.nodeId}" else "Awaiting Raspberry Pi Wi-Fi Telemetry",
+                                fontSize = 10.sp,
+                                color = if (telemetry != null) Color(0xFF0284C7) else Color(0xFF64748B),
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
 
                         // Clickable Defect Badges
@@ -494,9 +493,9 @@ fun RiskHeatmapScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("Zero high-strain anomaly clusters detected across monitored sectors. Derailment risk nominal (0.0%).", fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(12.dp))
-                    MetricRow("Hazard Density", "0.0 / Low")
-                    MetricRow("Track Geometry", "UIC 60 Nominal Clearance")
-                    MetricRow("Authorized Line Speed", "Full Line Speed Permitted")
+                    MetricRow("Hazard Density", if (defects.isNotEmpty()) "${defects.size} Anomaly Points" else "0.0 / Low")
+                    MetricRow("Monitored Corridor", if (defects.isNotEmpty()) defects.map { it.section }.distinct().joinToString(", ") else "Active Track")
+                    MetricRow("Authorized Line Speed", if (criticalCount > 0) "Emergency TSR Active" else "Nominal Line Speed")
                 }
             }
         }
