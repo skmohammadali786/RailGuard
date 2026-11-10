@@ -106,12 +106,6 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    SettingsRowTile(
-                        icon = Icons.Default.Security,
-                        title = "Security & PIN Lock",
-                        subtitle = "Passcode, biometric & session lock",
-                        onClick = { onNavigate("security") }
-                    )
 
                     SettingsRowTile(
                         icon = Icons.Default.Language,
@@ -491,54 +485,7 @@ fun SecurityScreen(
     onLockApp: () -> Unit,
     onBack: () -> Unit
 ) {
-    var passcodeEnabled by remember { mutableStateOf(preferences.passcodeEnabled) }
-    var pin by remember { mutableStateOf(preferences.passcodePin) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        SubScreenHeader(title = "Security & App Lock", subtitle = "Mission-critical authorization", onBack = onBack)
-        Spacer(modifier = Modifier.height(16.dp))
-        RailCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Enable Passcode Lock", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Switch(
-                        checked = passcodeEnabled,
-                        onCheckedChange = {
-                            passcodeEnabled = it
-                            onUpdatePreferences(preferences.copy(passcodeEnabled = it))
-                        }
-                    )
-                }
-
-                if (passcodeEnabled) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = pin,
-                        onValueChange = {
-                            if (it.length <= 4) {
-                                pin = it
-                                onUpdatePreferences(preferences.copy(passcodePin = it))
-                            }
-                        },
-                        label = { Text("4-Digit PIN") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                PrimaryButton(title = "Lock Session Now", onClick = onLockApp)
-            }
-        }
-    }
+    LaunchedEffect(Unit) { onBack() }
 }
 
 @Composable

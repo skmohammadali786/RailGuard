@@ -807,7 +807,7 @@ fun GrowthAnalysisScreen(
     // Compute live Paris law parameters from live telemetry or active defect
     val crackLenMm: Double = when {
         telemetry != null && telemetry.hasCrack && telemetry.crackLengthMm > 0f -> telemetry.crackLengthMm.toDouble()
-        defect != null -> 8.5
+        defect != null -> defect.estimatedLength.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 12.0
         telemetry != null && telemetry.hasCrack -> 14.8
         else -> 0.0
     }
@@ -898,6 +898,8 @@ fun GrowthAnalysisScreen(
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
+                MetricRow("Crack Surface Length", if (crackLenMm > 0.0) "${String.format(java.util.Locale.US, "%.1f", crackLenMm)} mm" else "No Surface Flaw")
+                MetricRow("Live Rail Temp / Speed", "${telemetry?.railTempC ?: 24.0} °C · ${telemetry?.axleSpeedKmh ?: 0.0} km/h")
                 MetricRow("Delta-K Stress Intensity", "$deltaK MPa·m^(1/2) (Rate: $parisGrowthRate)")
                 MetricRow("Fatigue Life Remaining", "$remainingCycles load cycles (${if (remainingCycles < 5000) "Action Required" else "Nominal"})")
                 MetricRow("Speed Restriction Required", if (isCritical) "Yes (Max 25 km/h TSR Active)" else "No (Nominal Line Speed)")
@@ -1372,14 +1374,25 @@ fun AllObservationsScreen(
     onAddObservation: ((ObservationItem) -> Unit)? = null,
     onBack: () -> Unit
 ) {
+    val firebaseService = remember { RailGuardFirebaseService.instance }
     val scope = rememberCoroutineScope()
     var isSyncingObs by remember { mutableStateOf(false) }
     var syncObsMsg by remember { mutableStateOf<String?>(null) }
-    val displayList = remember { mutableStateListOf<ObservationItem>() }
+    val displayList = remember {
+        mutableStateListOf<ObservationItem>().apply {
+            val local = firebaseService.loadLocalObservations()
+            if (local.isNotEmpty()) addAll(local) else addAll(observations)
+        }
+    }
 
     LaunchedEffect(observations) {
-        displayList.clear()
-        displayList.addAll(observations)
+        if (observations.isNotEmpty()) {
+            val currentIds = displayList.map { it.id }.toSet()
+            val newItems = observations.filter { it.id !in currentIds }
+            if (newItems.isNotEmpty()) {
+                displayList.addAll(0, newItems)
+            }
+        }
     }
 
     Column(
@@ -1399,8 +1412,9 @@ fun AllObservationsScreen(
             onClick = {
                 isSyncingObs = true
                 scope.launch {
+                    firebaseService.saveLocalObservations(displayList.toList())
                     displayList.forEach { obs ->
-                        RailGuardFirebaseService.instance.saveObservation(obs)
+                        firebaseService.saveObservation(obs)
                     }
                     isSyncingObs = false
                     syncObsMsg = "All observations saved ✓"
@@ -1438,9 +1452,10 @@ fun AllObservationsScreen(
                             tone = Tone.INFO
                         )
                         displayList.add(0, obs)
+                        firebaseService.saveLocalObservation(obs)
                         onAddObservation?.invoke(obs)
                         scope.launch {
-                            RailGuardFirebaseService.instance.saveObservation(obs)
+                            firebaseService.saveObservation(obs)
                             syncObsMsg = "Observation saved ✓"
                         }
                     }

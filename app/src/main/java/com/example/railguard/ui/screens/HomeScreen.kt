@@ -68,13 +68,7 @@ fun HomeScreen(
             )
         }
 
-        // Direct Raspberry Pi Wi-Fi Gateway Card
-        item {
-            RaspberryPiWifiGatewayCard(
-                onOpenConfig = { showWifiDialog = true }
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-        }
+
 
         // Dedicated AI Predictive Safety Engine - Compact Summary
         item {
@@ -353,7 +347,7 @@ fun HomeScreen(
                         MetricTile(
                             value = telemetry?.let { "${it.axleSpeedKmh} km/h" } ?: "Awaiting sensor",
                             label = "Patrol / Axle Speed",
-                            tone = Tone.INFO,
+                            tone = if (telemetry != null && telemetry.axleSpeedKmh > 80.0) Tone.WARNING else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
                     }

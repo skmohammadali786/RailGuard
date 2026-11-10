@@ -105,6 +105,11 @@ class RailGuardFirebaseService private constructor() {
         private const val KEY_HIGH_PRECISION_AI = "app_high_precision_ai"
         private const val KEY_TSR_INTERLOCK = "app_tsr_interlock"
         private const val KEY_RPI_WIFI_IP = "rpi_wifi_ip"
+        private const val KEY_LOCAL_OBSERVATIONS = "local_cached_observations"
+        private const val KEY_LOCAL_SCHEDULES = "local_cached_schedules"
+        private const val KEY_LOCAL_DEFECTS = "local_cached_defects"
+        private const val KEY_LOCAL_TASKS = "local_cached_tasks"
+        private const val KEY_LOCAL_INSPECTIONS = "local_cached_inspections"
 
         // Server-Side Pre-Configured Firebase Cloud Project Credentials
         const val DEFAULT_PROJECT_NAME = "railguard"
@@ -407,10 +412,57 @@ class RailGuardFirebaseService private constructor() {
         }
     }
 
+    fun loadLocalObservations(): List<ObservationItem> {
+        val jsonStr = sharedPreferences?.getString(KEY_LOCAL_OBSERVATIONS, null) ?: return emptyList()
+        val list = mutableListOf<ObservationItem>()
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    ObservationItem(
+                        id = o.optString("id", "OBS-$i"),
+                        title = o.optString("title", ""),
+                        chainage = o.optString("chainage", "Field Patrol"),
+                        time = o.optString("time", "Recorded"),
+                        severity = o.optString("severity", "INFO"),
+                        tone = try { Tone.valueOf(o.optString("tone", Tone.INFO.name)) } catch (_: Exception) { Tone.INFO }
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("RailGuardFirebase", "Failed to parse local observations: ${e.message}")
+        }
+        return list
+    }
+
+    fun saveLocalObservations(items: List<ObservationItem>) {
+        val arr = JSONArray()
+        items.forEach { obs ->
+            arr.put(JSONObject().apply {
+                put("id", obs.id)
+                put("title", obs.title)
+                put("chainage", obs.chainage)
+                put("time", obs.time)
+                put("severity", obs.severity)
+                put("tone", obs.tone.name)
+            })
+        }
+        sharedPreferences?.edit()?.putString(KEY_LOCAL_OBSERVATIONS, arr.toString())?.apply()
+    }
+
+    fun saveLocalObservation(obs: ObservationItem) {
+        val current = loadLocalObservations().toMutableList()
+        current.removeAll { it.id == obs.id }
+        current.add(0, obs)
+        saveLocalObservations(current)
+    }
+
     suspend fun pullObservations(
         onSuccess: (List<ObservationItem>) -> Unit,
         onError: (String) -> Unit = {}
     ) {
+        val localList = loadLocalObservations()
         try {
             val json = readUserObject("observations")
             val result = mutableListOf<ObservationItem>()
@@ -431,30 +483,257 @@ class RailGuardFirebaseService private constructor() {
                     )
                 }
             }
-            withContext(Dispatchers.Main) { onSuccess(result) }
-        } catch (e: CancellationException) {
-            throw e
+            val mergedMap = linkedMapOf<String, ObservationItem>()
+            localList.forEach { mergedMap[it.id] = it }
+            result.forEach { mergedMap[it.id] = it }
+            val merged = mergedMap.values.toList()
+            saveLocalObservations(merged)
+            withContext(Dispatchers.Main) { onSuccess(merged) }
         } catch (e: Exception) {
             Log.w("RailGuardFirebase", "Observations pull error: ${e.message}")
-            withContext(Dispatchers.Main) { onError(e.message ?: "Observations could not be loaded.") }
+            withContext(Dispatchers.Main) {
+                if (localList.isNotEmpty()) onSuccess(localList)
+                else onError(e.message ?: "Observations could not be loaded.")
+            }
         }
     }
 
-    private val cachedSchedules = mutableListOf<PatrolSchedule>()
+    fun loadLocalSchedules(): List<PatrolSchedule> {
+        val jsonStr = sharedPreferences?.getString(KEY_LOCAL_SCHEDULES, null) ?: return emptyList()
+        val list = mutableListOf<PatrolSchedule>()
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    PatrolSchedule(
+                        id = o.optString("id", "SCHED-$i"),
+                        section = o.optString("section", "Mainline"),
+                        date = o.optString("date", "Today"),
+                        time = o.optString("time", "08:00"),
+                        shift = o.optString("shift", "Morning Shift"),
+                        inspector = o.optString("inspector", "Lead Inspector"),
+                        patrolType = o.optString("patrolType", "Automated Optical & Ultrasonic"),
+                        frequency = o.optString("frequency", "Once"),
+                        status = o.optString("status", "Scheduled"),
+                        notes = o.optString("notes", "")
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("RailGuardFirebase", "Failed to parse local schedules: ${e.message}")
+        }
+        return list
+    }
 
-    fun getCachedSchedules(): List<PatrolSchedule> = synchronized(cachedSchedules) { cachedSchedules.toList() }
+    fun saveLocalSchedules(items: List<PatrolSchedule>) {
+        val arr = JSONArray()
+        items.forEach { s ->
+            arr.put(JSONObject().apply {
+                put("id", s.id)
+                put("section", s.section)
+                put("date", s.date)
+                put("time", s.time)
+                put("shift", s.shift)
+                put("inspector", s.inspector)
+                put("patrolType", s.patrolType)
+                put("frequency", s.frequency)
+                put("status", s.status)
+                put("notes", s.notes)
+            })
+        }
+        sharedPreferences?.edit()?.putString(KEY_LOCAL_SCHEDULES, arr.toString())?.apply()
+    }
+
+    fun getCachedSchedules(): List<PatrolSchedule> = loadLocalSchedules()
 
     fun addCachedSchedule(schedule: PatrolSchedule) {
-        synchronized(cachedSchedules) {
-            cachedSchedules.removeAll { it.id == schedule.id }
-            cachedSchedules.add(0, schedule)
-        }
+        val list = loadLocalSchedules().toMutableList()
+        list.removeAll { it.id == schedule.id }
+        list.add(0, schedule)
+        saveLocalSchedules(list)
     }
 
     fun deleteCachedSchedule(scheduleId: String) {
-        synchronized(cachedSchedules) {
-            cachedSchedules.removeAll { it.id == scheduleId }
+        val list = loadLocalSchedules().toMutableList()
+        list.removeAll { it.id == scheduleId }
+        saveLocalSchedules(list)
+    }
+
+    fun loadLocalDefects(): List<Defect> {
+        val jsonStr = sharedPreferences?.getString(KEY_LOCAL_DEFECTS, null) ?: return emptyList()
+        val list = mutableListOf<Defect>()
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    Defect(
+                        id = o.optString("id", "DEF-$i"),
+                        title = o.optString("title", "Track Defect"),
+                        section = o.optString("section", "Mainline"),
+                        score = o.optString("score", "CRITICAL"),
+                        tone = try { Tone.valueOf(o.optString("tone", Tone.CRITICAL.name)) } catch (_: Exception) { Tone.CRITICAL },
+                        time = o.optString("time", "Recorded"),
+                        detail = o.optString("detail", ""),
+                        estimatedLength = o.optString("estimatedLength", "Unknown"),
+                        latitude = o.optDouble("latitude", 0.0),
+                        longitude = o.optDouble("longitude", 0.0),
+                        riskScore = o.optInt("riskScore", 0),
+                        chainageCoordinate = o.optString("chainageCoordinate", "Unknown"),
+                        aiConfidencePercent = o.optInt("aiConfidencePercent", 0),
+                        aiPrescribedAction = o.optString("aiPrescribedAction", ""),
+                        flawType = o.optString("flawType", "Transverse Gauge Corner Fissure"),
+                        ultrasonicDepthMm = o.optDouble("ultrasonicDepthMm", 0.0).toFloat(),
+                        vibrationG = o.optDouble("vibrationG", 0.0).toFloat(),
+                        railTempC = o.optDouble("railTempC", 0.0).toFloat(),
+                        speedKmh = o.optDouble("speedKmh", 0.0).toFloat(),
+                        boundingBox = o.optString("boundingBox", "")
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("RailGuardFirebase", "Failed to parse local defects: ${e.message}")
         }
+        return list
+    }
+
+    fun saveLocalDefects(items: List<Defect>) {
+        val arr = JSONArray()
+        items.forEach { d ->
+            arr.put(JSONObject().apply {
+                put("id", d.id)
+                put("title", d.title)
+                put("section", d.section)
+                put("score", d.score)
+                put("tone", d.tone.name)
+                put("time", d.time)
+                put("detail", d.detail)
+                put("estimatedLength", d.estimatedLength)
+                put("latitude", d.latitude)
+                put("longitude", d.longitude)
+                put("riskScore", d.riskScore)
+                put("chainageCoordinate", d.chainageCoordinate)
+                put("aiConfidencePercent", d.aiConfidencePercent)
+                put("aiPrescribedAction", d.aiPrescribedAction)
+                put("flawType", d.flawType)
+                put("ultrasonicDepthMm", d.ultrasonicDepthMm.toDouble())
+                put("vibrationG", d.vibrationG.toDouble())
+                put("railTempC", d.railTempC.toDouble())
+                put("speedKmh", d.speedKmh.toDouble())
+                put("boundingBox", d.boundingBox)
+            })
+        }
+        sharedPreferences?.edit()?.putString(KEY_LOCAL_DEFECTS, arr.toString())?.apply()
+    }
+
+    fun saveLocalDefect(defect: Defect) {
+        val current = loadLocalDefects().toMutableList()
+        current.removeAll { it.id == defect.id }
+        current.add(0, defect)
+        saveLocalDefects(current)
+    }
+
+    fun loadLocalTasks(): List<MaintenanceTask> {
+        val jsonStr = sharedPreferences?.getString(KEY_LOCAL_TASKS, null) ?: return emptyList()
+        val list = mutableListOf<MaintenanceTask>()
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    MaintenanceTask(
+                        id = o.optString("id", "TSK-$i"),
+                        title = o.optString("title", "Maintenance Task"),
+                        section = o.optString("section", "Mainline"),
+                        due = o.optString("due", "Pending"),
+                        tone = try { Tone.valueOf(o.optString("tone", Tone.WARNING.name)) } catch (_: Exception) { Tone.WARNING },
+                        assignee = o.optString("assignee", "Field Crew"),
+                        status = o.optString("status", "Pending"),
+                        torque = o.optString("torque", "Unknown")
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("RailGuardFirebase", "Failed to parse local tasks: ${e.message}")
+        }
+        return list
+    }
+
+    fun saveLocalTasks(items: List<MaintenanceTask>) {
+        val arr = JSONArray()
+        items.forEach { t ->
+            arr.put(JSONObject().apply {
+                put("id", t.id)
+                put("title", t.title)
+                put("section", t.section)
+                put("due", t.due)
+                put("tone", t.tone.name)
+                put("assignee", t.assignee)
+                put("status", t.status)
+                put("torque", t.torque)
+            })
+        }
+        sharedPreferences?.edit()?.putString(KEY_LOCAL_TASKS, arr.toString())?.apply()
+    }
+
+    fun saveLocalTask(task: MaintenanceTask) {
+        val current = loadLocalTasks().toMutableList()
+        current.removeAll { it.id == task.id }
+        current.add(0, task)
+        saveLocalTasks(current)
+    }
+
+    fun loadLocalInspections(): List<InspectionRecord> {
+        val jsonStr = sharedPreferences?.getString(KEY_LOCAL_INSPECTIONS, null) ?: return emptyList()
+        val list = mutableListOf<InspectionRecord>()
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    InspectionRecord(
+                        id = o.optString("id", "INSP-$i"),
+                        section = o.optString("section", "Mainline"),
+                        date = o.optString("date", "Today"),
+                        inspector = o.optString("inspector", "Field Inspector"),
+                        status = o.optString("status", "Completed"),
+                        framesCount = o.optInt("framesCount", 0),
+                        detectionsCount = o.optInt("detectionsCount", 0),
+                        detectedCrackTitle = o.optString("detectedCrackTitle", ""),
+                        recommendedMaintenanceAction = o.optString("recommendedMaintenanceAction", "")
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("RailGuardFirebase", "Failed to parse local inspections: ${e.message}")
+        }
+        return list
+    }
+
+    fun saveLocalInspections(items: List<InspectionRecord>) {
+        val arr = JSONArray()
+        items.forEach { insp ->
+            arr.put(JSONObject().apply {
+                put("id", insp.id)
+                put("section", insp.section)
+                put("date", insp.date)
+                put("inspector", insp.inspector)
+                put("status", insp.status)
+                put("framesCount", insp.framesCount)
+                put("detectionsCount", insp.detectionsCount)
+                put("detectedCrackTitle", insp.detectedCrackTitle)
+                put("recommendedMaintenanceAction", insp.recommendedMaintenanceAction)
+            })
+        }
+        sharedPreferences?.edit()?.putString(KEY_LOCAL_INSPECTIONS, arr.toString())?.apply()
+    }
+
+    fun saveLocalInspection(insp: InspectionRecord) {
+        val current = loadLocalInspections().toMutableList()
+        current.removeAll { it.id == insp.id }
+        current.add(0, insp)
+        saveLocalInspections(current)
     }
 
     suspend fun saveSchedule(schedule: PatrolSchedule): Boolean {
@@ -520,16 +799,12 @@ class RailGuardFirebaseService private constructor() {
                     )
                 }
             }
-            val merged = synchronized(cachedSchedules) {
-                val map = linkedMapOf<String, PatrolSchedule>()
-                cachedSchedules.forEach { map[it.id] = it }
-                result.forEach { map[it.id] = it }
-                map.values.toList()
-            }
-            synchronized(cachedSchedules) {
-                cachedSchedules.clear()
-                cachedSchedules.addAll(merged)
-            }
+            val localSchedules = loadLocalSchedules()
+            val map = linkedMapOf<String, PatrolSchedule>()
+            localSchedules.forEach { map[it.id] = it }
+            result.forEach { map[it.id] = it }
+            val merged = map.values.toList()
+            saveLocalSchedules(merged)
             withContext(Dispatchers.Main) { onSuccess(merged) }
         } catch (e: CancellationException) {
             throw e
@@ -1062,6 +1337,7 @@ class RailGuardFirebaseService private constructor() {
     }
 
     suspend fun uploadInspectionToFirebase(inspection: InspectionRecord): Boolean {
+        saveLocalInspection(inspection)
         return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
@@ -1471,6 +1747,10 @@ class RailGuardFirebaseService private constructor() {
                         }
                     }
 
+                    if (defectsList.isNotEmpty()) saveLocalDefects(defectsList)
+                    if (tasksList.isNotEmpty()) saveLocalTasks(tasksList)
+                    if (inspectionsList.isNotEmpty()) saveLocalInspections(inspectionsList)
+
                     val timestampStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
                     withContext(Dispatchers.Main) {
                         isSyncing = false
@@ -1480,10 +1760,17 @@ class RailGuardFirebaseService private constructor() {
                         onSuccess(defectsList, tasksList, inspectionsList)
                     }
                 } else {
+                    val localD = loadLocalDefects()
+                    val localT = loadLocalTasks()
+                    val localI = loadLocalInspections()
                     withContext(Dispatchers.Main) {
                         isSyncing = false
                         syncStatusMessage = "Cloud database is clear. Ready to receive records from Raspberry Pi."
-                        onSuccess(emptyList(), emptyList(), emptyList())
+                        if (localD.isNotEmpty() || localT.isNotEmpty() || localI.isNotEmpty()) {
+                            onSuccess(localD, localT, localI)
+                        } else {
+                            onSuccess(emptyList(), emptyList(), emptyList())
+                        }
                     }
                 }
             } catch (e: CancellationException) {
@@ -1491,10 +1778,17 @@ class RailGuardFirebaseService private constructor() {
             } catch (e: Exception) {
                 val errMsg = "Network error: ${e.localizedMessage ?: e.message}"
                 Log.e("RailGuardFirebase", "Pull error", e)
+                val localD = loadLocalDefects()
+                val localT = loadLocalTasks()
+                val localI = loadLocalInspections()
                 withContext(Dispatchers.Main) {
                     isSyncing = false
                     syncStatusMessage = errMsg
-                    onError(errMsg)
+                    if (localD.isNotEmpty() || localT.isNotEmpty() || localI.isNotEmpty()) {
+                        onSuccess(localD, localT, localI)
+                    } else {
+                        onError(errMsg)
+                    }
                 }
             }
         }
@@ -1504,6 +1798,7 @@ class RailGuardFirebaseService private constructor() {
      * Uploads a single defect immediately to Firebase
      */
     suspend fun uploadDefectToFirebase(defect: Defect) {
+        saveLocalDefect(defect)
         withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
@@ -1612,6 +1907,7 @@ class RailGuardFirebaseService private constructor() {
      * Uploads a newly updated or created maintenance task to Firebase
      */
     suspend fun uploadTaskToFirebase(task: MaintenanceTask) {
+        saveLocalTask(task)
         withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
@@ -2027,29 +2323,32 @@ class RailGuardFirebaseService private constructor() {
      * Uploads track observation item to cloud database
      */
     suspend fun saveObservation(obs: ObservationItem) {
+        saveLocalObservation(obs)
         withContext(Dispatchers.IO) {
             try {
-                val authParam = authenticatedQueryParam()
-                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/observations/${obs.id}.json$authParam"
-                val json = JSONObject().apply {
-                    put("id", obs.id)
-                    put("title", obs.title)
-                    put("chainage", obs.chainage)
-                    put("time", obs.time)
-                    put("severity", obs.severity)
-                    put("tone", obs.tone.name)
-                    put("syncedAt", System.currentTimeMillis())
-                }
+                if (currentUser != null) {
+                    val authParam = authenticatedQueryParam()
+                    val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/observations/${obs.id}.json$authParam"
+                    val json = JSONObject().apply {
+                        put("id", obs.id)
+                        put("title", obs.title)
+                        put("chainage", obs.chainage)
+                        put("time", obs.time)
+                        put("severity", obs.severity)
+                        put("tone", obs.tone.name)
+                        put("syncedAt", System.currentTimeMillis())
+                    }
 
-                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "PUT"
-                    connectTimeout = 6000
-                    readTimeout = 6000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "PUT"
+                        connectTimeout = 6000
+                        readTimeout = 6000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    }
+                    OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                    conn.responseCode
                 }
-                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
-                conn.responseCode
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -2695,6 +2994,10 @@ class RailGuardFirebaseService private constructor() {
                                     )
                                 }
                             }
+
+                            if (rDefects.isNotEmpty()) saveLocalDefects(rDefects)
+                            if (rTasks.isNotEmpty()) saveLocalTasks(rTasks)
+                            if (rInspections.isNotEmpty()) saveLocalInspections(rInspections)
 
                             withContext(Dispatchers.Main) {
                                 isDirectWifiConnected = true

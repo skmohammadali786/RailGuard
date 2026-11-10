@@ -635,7 +635,7 @@ fun InspectionCalendarScreen(
     val firebaseService = remember { RailGuardFirebaseService.instance }
     val scope = rememberCoroutineScope()
     var showDialog by remember { mutableStateOf(false) }
-    var schedules by remember { mutableStateOf<List<PatrolSchedule>>(emptyList()) }
+    var schedules by remember { mutableStateOf<List<PatrolSchedule>>(firebaseService.getCachedSchedules()) }
     var isLoading by remember { mutableStateOf(true) }
 
     val context = LocalContext.current
@@ -878,26 +878,18 @@ fun InspectionCalendarScreen(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            OutlinedTextField(
-                                value = newDate,
-                                onValueChange = { newDate = it },
-                                label = { Text("Date") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                trailingIcon = {
-                                    IconButton(onClick = { datePickerDialog.show() }) {
-                                        Icon(Icons.Default.CalendarToday, contentDescription = "Select Date", tint = Color(0xFF0284C7), modifier = Modifier.size(18.dp))
-                                    }
+                        OutlinedTextField(
+                            value = newDate,
+                            onValueChange = { newDate = it },
+                            label = { Text("Date (YYYY-MM-DD)") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(onClick = { datePickerDialog.show() }) {
+                                    Icon(Icons.Default.CalendarToday, contentDescription = "Select Date", tint = Color(0xFF0284C7), modifier = Modifier.size(18.dp))
                                 }
-                            )
-                            // Invisible overlay making the entire date field clickable for the calendar picker
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .clickable { datePickerDialog.show() }
-                            )
-                        }
+                            }
+                        )
                         OutlinedTextField(
                             value = newTime,
                             onValueChange = { newTime = it },

@@ -108,15 +108,26 @@ fun RailGuardApp() {
     val firebaseService = remember { RailGuardFirebaseService.instance }
     var appPreferences by remember { mutableStateOf(firebaseService.loadAppPreferences()) }
     var isDarkMode by remember { mutableStateOf(appPreferences.isDarkMode) }
-    var isAppLocked by remember { mutableStateOf(false) }
     var currentRoute by remember { mutableStateOf<String>(Screen.Splash.route) }
     val backStack = remember { mutableStateListOf<String>() }
 
-    // State data
-    val defects = remember { mutableStateListOf(*RailDataRepository.initialDefects.toTypedArray()) }
-    val tasks = remember { mutableStateListOf(*RailDataRepository.initialTasks.toTypedArray()) }
-    val inspections = remember { mutableStateListOf(*RailDataRepository.initialInspections.toTypedArray()) }
-    val observations = remember { mutableStateListOf(*RailDataRepository.initialObservations.toTypedArray()) }
+    // State data loaded from local disk cache with repository fallbacks
+    val cachedDefects = remember { firebaseService.loadLocalDefects() }
+    val defects = remember {
+        mutableStateListOf(*(if (cachedDefects.isNotEmpty()) cachedDefects else RailDataRepository.initialDefects).toTypedArray())
+    }
+    val cachedTasks = remember { firebaseService.loadLocalTasks() }
+    val tasks = remember {
+        mutableStateListOf(*(if (cachedTasks.isNotEmpty()) cachedTasks else RailDataRepository.initialTasks).toTypedArray())
+    }
+    val cachedInspections = remember { firebaseService.loadLocalInspections() }
+    val inspections = remember {
+        mutableStateListOf(*(if (cachedInspections.isNotEmpty()) cachedInspections else RailDataRepository.initialInspections).toTypedArray())
+    }
+    val cachedObs = remember { firebaseService.loadLocalObservations() }
+    val observations = remember {
+        mutableStateListOf(*(if (cachedObs.isNotEmpty()) cachedObs else RailDataRepository.initialObservations).toTypedArray())
+    }
     val notifications = remember { mutableStateListOf(*RailDataRepository.initialNotifications.toTypedArray()) }
 
     var latestSensorTelemetry by remember {
@@ -143,6 +154,13 @@ fun RailGuardApp() {
         appPreferences = updated
         isDarkMode = updated.isDarkMode
         firebaseService.saveAppPreferences(updated)
+        val loc = when (updated.language) {
+            AppLanguage.HI -> java.util.Locale("hi", "IN")
+            AppLanguage.ES -> java.util.Locale("es", "ES")
+            AppLanguage.EN_US -> java.util.Locale.US
+            AppLanguage.EN_UK -> java.util.Locale.UK
+        }
+        java.util.Locale.setDefault(loc)
         scope.launch {
             firebaseService.saveUserSettings(
                 mapOf(
@@ -178,12 +196,17 @@ fun RailGuardApp() {
         while (true) {
             firebaseService.pullAllFromFirebase(
                 onSuccess = { rDefects, rTasks, rInspections ->
-                    defects.clear()
-                    defects.addAll(rDefects)
-                    tasks.clear()
-                    tasks.addAll(rTasks)
-                    inspections.clear()
-                    inspections.addAll(rInspections)
+                    if (rDefects.isNotEmpty() || rTasks.isNotEmpty() || rInspections.isNotEmpty()) {
+                        defects.clear()
+                        defects.addAll(rDefects)
+                        firebaseService.saveLocalDefects(rDefects)
+                        tasks.clear()
+                        tasks.addAll(rTasks)
+                        firebaseService.saveLocalTasks(rTasks)
+                        inspections.clear()
+                        inspections.addAll(rInspections)
+                        firebaseService.saveLocalInspections(rInspections)
+                    }
                     selectedDefect = selectedDefect?.let { current ->
                         rDefects.firstOrNull { it.id == current.id }
                     }
@@ -204,8 +227,11 @@ fun RailGuardApp() {
             )
             firebaseService.pullObservations(
                 onSuccess = {
-                    observations.clear()
-                    observations.addAll(it)
+                    if (it.isNotEmpty()) {
+                        observations.clear()
+                        observations.addAll(it)
+                        firebaseService.saveLocalObservations(it)
+                    }
                 }
             )
             delay(10_000)
@@ -221,14 +247,17 @@ fun RailGuardApp() {
                     if (rDefects.isNotEmpty()) {
                         defects.clear()
                         defects.addAll(rDefects)
+                        firebaseService.saveLocalDefects(rDefects)
                     }
                     if (rTasks.isNotEmpty()) {
                         tasks.clear()
                         tasks.addAll(rTasks)
+                        firebaseService.saveLocalTasks(rTasks)
                     }
                     if (rInspections.isNotEmpty()) {
                         inspections.clear()
                         inspections.addAll(rInspections)
+                        firebaseService.saveLocalInspections(rInspections)
                     }
                 }
             )
@@ -312,8 +341,16 @@ fun RailGuardApp() {
                                             )
                                         },
                                         label = {
+                                            val translatedTitle = when (tab.route) {
+                                                Screen.Home.route -> appPreferences.translate("home")
+                                                Screen.Inspections.route -> appPreferences.translate("inspect")
+                                                Screen.Defects.route -> appPreferences.translate("defects")
+                                                Screen.Map.route -> appPreferences.translate("map")
+                                                Screen.Maintenance.route -> appPreferences.translate("control")
+                                                else -> tab.title
+                                            }
                                             Text(
-                                                text = tab.title,
+                                                text = translatedTitle,
                                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                                                 fontSize = 11.sp
                                             )
@@ -466,7 +503,7 @@ fun RailGuardApp() {
                                 backStack.clear()
                                 navigateTo(Screen.Login.route)
                             },
-                            onLockApp = { isAppLocked = true }
+                            onLockApp = {}
                         )
 
                         // Sub-screens: Inspections
@@ -778,7 +815,7 @@ fun RailGuardApp() {
                         Screen.Security.route -> SecurityScreen(
                             preferences = appPreferences,
                             onUpdatePreferences = { updatePreferences(it) },
-                            onLockApp = { isAppLocked = true },
+                            onLockApp = {},
                             onBack = { navigateBack() }
                         )
                         Screen.Language.route -> LanguageScreen(
@@ -832,13 +869,6 @@ fun RailGuardApp() {
             }
         }
 
-        if (isAppLocked) {
-            PasscodeLockScreen(
-                expectedPin = appPreferences.passcodePin.ifBlank { "1234" },
-                allowBiometric = appPreferences.isBiometricEnabled,
-                onUnlock = { isAppLocked = false }
-            )
-        }
 
         val crackAlert = firebaseService.latestCrackAlert
         if (crackAlert != null) {
