@@ -819,6 +819,28 @@ fun InspectionCalendarScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 if (item.status != "Completed") {
+                                    Button(
+                                        onClick = {
+                                            val inProgress = item.copy(status = "In Progress")
+                                            schedules = schedules.map { if (it.id == item.id) inProgress else it }
+                                            firebaseService.addCachedSchedule(inProgress)
+                                            scope.launch {
+                                                val (ok, msg) = firebaseService.startPiPatrol(inProgress)
+                                                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                                firebaseService.saveSchedule(inProgress)
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(30.dp)
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Start Sensors (Pi)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+
                                     TextButton(
                                         onClick = {
                                             val completed = item.copy(status = "Completed")
@@ -831,7 +853,7 @@ fun InspectionCalendarScreen(
                                     ) {
                                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF16A34A))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Mark Completed", color = Color(0xFF16A34A), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("Mark Done", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                 }

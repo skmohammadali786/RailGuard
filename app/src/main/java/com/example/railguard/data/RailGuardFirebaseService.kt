@@ -110,6 +110,7 @@ class RailGuardFirebaseService private constructor() {
         private const val KEY_LOCAL_DEFECTS = "local_cached_defects"
         private const val KEY_LOCAL_TASKS = "local_cached_tasks"
         private const val KEY_LOCAL_INSPECTIONS = "local_cached_inspections"
+        private const val KEY_LOCAL_NOTIFICATIONS = "local_cached_notifications"
 
         // Server-Side Pre-Configured Firebase Cloud Project Credentials
         const val DEFAULT_PROJECT_NAME = "railguard"
@@ -146,6 +147,7 @@ class RailGuardFirebaseService private constructor() {
     var directWifiLatencyMs by mutableStateOf(0L)
     var latestPiCameraBitmap by mutableStateOf<Bitmap?>(null)
     var latestPiCameraTimestamp by mutableStateOf(0L)
+    var activeTsrSpeed by mutableStateOf<Int?>(25)
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var appContext: Context? = null
@@ -341,10 +343,73 @@ class RailGuardFirebaseService private constructor() {
         }
     }
 
+    fun loadLocalNotifications(): List<com.example.railguard.model.NotificationItem> {
+        val jsonStr = sharedPreferences?.getString(KEY_LOCAL_NOTIFICATIONS, null) ?: return emptyList()
+        val list = mutableListOf<com.example.railguard.model.NotificationItem>()
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    com.example.railguard.model.NotificationItem(
+                        id = o.optString("id", "NOTIF-$i"),
+                        title = o.optString("title", ""),
+                        message = o.optString("message", ""),
+                        time = o.optString("time", ""),
+                        tone = try { Tone.valueOf(o.optString("tone", Tone.INFO.name)) } catch (_: Exception) { Tone.INFO },
+                        read = o.optBoolean("read", false)
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("RailGuardFirebase", "Failed to parse local notifications: ${e.message}")
+        }
+        return list
+    }
+
+    fun saveLocalNotifications(items: List<com.example.railguard.model.NotificationItem>) {
+        val arr = JSONArray()
+        items.forEach { notif ->
+            arr.put(JSONObject().apply {
+                put("id", notif.id)
+                put("title", notif.title)
+                put("message", notif.message)
+                put("time", notif.time)
+                put("tone", notif.tone.name)
+                put("read", notif.read)
+            })
+        }
+        sharedPreferences?.edit()?.putString(KEY_LOCAL_NOTIFICATIONS, arr.toString())?.apply()
+    }
+
+    fun saveLocalNotification(item: com.example.railguard.model.NotificationItem) {
+        val list = loadLocalNotifications().toMutableList()
+        list.removeAll { it.id == item.id }
+        list.add(0, item)
+        saveLocalNotifications(list)
+    }
+
+    fun clearLocalNotifications() {
+        sharedPreferences?.edit()?.remove(KEY_LOCAL_NOTIFICATIONS)?.apply()
+    }
+
+    fun markNotificationRead(id: String) {
+        val list = loadLocalNotifications().map {
+            if (it.id == id) it.copy(read = true) else it
+        }
+        saveLocalNotifications(list)
+    }
+
+    fun markAllNotificationsRead() {
+        val list = loadLocalNotifications().map { it.copy(read = true) }
+        saveLocalNotifications(list)
+    }
+
     suspend fun pullNotifications(
         onSuccess: (List<com.example.railguard.model.NotificationItem>) -> Unit,
         onError: (String) -> Unit = {}
     ) {
+        val cached = loadLocalNotifications()
         try {
             val json = readUserObject("notifications")
             val result = mutableListOf<com.example.railguard.model.NotificationItem>()
@@ -365,12 +430,19 @@ class RailGuardFirebaseService private constructor() {
                     )
                 }
             }
-            withContext(Dispatchers.Main) { onSuccess(result) }
+            val merged = (cached + result).distinctBy { it.id }
+            if (merged.isNotEmpty()) {
+                saveLocalNotifications(merged)
+            }
+            withContext(Dispatchers.Main) { onSuccess(if (merged.isNotEmpty()) merged else cached) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w("RailGuardFirebase", "Notifications pull error: ${e.message}")
-            withContext(Dispatchers.Main) { onError(e.message ?: "Notifications could not be loaded.") }
+            withContext(Dispatchers.Main) { 
+                if (cached.isNotEmpty()) onSuccess(cached)
+                else onError(e.message ?: "Notifications could not be loaded.") 
+            }
         }
     }
 
@@ -379,12 +451,22 @@ class RailGuardFirebaseService private constructor() {
         message: String,
         tone: Tone = Tone.INFO
     ): Boolean {
+        val notifId = "NOTIF-${System.currentTimeMillis() % 100000}"
+        val timeStr = java.text.SimpleDateFormat("HH:mm · dd MMM", java.util.Locale.getDefault()).format(java.util.Date())
+        val localItem = com.example.railguard.model.NotificationItem(
+            id = notifId,
+            title = title,
+            message = message,
+            time = timeStr,
+            tone = tone,
+            read = false
+        )
+        saveLocalNotification(localItem)
+
         return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
-                val notifId = "NOTIF-${System.currentTimeMillis() % 100000}"
                 val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/notifications/$notifId.json$authParam"
-                val timeStr = java.text.SimpleDateFormat("HH:mm · dd MMM", java.util.Locale.getDefault()).format(java.util.Date())
                 val json = JSONObject().apply {
                     put("id", notifId)
                     put("title", title)
@@ -397,8 +479,8 @@ class RailGuardFirebaseService private constructor() {
 
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "PUT"
-                    connectTimeout = 6000
-                    readTimeout = 6000
+                    connectTimeout = 5000
+                    readTimeout = 5000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 }
@@ -408,8 +490,8 @@ class RailGuardFirebaseService private constructor() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w("RailGuardFirebase", "Post notification error: ${e.message}")
-                false
+                Log.w("RailGuardFirebase", "Post notification cloud sync error: ${e.message}")
+                true // Local copy already saved
             }
         }
     }
@@ -740,6 +822,9 @@ class RailGuardFirebaseService private constructor() {
 
     suspend fun saveSchedule(schedule: PatrolSchedule): Boolean {
         addCachedSchedule(schedule)
+        scope.launch {
+            dispatchScheduleToPi(schedule)
+        }
         return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
@@ -1945,10 +2030,50 @@ class RailGuardFirebaseService private constructor() {
     }
 
     /**
-     * Dispatches temporary speed restriction (TSR) live to Firebase for train cab signaling
+     * Dispatches temporary speed restriction (TSR) live to Raspberry Pi over Wi-Fi
+     * and to Firebase Cloud RTDB for train cab signaling
      */
     suspend fun dispatchTsrToFirebase(trainId: String, tsrSpeedKmH: Int, reason: String): Boolean {
+        withContext(Dispatchers.Main) {
+            activeTsrSpeed = tsrSpeedKmH
+        }
         return withContext(Dispatchers.IO) {
+            var piSuccess = false
+            var cloudSuccess = false
+
+            // 1. Direct Wi-Fi HTTP POST to Raspberry Pi /api/tsr
+            val cleanHost = localWifiIp.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
+            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            val tsrPayload = JSONObject().apply {
+                put("speed", tsrSpeedKmH)
+                put("reason", reason)
+                put("trainId", trainId)
+                put("timestamp", System.currentTimeMillis())
+            }.toString()
+
+            for (candidate in candidateHosts) {
+                try {
+                    val conn = (URL("http://$candidate:8080/api/tsr").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 2500
+                        readTimeout = 2500
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    }
+                    conn.outputStream.use { it.write(tsrPayload.toByteArray(Charsets.UTF_8)) }
+                    if (conn.responseCode in 200..299) {
+                        piSuccess = true
+                        break
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 2. Dual-channel write to Firebase RTDB
             try {
                 val authParam = authenticatedQueryParam()
                 val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/trains/$trainId/tsr.json$authParam"
@@ -1962,27 +2087,144 @@ class RailGuardFirebaseService private constructor() {
 
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "PUT"
-                    connectTimeout = 6000
-                    readTimeout = 6000
+                    connectTimeout = 5000
+                    readTimeout = 5000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 }
 
                 OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
-                val isSuccess = conn.responseCode in 200..299
-                if (isSuccess) {
-                    postNotification(
-                        title = "TSR Speed Order Issued ($tsrSpeedKmH km/h)",
-                        message = "Train/Node $trainId: $reason",
-                        tone = if (tsrSpeedKmH <= 25) Tone.CRITICAL else Tone.WARNING
-                    )
-                }
-                isSuccess
+                cloudSuccess = conn.responseCode in 200..299
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w("RailGuardFirebase", "TSR dispatch error: ${e.message}")
-                false
+                Log.w("RailGuardFirebase", "TSR cloud dispatch error: ${e.message}")
+            }
+
+            val isSuccess = piSuccess || cloudSuccess
+            postNotification(
+                title = "TSR Speed Order Issued ($tsrSpeedKmH km/h)",
+                message = "Train/Node $trainId: $reason",
+                tone = if (tsrSpeedKmH <= 25) Tone.CRITICAL else Tone.WARNING
+            )
+            isSuccess
+        }
+    }
+
+    /**
+     * Sends scheduled patrol metadata to Raspberry Pi over Wi-Fi
+     */
+    suspend fun dispatchScheduleToPi(schedule: PatrolSchedule, host: String = localWifiIp, port: Int = 8080): Boolean {
+        return withContext(Dispatchers.IO) {
+            val cleanHost = host.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
+            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            val payload = JSONObject().apply {
+                put("id", schedule.id)
+                put("section", schedule.section)
+                put("date", schedule.date)
+                put("time", schedule.time)
+                put("shift", schedule.shift)
+                put("inspector", schedule.inspector)
+                put("patrolType", schedule.patrolType)
+                put("frequency", schedule.frequency)
+                put("notes", schedule.notes)
+            }.toString()
+
+            for (candidate in candidateHosts) {
+                try {
+                    val conn = (URL("http://$candidate:$port/api/schedule").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 2500
+                        readTimeout = 2500
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    }
+                    conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                    if (conn.responseCode in 200..299) {
+                        return@withContext true
+                    }
+                } catch (_: Exception) {}
+            }
+            false
+        }
+    }
+
+    /**
+     * Commands Raspberry Pi to activate sensors (Camera, Ultrasonic, Vibration, Temp)
+     * and start live patrol telemetry stream
+     */
+    suspend fun startPiPatrol(schedule: PatrolSchedule?, host: String = localWifiIp, port: Int = 8080): Pair<Boolean, String> {
+        return withContext(Dispatchers.IO) {
+            val cleanHost = host.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
+            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            val payload = JSONObject().apply {
+                put("scheduleId", schedule?.id ?: "PATROL-INSTANT")
+                put("section", schedule?.section ?: "Active Corridor")
+                put("inspector", schedule?.inspector ?: (currentUser?.displayName ?: "Field Inspector"))
+                put("sensors", JSONArray().apply {
+                    put("camera")
+                    put("ultrasonic")
+                    put("vibration")
+                    put("temperature")
+                    put("gyro")
+                })
+                put("timestamp", System.currentTimeMillis())
+            }.toString()
+
+            var started = false
+            for (candidate in candidateHosts) {
+                try {
+                    val conn = (URL("http://$candidate:$port/api/patrol/start").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 3000
+                        readTimeout = 3000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    }
+                    conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                    if (conn.responseCode in 200..299) {
+                        started = true
+                        break
+                    }
+                } catch (_: Exception) {}
+            }
+
+            if (started) {
+                syncDirectWifiAllData()
+                fetchPiCameraFrame()
+
+                val inspId = "INSP-${System.currentTimeMillis() % 100000}"
+                val record = InspectionRecord(
+                    id = inspId,
+                    section = schedule?.section ?: "Mainline Corridor",
+                    date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date()),
+                    inspector = schedule?.inspector ?: (currentUser?.displayName ?: "Field Inspector"),
+                    status = "In Progress",
+                    framesCount = 1,
+                    detectionsCount = 0,
+                    detectedCrackTitle = "Automated Patrol Active",
+                    recommendedMaintenanceAction = "Optical and ultrasonic sensors scanning"
+                )
+                saveLocalInspection(record)
+
+                postNotification(
+                    title = "Patrol Started on Raspberry Pi",
+                    message = "Sensors (Camera, Ultrasonic, Vibration, Temp) active on ${schedule?.section ?: "Track Corridor"}",
+                    tone = Tone.HEALTHY
+                )
+                Pair(true, "Raspberry Pi sensors activated successfully.")
+            } else {
+                Pair(false, "Could not reach Raspberry Pi on http://$cleanHost:$port. Ensure Wi-Fi hotspot is connected.")
             }
         }
     }

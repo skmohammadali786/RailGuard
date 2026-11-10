@@ -117,8 +117,22 @@ fun SettingsScreen(
                     SettingsRowTile(
                         icon = Icons.Default.Info,
                         title = "About RailGuard Platform",
-                        subtitle = "v2.4.0 High-Speed Track AI Engine",
+                        subtitle = "Hardware architecture, AI models & safety standards",
                         onClick = { onNavigate("about") }
+                    )
+
+                    SettingsRowTile(
+                        icon = Icons.Default.Policy,
+                        title = "Privacy Policy",
+                        subtitle = "Telemetry, edge processing & data handling",
+                        onClick = { onNavigate("privacy_policy") }
+                    )
+
+                    SettingsRowTile(
+                        icon = Icons.Default.Description,
+                        title = "Terms & Conditions",
+                        subtitle = "Operational guidelines, safety interlocks & compliance",
+                        onClick = { onNavigate("terms_and_conditions") }
                     )
                 }
             }
@@ -559,21 +573,146 @@ fun HelpCenterScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(
+    onBack: () -> Unit,
+    onNavigatePrivacyPolicy: () -> Unit = {},
+    onNavigateTerms: () -> Unit = {}
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xFFF8FAFC))
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "About RailGuard", subtitle = "Track integrity platform", onBack = onBack)
-        Spacer(modifier = Modifier.height(16.dp))
-        RailCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("RailGuard Autonomous Track AI", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0284C7))
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("Version 1.0.0", fontSize = 12.sp, color = Color.Gray)
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Enterprise mobile inspection platform for automated track surveillance, flaw detection, and predictive maintenance.", fontSize = 12.sp)
+        SubScreenHeader(title = "About RailGuard Platform", subtitle = "Autonomous track integrity & safety architecture", onBack = onBack)
+        Spacer(modifier = Modifier.height(14.dp))
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF0284C7)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Train, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("RailGuard Autonomous Track AI", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0F172A))
+                                Text("Production Build v1.0.0 · Field Deployment Edition", fontSize = 11.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "RailGuard is a mission-critical permanent way inspection and surveillance platform engineered for automated flaw detection, real-time sensor fusion, ultrasonic railhead verification, and automated train signaling interlocks.",
+                            fontSize = 12.sp,
+                            color = Color(0xFF334155),
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("1. Hardware & Sensor Gateway Stack", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        MetricRow("Compute Host", "Raspberry Pi 4B / 5 (ARM Quad-Core Linux)")
+                        MetricRow("Optical Sensor", "Sony IMX219 / OV5647 Macro HDR (1080p@30FPS)")
+                        MetricRow("Ultrasonic Transducer", "5MHz High-Frequency Piezo Gauge Thickness")
+                        MetricRow("Inertial Profiler", "MPU-6050 / ADXL345 6-DoF Vibration & Shocks")
+                        MetricRow("Thermal Transducer", "DS18B20 Rail Temperature (CWR Neutral Monitoring)")
+                        MetricRow("Trackside Buzzer", "5V Active Piezo Alarm & Strobe Interlock")
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("2. Edge AI & Crack Detection Engine", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "• Computer Vision Neural Core: Live contour and morphological gradient analysis for transverse fissures, squats, head checks, and rail burns.\n" +
+                            "• Paris-Erdogan Fatigue Growth Kinetics: Predicts remaining life cycles (da/dN) and stress intensity factors (ΔK).\n" +
+                            "• Dynamic Track Health: Real-time calculation from ultrasonic wear, vibration shocks, and active defect severities.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("3. Dual-Channel Network & Interlocks", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "• Direct Wi-Fi REST Gateway: Field ad-hoc connectivity over http://192.168.4.1:8080 without requiring public internet.\n" +
+                            "• Cloud RTDB Synchronization: Central dispatch signaling with real-time cab signaling and telemetry broadcast.\n" +
+                            "• TSR Interlock: Automated slow orders (25, 60, 120 km/h) dispatched to both Raspberry Pi and Cloud.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("4. Safety & Industry Compliance", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Compliant with EN 13848 (Track Geometry Quality), AREMA Chapter 4 (Rail Safety Standards), and IRSE Level 3 Signalling Principles.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569)
+                        )
+                    }
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onNavigatePrivacyPolicy,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Policy, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Privacy Policy", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+                    }
+
+                    OutlinedButton(
+                        onClick = onNavigateTerms,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Terms & Conditions", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
             }
         }
     }
@@ -630,17 +769,41 @@ fun AttentionScreen(
 @Composable
 fun NotificationsScreen(
     notifications: List<NotificationItem>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onClearAll: () -> Unit = {},
+    onMarkAllRead: () -> Unit = {}
 ) {
     val isDark = LocalIsDark.current
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xFFF8FAFC))
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "Dispatch & System Alerts", subtitle = "${notifications.size} notifications", onBack = onBack)
-        Spacer(modifier = Modifier.height(16.dp))
+        SubScreenHeader(title = "Dispatch & System Alerts", subtitle = "${notifications.size} recorded notifications", onBack = onBack)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (notifications.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onMarkAllRead) {
+                    Icon(Icons.Default.DoneAll, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF0284C7))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Mark All Read", fontSize = 11.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                TextButton(onClick = onClearAll) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFFEF4444))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Clear All", fontSize = 11.sp, color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         if (notifications.isEmpty()) {
             RailCard(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
@@ -667,13 +830,13 @@ fun NotificationsScreen(
                         text = "No System Alerts",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = Color(0xFF0F172A)
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "All corridor sections and telemetry streams are nominal. Emergency slow orders or track hazard alerts will appear here.",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = Color(0xFF64748B),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
@@ -698,12 +861,176 @@ fun NotificationsScreen(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(notif.title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text(notif.message, fontSize = 11.sp, color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569))
-                            Text(notif.time, fontSize = 10.sp, color = Color.Gray)
+                            Text(notif.title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0F172A))
+                            Text(notif.message, fontSize = 11.sp, color = Color(0xFF475569))
+                            Text(notif.time, fontSize = 10.sp, color = Color(0xFF94A3B8))
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun PrivacyPolicyScreen(onBack: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8FAFC))
+            .padding(16.dp)
+    ) {
+        SubScreenHeader(title = "Privacy Policy", subtitle = "Telemetry handling, edge processing & data governance", onBack = onBack)
+        Spacer(modifier = Modifier.height(14.dp))
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("1. Data Scope & Collection", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "RailGuard operates solely for track integrity inspection, railway infrastructure safety monitoring, and automated train signaling. Telemetry captured includes optical camera frames, 5MHz ultrasonic thickness echoes, 3-axis vibration/acceleration vectors, rail surface temperatures, and high-precision GNSS/RTK coordinates. No personally identifiable consumer data or commercial passenger information is collected.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("2. On-Device & Direct Wi-Fi Edge Processing", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "All Computer Vision defect classification and acoustic signal processing are performed directly on the edge hardware (Raspberry Pi & Android device). Direct Wi-Fi communications occur entirely within the closed local network of the inspection vehicle (192.168.4.x) and never transit public internet servers unless cloud sync is explicitly enabled.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("3. Cloud Synchronization & Encryption", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "When connected to central railway cloud services, all telemetry, defect logs, and speed restriction orders are transmitted via TLS 1.3 encrypted HTTPS endpoints with authenticated tokens. Access is restricted to certified railway operators and maintenance engineers.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("4. Local Storage & Cache Governance", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Local inspection records, scheduled patrols, and notification logs are stored in private sandboxed SharedPreferences and local storage. Inspectors may export audit PDF reports to device Downloads or clear cached notifications at any time.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun TermsAndConditionsScreen(onBack: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8FAFC))
+            .padding(16.dp)
+    ) {
+        SubScreenHeader(title = "Terms & Conditions", subtitle = "Operational rules, safety interlocks & compliance terms", onBack = onBack)
+        Spacer(modifier = Modifier.height(14.dp))
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("1. Mission-Critical Operational Status", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "RailGuard is an automated decision-support system designed to assist certified Permanent Way Inspectors. While the AI neural classifier and ultrasonic algorithms detect defects and recommend emergency slow orders, final track certification, line reopening, and repair approval remain the strict responsibility of authorized railway personnel.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("2. Temporary Speed Restriction (TSR) Protocol", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Emergency slow orders (25 km/h, 60 km/h, 120 km/h) dispatched through this platform interface with trackside signaling relays and cab communication units. Field operators must follow standard operating operating rules (SOR) and notify Central Train Control immediately when issuing severe restrictions.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("3. Hardware Integrity & Sensor Maintenance", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Correct operation requires proper alignment and regular calibration of the optical camera lens, 5MHz ultrasonic piezoelectric transducer, acoustic buzzer, and inertial shock sensors. Damaged probes or degraded batteries must be replaced before conducting passenger line sweeps.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                RailCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("4. Railway Safety Standard Compliance", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0284C7))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "This system is engineered in accordance with European Standard EN 13848 (Track Geometry Quality), AREMA Section 4, and IRSE Level 3 signalling safety integrity. Audit packages and PDF exports represent legal records for permanent way maintenance archives.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }

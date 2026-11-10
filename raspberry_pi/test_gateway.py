@@ -185,6 +185,29 @@ class TestCameraCrackDetector(unittest.TestCase):
             self.assertEqual(data["status"], "SUCCESS")
             self.assertEqual(data["buzzer"], "SILENCED")
 
+        # 8. Schedule Save POST & GET
+        req_sched = urllib.request.Request(
+            "http://127.0.0.1:18080/api/schedule",
+            data=json.dumps({"id": "SCHED-TEST", "section": "Corridor Sector 4B", "time": "08:00"}).encode(),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req_sched, timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "SCHEDULE_SAVED")
+
+        # 9. Patrol Start POST
+        req_patrol = urllib.request.Request(
+            "http://127.0.0.1:18080/api/patrol/start",
+            data=json.dumps({"section": "Sector 4B", "action": "START_PATROL"}).encode(),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req_patrol, timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "PATROL_ACTIVE")
+            self.assertIn("sensors", data)
+
         if server:
             server.shutdown()
 

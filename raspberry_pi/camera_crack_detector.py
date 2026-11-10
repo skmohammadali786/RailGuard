@@ -49,6 +49,8 @@ DEFECTS_REGISTRY: List[Dict[str, Any]] = []
 TASKS_REGISTRY: List[Dict[str, Any]] = []
 INSPECTIONS_REGISTRY: List[Dict[str, Any]] = []
 REPORTS_REGISTRY: List[Dict[str, Any]] = []
+SCHEDULES_REGISTRY: List[Dict[str, Any]] = []
+ACTIVE_PATROL_STATUS: Dict[str, Any] = {"status": "STANDBY", "sensors": ["camera", "ultrasonic", "vibration", "temperature", "gps"]}
 START_TIME_MS: int = int(time.time() * 1000)
 LATEST_CAMERA_FRAME_BYTES: Optional[bytes] = None
 LATEST_FRAME_CAPTURED_AT: int = int(time.time() * 1000)
@@ -350,6 +352,10 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 "lastTriggered": BUZZER_TRIGGERED_AT,
                 "timestamp": int(time.time() * 1000)
             })
+        elif clean_path in ("/api/schedules", "/api/schedule"):
+            self._send_json(200, {"schedules": SCHEDULES_REGISTRY})
+        elif clean_path in ("/api/patrol", "/api/patrol/status"):
+            self._send_json(200, ACTIVE_PATROL_STATUS)
         elif clean_path == "/api/health":
             self._send_json(200, {
                 "status": "ONLINE",
@@ -357,11 +363,12 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 "hardware": "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
                 "buzzerPin": BUZZER_PIN,
                 "buzzerActive": IS_BUZZER_RINGING,
+                "patrolActive": ACTIVE_PATROL_STATUS.get("status") == "PATROL_ACTIVE",
                 "wifiDirectActive": True,
                 "timestamp": int(time.time() * 1000)
             })
         else:
-            self._send_json(404, {"error": "Endpoint not found", "available": ["/api/all_data", "/api/telemetry", "/api/camera_frame", "/api/latest_crack", "/api/defects", "/api/tasks", "/api/inspections", "/api/reports", "/api/hardware", "/api/ai_oracle", "/api/buzzer", "/api/health", "/api/tsr"]})
+            self._send_json(404, {"error": "Endpoint not found", "available": ["/api/all_data", "/api/telemetry", "/api/camera_frame", "/api/latest_crack", "/api/defects", "/api/tasks", "/api/inspections", "/api/reports", "/api/hardware", "/api/ai_oracle", "/api/buzzer", "/api/schedule", "/api/patrol/start", "/api/health", "/api/tsr"]})
 
     def do_POST(self):
         clean_path = self.path.split("?")[0].rstrip("/")
@@ -394,6 +401,39 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     res = activate_buzzer(duration_seconds=duration, reason=reason)
                 self._send_json(200, res)
+            except Exception as e:
+                self._send_json(400, {"error": str(e)})
+        elif clean_path in ("/api/schedules", "/api/schedule"):
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+            try:
+                req_data = json.loads(body) if body.strip() else {}
+                SCHEDULES_REGISTRY.append(req_data)
+                log.info("[+] Patrol schedule saved on Pi: %s (Time: %s)", req_data.get("section"), req_data.get("time"))
+                self._send_json(200, {"status": "SCHEDULE_SAVED", "count": len(SCHEDULES_REGISTRY)})
+            except Exception as e:
+                self._send_json(400, {"error": str(e)})
+        elif clean_path in ("/api/patrol/start", "/api/patrol"):
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+            try:
+                req_data = json.loads(body) if body.strip() else {}
+                global ACTIVE_PATROL_STATUS
+                ACTIVE_PATROL_STATUS = {
+                    "status": "PATROL_ACTIVE",
+                    "section": req_data.get("section", "Active Corridor"),
+                    "sensors": ["camera", "ultrasonic", "vibration", "temperature", "gps"],
+                    "startedAt": int(time.time() * 1000)
+                }
+                log.warning("🚨 [PATROL STARTED] Raspberry Pi sensors ACTIVE for %s", ACTIVE_PATROL_STATUS["section"])
+                trigger_camera_snapshot()
+                self._send_json(200, {
+                    "status": "PATROL_ACTIVE",
+                    "message": "Raspberry Pi sensors online & streaming",
+                    "section": ACTIVE_PATROL_STATUS["section"],
+                    "sensors": ACTIVE_PATROL_STATUS["sensors"],
+                    "startedAt": ACTIVE_PATROL_STATUS["startedAt"]
+                })
             except Exception as e:
                 self._send_json(400, {"error": str(e)})
         elif clean_path in ("/api/camera_capture", "/api/camera/capture"):

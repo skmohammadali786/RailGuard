@@ -93,7 +93,7 @@ fun Header(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = if (isHome) "RAILGUARD / CONTROL" else "RAILGUARD / SYSTEM",
+                text = "RAILGUARD",
                 style = MaterialTheme.typography.labelSmall,
                 color = colorScheme.primary,
                 fontWeight = FontWeight.Bold,

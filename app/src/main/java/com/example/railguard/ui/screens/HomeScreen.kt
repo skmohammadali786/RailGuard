@@ -355,33 +355,66 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     // Quick TSR Interlock Dispatch
+                    val activeTsr = com.example.railguard.data.RailGuardFirebaseService.instance.activeTsrSpeed
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("TSR Speed Order:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurfaceVariant)
+                        Column {
+                            Text("TSR Speed Order:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurfaceVariant)
+                            Text(
+                                text = "Active Limit: ${activeTsr ?: 25} km/h",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if ((activeTsr ?: 25) <= 25) Color(0xFFDC2626) else Color(0xFF0284C7)
+                            )
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(25, 60, 120).forEach { speed ->
-                                OutlinedButton(
-                                    onClick = {
-                                        scope.launch {
-                                            com.example.railguard.data.RailGuardFirebaseService.instance.dispatchTsrToFirebase(
-                                                trainId = telemetry?.nodeId ?: "RPI-TRACK-01",
-                                                tsrSpeedKmH = speed,
-                                                reason = "Operator speed order: $speed km/h"
-                                            )
-                                            tsrFeedback = "TSR $speed km/h sent to hardware ✓"
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(6.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        contentColor = if (speed == 25) Color(0xFFDC2626) else Color(0xFF0284C7)
-                                    )
-                                ) {
-                                    Text("$speed", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                val isSelected = activeTsr == speed
+                                if (isSelected) {
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                com.example.railguard.data.RailGuardFirebaseService.instance.dispatchTsrToFirebase(
+                                                    trainId = telemetry?.nodeId ?: "RPI-TRACK-01",
+                                                    tsrSpeedKmH = speed,
+                                                    reason = "Operator speed order: $speed km/h"
+                                                )
+                                                tsrFeedback = "TSR $speed km/h active (Pi Hardware + Cloud Interlock) ✓"
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (speed == 25) Color(0xFFDC2626) else Color(0xFF0284C7)
+                                        )
+                                    ) {
+                                        Text("$speed", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        onClick = {
+                                            scope.launch {
+                                                com.example.railguard.data.RailGuardFirebaseService.instance.dispatchTsrToFirebase(
+                                                    trainId = telemetry?.nodeId ?: "RPI-TRACK-01",
+                                                    tsrSpeedKmH = speed,
+                                                    reason = "Operator speed order: $speed km/h"
+                                                )
+                                                tsrFeedback = "TSR $speed km/h sent to hardware ✓"
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            contentColor = if (speed == 25) Color(0xFFDC2626) else Color(0xFF0284C7)
+                                        )
+                                    ) {
+                                        Text("$speed", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
@@ -447,14 +480,14 @@ fun HomeScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Column {
                                     Text(
-                                        text = if (fbService.isPiBuzzerActive) "Pi Hardware Buzzer: RINGING" else "Pi Hardware Buzzer: IDLE (GPIO 18)",
+                                        text = if (fbService.isPiBuzzerActive) "Trackside Buzzer: ALARM ACTIVE" else "Trackside Buzzer: READY / IDLE",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
                                         color = if (fbService.isPiBuzzerActive) Color(0xFFDC2626) else Color(0xFF475569)
                                     )
                                     Text(
-                                        text = if (fbService.isPiBuzzerActive) "Active alarm on track & phone" else "Armed: rings immediately on crack",
+                                        text = if (fbService.isPiBuzzerActive) "Audible alarm sounding at trackside & phone" else "Armed: rings immediately when anomaly detected",
                                         fontSize = 10.sp,
                                         color = if (fbService.isPiBuzzerActive) Color(0xFF991B1B) else Color(0xFF64748B)
                                     )
@@ -472,7 +505,7 @@ fun HomeScreen(
                                 border = androidx.compose.foundation.BorderStroke(1.dp, if (fbService.isPiBuzzerActive) Color(0xFFDC2626) else Color(0xFF0284C7))
                             ) {
                                 Text(
-                                    text = if (fbService.isPiBuzzerActive) "Silence" else "Test Buzzer",
+                                    text = if (fbService.isPiBuzzerActive) "Silence Buzzer" else "Trigger Buzzer",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (fbService.isPiBuzzerActive) Color(0xFFDC2626) else Color(0xFF0284C7)
@@ -486,6 +519,42 @@ fun HomeScreen(
 
         // Network Pulse
         item {
+            val isDirectWifiConnected = com.example.railguard.data.RailGuardFirebaseService.instance.isDirectWifiConnected
+            val liveTrackHealth: Pair<String, Tone> = remember(defects, telemetry, isDirectWifiConnected) {
+                if (!isDirectWifiConnected && defects.isEmpty() && (telemetry == null || (telemetry.vibrationG == 0.0f && telemetry.ultrasonicDepthMm == 0.0f))) {
+                    Pair("Awaiting Scan", Tone.NEUTRAL)
+                } else {
+                    var score = 98.4
+                    defects.forEach { d ->
+                        when (d.tone) {
+                            Tone.CRITICAL -> score -= 18.0
+                            Tone.WARNING -> score -= 8.0
+                            else -> score -= 4.0
+                        }
+                    }
+                    val vib = telemetry?.vibrationG?.toDouble() ?: 0.0
+                    if (vib > 1.2) {
+                        score -= minOf(15.0, (vib - 1.2) * 8.0)
+                    }
+                    val ut = telemetry?.ultrasonicDepthMm?.toDouble() ?: 0.0
+                    if (ut in 1.0..58.0) {
+                        score -= minOf(20.0, (58.0 - ut) * 2.0)
+                    }
+                    val temp = telemetry?.railTempC?.toDouble() ?: 24.0
+                    if (temp > 45.0 || temp < -5.0) {
+                        score -= 5.0
+                    }
+                    val clamped = score.coerceIn(25.0, 99.2)
+                    val formatted = String.format(java.util.Locale.US, "%.1f%%", clamped)
+                    val tone = when {
+                        clamped >= 85.0 -> Tone.HEALTHY
+                        clamped >= 65.0 -> Tone.WARNING
+                        else -> Tone.CRITICAL
+                    }
+                    Pair(formatted, tone)
+                }
+            }
+
             SectionLabel(
                 title = "NETWORK PULSE",
                 action = "View all",
@@ -503,16 +572,16 @@ fun HomeScreen(
                     onClick = { onNavigate("defects") }
                 )
                 MetricTile(
-                    value = "${tasks.size}",
-                    label = "Due tasks",
-                    tone = if (tasks.isNotEmpty()) Tone.WARNING else Tone.HEALTHY,
+                    value = "${tasks.count { !it.status.contains("Completed") }}",
+                    label = "Active tasks",
+                    tone = if (tasks.any { !it.status.contains("Completed") }) Tone.WARNING else Tone.HEALTHY,
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("maintenance") }
                 )
                 MetricTile(
-                    value = if (defects.isEmpty()) "100%" else "${maxOf(60, 100 - defects.size * 5)}%",
+                    value = liveTrackHealth.first,
                     label = "Track health",
-                    tone = if (defects.isEmpty()) Tone.HEALTHY else Tone.WARNING,
+                    tone = liveTrackHealth.second,
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("track_health") }
                 )

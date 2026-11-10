@@ -92,6 +92,8 @@ sealed class Screen(val route: String) {
     object Language : Screen("language")
     object Help : Screen("help")
     object About : Screen("about")
+    object PrivacyPolicy : Screen("privacy_policy")
+    object TermsAndConditions : Screen("terms_and_conditions")
     object Attention : Screen("attention")
     object Notifications : Screen("notifications")
     object AiOracle : Screen("ai_oracle")
@@ -128,7 +130,10 @@ fun RailGuardApp() {
     val observations = remember {
         mutableStateListOf(*(if (cachedObs.isNotEmpty()) cachedObs else RailDataRepository.initialObservations).toTypedArray())
     }
-    val notifications = remember { mutableStateListOf(*RailDataRepository.initialNotifications.toTypedArray()) }
+    val cachedNotifs = remember { firebaseService.loadLocalNotifications() }
+    val notifications = remember {
+        mutableStateListOf(*(if (cachedNotifs.isNotEmpty()) cachedNotifs else RailDataRepository.initialNotifications).toTypedArray())
+    }
 
     var latestSensorTelemetry by remember {
         mutableStateOf<RailGuardFirebaseService.LiveSensorTelemetry?>(null)
@@ -824,7 +829,13 @@ fun RailGuardApp() {
                             onBack = { navigateBack() }
                         )
                         Screen.Help.route -> HelpCenterScreen(onBack = { navigateBack() })
-                        Screen.About.route -> AboutScreen(onBack = { navigateBack() })
+                        Screen.About.route -> AboutScreen(
+                            onBack = { navigateBack() },
+                            onNavigatePrivacyPolicy = { navigateTo(Screen.PrivacyPolicy.route) },
+                            onNavigateTerms = { navigateTo(Screen.TermsAndConditions.route) }
+                        )
+                        Screen.PrivacyPolicy.route -> PrivacyPolicyScreen(onBack = { navigateBack() })
+                        Screen.TermsAndConditions.route -> TermsAndConditionsScreen(onBack = { navigateBack() })
                         Screen.Attention.route -> AttentionScreen(
                             defects = defects,
                             tasks = tasks,
@@ -846,7 +857,17 @@ fun RailGuardApp() {
                         )
                         Screen.Notifications.route -> NotificationsScreen(
                             notifications = notifications,
-                            onBack = { navigateBack() }
+                            onBack = { navigateBack() },
+                            onClearAll = {
+                                firebaseService.clearLocalNotifications()
+                                notifications.clear()
+                            },
+                            onMarkAllRead = {
+                                firebaseService.markAllNotificationsRead()
+                                val updated = notifications.map { it.copy(read = true) }
+                                notifications.clear()
+                                notifications.addAll(updated)
+                            }
                         )
                         Screen.AiOracle.route -> AiOracleScreen(
                             defects = defects,
