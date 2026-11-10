@@ -296,10 +296,12 @@ fun RailGuardApp() {
         focusManager.clearFocus(force = true)
         if (backStack.isNotEmpty()) {
             currentRoute = backStack.removeAt(backStack.size - 1)
+        } else if (currentRoute != Screen.Home.route) {
+            currentRoute = Screen.Home.route
         }
     }
 
-    BackHandler(enabled = backStack.isNotEmpty()) {
+    BackHandler(enabled = backStack.isNotEmpty() || currentRoute != Screen.Home.route) {
         keyboardController?.hide()
         focusManager.clearFocus(force = true)
         navigateBack()
@@ -335,7 +337,12 @@ fun RailGuardApp() {
                                         selected = selected,
                                         onClick = {
                                             if (currentRoute != tab.route) {
-                                                backStack.clear()
+                                                if (currentRoute == Screen.Home.route) {
+                                                    backStack.add(Screen.Home.route)
+                                                } else {
+                                                    backStack.removeAll { it in tabs.map { t -> t.route } }
+                                                    backStack.add(Screen.Home.route)
+                                                }
                                                 currentRoute = tab.route
                                             }
                                         },
@@ -583,12 +590,10 @@ fun RailGuardApp() {
                         } ?: CloudDataRequiredScreen("No inspection records found in cloud database", ::navigateBack)
                         Screen.InspectionSummary.route -> InspectionSummaryScreen(
                             onDone = {
-                                backStack.clear()
-                                currentRoute = Screen.Home.route
+                                navigateBack()
                             },
                             onBack = {
-                                backStack.clear()
-                                currentRoute = Screen.Home.route
+                                navigateBack()
                             }
                         )
                         Screen.InspectionCalendar.route -> InspectionCalendarScreen(
@@ -643,21 +648,31 @@ fun RailGuardApp() {
                             onBack = { navigateBack() }
                         )
                         Screen.EngineerVerification.route -> EngineerVerificationScreen(
-                            onSigned = {
+                            defect = selectedDefect ?: defects.firstOrNull(),
+                            inspectorName = profileName,
+                            onSigned = { signedBy, notes ->
                                 scope.launch {
-                                     val defect = selectedDefect ?: return@launch
-                                     val verified = defect.copy(
-                                        score = "Verified (100%)",
-                                        tone = Tone.HEALTHY,
-                                        aiPrescribedAction = "Verified & signed off by Lead Engineer ($profileName)"
-                                    )
-                                     val idx = defects.indexOfFirst { it.id == defect.id }
-                                    if (idx >= 0) defects[idx] = verified
-                                    selectedDefect = verified
-                                    firebaseService.uploadDefectToFirebase(verified)
+                                    val targetDefect = selectedDefect ?: defects.firstOrNull()
+                                    if (targetDefect != null) {
+                                        val verified = targetDefect.copy(
+                                            score = "Verified (100%)",
+                                            tone = Tone.HEALTHY,
+                                            aiPrescribedAction = "Verified & signed off by $signedBy: $notes"
+                                        )
+                                        val idx = defects.indexOfFirst { it.id == targetDefect.id }
+                                        if (idx >= 0) defects[idx] = verified
+                                        selectedDefect = verified
+                                        firebaseService.saveLocalDefects(defects.toList())
+                                        firebaseService.uploadDefectToFirebase(verified)
+                                    }
                                     firebaseService.logSafetyAuditEvent(
-                                        action = "ENGINEER_VERIFICATION",
-                                        details = "Defect ${verified.id} (${verified.title}) verified and signed by $profileName"
+                                        action = "ENGINEER_SIGNOFF",
+                                        details = "Official audit signed off by $signedBy: $notes"
+                                    )
+                                    firebaseService.postNotification(
+                                        title = "Engineer Sign-Off",
+                                        message = "Official audit signed off by $signedBy" + (if (targetDefect != null) " for ${targetDefect.id}" else ""),
+                                        tone = Tone.HEALTHY
                                     )
                                 }
                                 navigateBack()

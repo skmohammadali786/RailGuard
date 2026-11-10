@@ -812,7 +812,7 @@ fun HomeScreen(
                 )
                 WorkspaceTile(
                     title = "Track Health",
-                    subtitle = if (defects.isEmpty()) "100% Nominal" else "${maxOf(60, 100 - defects.size * 5)}% Condition",
+                    subtitle = if (defects.isEmpty()) "100% Optimal" else "${maxOf(60, 100 - defects.size * 5)}% Condition",
                     icon = Icons.Default.HealthAndSafety,
                     onClick = { onNavigate("track_health") },
                     modifier = Modifier.weight(1f)
@@ -904,7 +904,7 @@ fun DedicatedHomepageAiOracle(
                     .border(1.dp, Color(0xFF0284C7).copy(alpha = 0.6f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
-                val conf = if (defects.isNotEmpty()) "${defects.first().aiConfidencePercent}% CONF" else "NOMINAL"
+                val conf = if (defects.isNotEmpty()) "${defects.first().aiConfidencePercent}% CONF" else "AI ACTIVE"
                 Text(
                     text = conf,
                     color = Color(0xFF0369A1),

@@ -610,10 +610,38 @@ fun DefectDetailsScreen(
             }
         }
 
+        if (defect.score.contains("Verified") || defect.aiPrescribedAction.contains("Verified", ignoreCase = true)) {
+            item {
+                Spacer(modifier = Modifier.height(6.dp))
+                RailCard(
+                    backgroundColor = Color(0xFFF0FDF4),
+                    borderColor = Color(0xFFBBF7D0),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF16A34A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text("OFFICIALLY SIGNED OFF", color = Color(0xFF16A34A), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(defect.aiPrescribedAction, color = Color(0xFF15803D), fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             Spacer(modifier = Modifier.height(6.dp))
             PrimaryButton(
-                title = "Sign & Verify Defect Record",
+                title = if (defect.score.contains("Verified")) "Update Engineer Sign-Off" else "Sign & Verify Defect Record",
                 onClick = onOpenVerify,
                 modifier = Modifier.testTag("verify_defect_action_btn")
             )
@@ -1235,12 +1263,23 @@ fun AlignmentAnalysisScreen(
 }
 
 @Composable
-fun EngineerVerificationScreen(onSigned: () -> Unit, onBack: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    val focusManager = LocalFocusManager.current
+fun EngineerVerificationScreen(
+    defect: Defect? = null,
+    inspectorName: String = "",
+    onSigned: (signedBy: String, notes: String) -> Unit,
+    onBack: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     var engineerNotes by remember { mutableStateOf("") }
-    var signedBy by remember { mutableStateOf(RailGuardFirebaseService.instance.currentUser?.email?.substringBefore("@")?.replace(".", " ")?.replaceFirstChar { it.uppercase() } ?: "Unknown") }
+    var signedBy by remember {
+        mutableStateOf(
+            if (inspectorName.isNotBlank() && inspectorName != "Unknown") inspectorName
+            else RailGuardFirebaseService.instance.currentUser?.email?.substringBefore("@")?.replace(".", " ")?.replaceFirstChar { it.uppercase() } ?: "Lead Field Engineer"
+        )
+    }
+    var isSigning by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1249,7 +1288,7 @@ fun EngineerVerificationScreen(onSigned: () -> Unit, onBack: () -> Unit) {
     ) {
         SubScreenHeader(
             title = "Engineer Sign-Off",
-            subtitle = "Official safety audit certificate",
+            subtitle = if (defect != null) "Sign & verify ${defect.id} · ${defect.title}" else "Official field corridor safety certification",
             onBack = {
                 keyboardController?.hide()
                 focusManager.clearFocus(force = true)
@@ -1257,14 +1296,40 @@ fun EngineerVerificationScreen(onSigned: () -> Unit, onBack: () -> Unit) {
             }
         )
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (defect != null) {
+            RailCard(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "TARGET DEFECT RECORD",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF0064E0),
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "${defect.id} · ${defect.title}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+                Text(
+                    text = "Chainage: ${defect.chainageCoordinate} · Estimated size: ${defect.estimatedLength}",
+                    fontSize = 11.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         RailCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("Verification Authority", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Column {
+                Text("Verification Authority", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0F172A))
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = signedBy,
                     onValueChange = { signedBy = it },
-                    label = { Text("Inspector Name & ID") },
+                    label = { Text("Lead Engineer Name & License") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1273,23 +1338,20 @@ fun EngineerVerificationScreen(onSigned: () -> Unit, onBack: () -> Unit) {
                     value = engineerNotes,
                     onValueChange = { engineerNotes = it },
                     label = { Text("Engineering Audit Notes") },
-                    placeholder = { Text("e.g. Verified with gauge caliper. Immediate weld scheduled.") },
+                    placeholder = { Text("e.g. Field verification completed. Geometry within permissible tolerance.") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(18.dp))
                 PrimaryButton(
-                    title = "Apply Cryptographic Field Signature",
+                    title = if (isSigning) "Recording Sign-Off..." else "Authorize & Sign Off",
+                    disabled = isSigning,
                     onClick = {
                         keyboardController?.hide()
                         focusManager.clearFocus(force = true)
-                        scope.launch {
-                            RailGuardFirebaseService.instance.logSafetyAuditEvent(
-                                "ENGINEER_SIGNOFF",
-                                mapOf("signedBy" to signedBy, "notes" to engineerNotes, "timestamp" to System.currentTimeMillis())
-                            )
-                        }
-                        onSigned()
+                        isSigning = true
+                        android.widget.Toast.makeText(context, "✓ Engineer Sign-Off Verified & Recorded", android.widget.Toast.LENGTH_LONG).show()
+                        onSigned(signedBy, engineerNotes.ifBlank { "Field verification confirmed by $signedBy" })
                     }
                 )
             }

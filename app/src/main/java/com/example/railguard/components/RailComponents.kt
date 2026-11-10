@@ -188,36 +188,38 @@ fun Header(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Astryx Wi-Fi Quick Access Pill with Live Beacon
-            Box(
-                modifier = Modifier
-                    .height(38.dp)
-                    .clip(RoundedCornerShape(9999.dp))
-                    .background(if (isWifiOnline) Color(0xFFF0FDF4) else Color(0xFFF1F5F9))
-                    .border(1.dp, if (isWifiOnline) Color(0xFFBBF7D0) else Color(0xFFE2E8F0), RoundedCornerShape(9999.dp))
-                    .clickable { showHeaderWifiDialog = true }
-                    .padding(horizontal = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isWifiOnline) {
-                        AstryxLiveBeacon(tone = Tone.HEALTHY, size = 6.dp)
-                        Spacer(modifier = Modifier.width(4.dp))
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Wifi,
-                            contentDescription = "Pi Wi-Fi",
-                            tint = Color(0xFF64748B),
-                            modifier = Modifier.size(15.dp)
+            // Astryx Wi-Fi Quick Access Pill with Live Beacon (Only displayed on Homepage)
+            if (isHome) {
+                Box(
+                    modifier = Modifier
+                        .height(38.dp)
+                        .clip(RoundedCornerShape(9999.dp))
+                        .background(if (isWifiOnline) Color(0xFFF0FDF4) else Color(0xFFF1F5F9))
+                        .border(1.dp, if (isWifiOnline) Color(0xFFBBF7D0) else Color(0xFFE2E8F0), RoundedCornerShape(9999.dp))
+                        .clickable { showHeaderWifiDialog = true }
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isWifiOnline) {
+                            AstryxLiveBeacon(tone = Tone.HEALTHY, size = 6.dp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Wifi,
+                                contentDescription = "Pi Wi-Fi",
+                                tint = Color(0xFF64748B),
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                        }
+                        Text(
+                            text = if (isWifiOnline) "${fbService.directWifiLatencyMs}ms" else "Pi Wi-Fi",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isWifiOnline) Color(0xFF16A34A) else Color(0xFF475569)
                         )
-                        Spacer(modifier = Modifier.width(5.dp))
                     }
-                    Text(
-                        text = if (isWifiOnline) "${fbService.directWifiLatencyMs}ms" else "Pi Wi-Fi",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isWifiOnline) Color(0xFF16A34A) else Color(0xFF475569)
-                    )
                 }
             }
 
@@ -747,22 +749,7 @@ fun RealTimeTrainLineMap(
                             fontWeight = FontWeight.Bold
                         )
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF16A34A).copy(alpha = 0.15f))
-                            .padding(horizontal = 5.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                        text = "NOMINAL PATROL",
-                        color = Color(0xFF16A34A),
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
-                Text("SCHEMATIC", color = Color(0xFF64748B), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
         }
 
