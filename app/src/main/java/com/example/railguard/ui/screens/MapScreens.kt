@@ -548,8 +548,8 @@ fun LocationDetailsScreen(onBack: () -> Unit) {
                 }
 
                 PrimaryButton(
-                    title = if (isSyncingGeodesy) "Syncing Geodesy..." else "Transmit Survey Markers to Cloud",
-                    icon = Icons.Default.CloudUpload,
+                    title = if (isSyncingGeodesy) "Saving Geodesy..." else "Save Survey Markers",
+                    icon = Icons.Default.Save,
                     onClick = {
                         isSyncingGeodesy = true
                         scope.launch {
@@ -579,9 +579,9 @@ fun LocationDetailsScreen(onBack: () -> Unit) {
                                     )
                                     isSyncingGeodesy = false
                                     geodesySyncMsg = if (synced) {
-                                        "Device coordinates persisted to Cloud Realtime DB ✓"
+                                        "Device coordinates saved ✓"
                                     } else {
-                                        "Firebase rejected the location update"
+                                        "Failed to save location update"
                                     }
                                 }
                             }
@@ -606,14 +606,14 @@ fun GpsScreen(onBack: () -> Unit) {
     ) { permissions ->
         if (permissions.values.any { it }) {
             isBroadcastingLive = true
-            lastSyncStatus = "GPS permission granted; starting cloud broadcast"
+            lastSyncStatus = "GPS permission granted; broadcasting telemetry"
         } else {
             isBroadcastingLive = false
             lastSyncStatus = "GPS permission was denied"
         }
     }
 
-    // Live continuous GPS sync loop to Firebase RTDB
+    // Live continuous GPS sync loop
     LaunchedEffect(isBroadcastingLive) {
         while (isBroadcastingLive) {
             delay(3000)
@@ -632,9 +632,9 @@ fun GpsScreen(onBack: () -> Unit) {
                 )
                 if (synced) {
                     broadcastPushedCount++
-                    lastSyncStatus = "Packet #$broadcastPushedCount streamed to Cloud DB"
+                    lastSyncStatus = "Packet #$broadcastPushedCount streamed ✓"
                 } else {
-                    lastSyncStatus = "Firebase rejected the GPS packet"
+                    lastSyncStatus = "Failed to stream GPS packet"
                 }
             }
         }
@@ -645,10 +645,10 @@ fun GpsScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "GPS Receiver Telemetry", subtitle = "Multi-constellation GNSS & Cloud Broadcast", onBack = onBack)
+        SubScreenHeader(title = "GPS Receiver Telemetry", subtitle = "Multi-constellation GNSS & Telemetry Broadcast", onBack = onBack)
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Cloud Broadcast Status Banner
+        // Telemetry Broadcast Status Banner
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -665,7 +665,7 @@ fun GpsScreen(onBack: () -> Unit) {
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Cloud Telemetry Uplink",
+                            text = "Live Telemetry Uplink",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -737,9 +737,9 @@ fun GpsScreen(onBack: () -> Unit) {
                                     )
                                     manualSyncing = false
                                     lastSyncStatus = if (synced) {
-                                        "Manual device fix synced to Cloud DB ✓"
+                                        "Manual device fix saved ✓"
                                     } else {
-                                        "Firebase rejected the manual GPS fix"
+                                        "Failed to save manual GPS fix"
                                     }
                                 }
                             }
@@ -751,7 +751,7 @@ fun GpsScreen(onBack: () -> Unit) {
                 ) {
                     Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (manualSyncing) "Transmitting..." else "Broadcast Immediate Fix to Cloud", fontSize = 12.sp)
+                    Text(if (manualSyncing) "Saving..." else "Record Immediate Fix", fontSize = 12.sp)
                 }
             }
         }

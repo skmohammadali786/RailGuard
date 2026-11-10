@@ -359,12 +359,12 @@ fun TaskDetailsScreen(
                                 .background(Color(0xFFFFA000).copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color(0xFFFFA000), modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Sync, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(16.dp))
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
-                            Text("Cloud Work Order Sync", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text(firebaseSyncMsg ?: "Replicate task state to central cloud", fontSize = 10.sp, color = colorScheme.onSurfaceVariant)
+                            Text("Work Order Sync", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(firebaseSyncMsg ?: "Save task state", fontSize = 10.sp, color = colorScheme.onSurfaceVariant)
                         }
                     }
 
@@ -374,7 +374,7 @@ fun TaskDetailsScreen(
                             scope.launch {
                                 com.example.railguard.data.RailGuardFirebaseService.instance.uploadTaskToFirebase(task)
                                 isSyncingToFirebase = false
-                                firebaseSyncMsg = "Synchronized to Central Cloud!"
+                                firebaseSyncMsg = "Saved successfully!"
                             }
                         },
                         enabled = !isSyncingToFirebase,
@@ -713,8 +713,8 @@ fun MaintenanceAnalyticsScreen(
                 }
 
                 PrimaryButton(
-                    title = if (isSyncingKpi) "Syncing..." else "Transmit Maintenance KPIs to Cloud",
-                    icon = Icons.Default.CloudUpload,
+                    title = if (isSyncingKpi) "Saving..." else "Save Maintenance KPIs",
+                    icon = Icons.Default.Save,
                     onClick = {
                         isSyncingKpi = true
                         scope.launch {
@@ -723,7 +723,7 @@ fun MaintenanceAnalyticsScreen(
                                 mapOf("totalTasks" to tasks.size, "criticalTasks" to criticalCount, "closedInSla" to slaAdherence)
                             )
                             isSyncingKpi = false
-                            kpiSyncMsg = "KPI metrics persisted to Cloud DB ✓"
+                            kpiSyncMsg = "KPI metrics saved ✓"
                         }
                     }
                 )

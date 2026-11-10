@@ -127,7 +127,7 @@ fun DefectsListScreen(
                         }
                     }
                 ) {
-                    Text("Save to Cloud")
+                    Text("Save")
                 }
             },
             dismissButton = {
@@ -481,12 +481,12 @@ fun DefectDetailsScreen(
                                 .background(Color(0xFFFFA000).copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color(0xFFFFA000), modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Sync, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(16.dp))
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
-                            Text("Cloud Telemetry Sync", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text(firebaseSyncMessage ?: "Replicate defect telemetry to cloud storage", fontSize = 10.sp, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+                            Text("Telemetry Sync", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(firebaseSyncMessage ?: "Save defect record", fontSize = 10.sp, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
                         }
                     }
 
@@ -496,7 +496,7 @@ fun DefectDetailsScreen(
                             scope.launch {
                                 RailGuardFirebaseService.instance.uploadDefectToFirebase(defect)
                                 isSyncingToFirebase = false
-                                firebaseSyncMessage = "Synchronized to Central Cloud!"
+                                firebaseSyncMessage = "Saved successfully!"
                             }
                         },
                         enabled = !isSyncingToFirebase,
@@ -772,8 +772,8 @@ fun CrackMeasurementScreen(
                 }
 
                 PrimaryButton(
-                    title = if (isTransmitting) "Uploading Analysis..." else "Sync Measurement to Cloud DB",
-                    icon = Icons.Default.CloudUpload,
+                    title = if (isTransmitting) "Saving Analysis..." else "Save Measurement",
+                    icon = Icons.Default.Save,
                     onClick = {
                         isTransmitting = true
                         scope.launch {
@@ -782,7 +782,7 @@ fun CrackMeasurementScreen(
                                 mapOf("defectId" to (defect?.id ?: "NOMINAL"), "aperture" to (defect?.estimatedLength ?: "0.0mm"), "kt" to "K_t: N/A (requires sensor data)")
                             )
                             isTransmitting = false
-                            transmitMsg = "Measurement synced to Cloud Telemetry ✓"
+                            transmitMsg = "Measurement saved ✓"
                         }
                     }
                 )
@@ -868,8 +868,8 @@ fun GrowthAnalysisScreen(
                 }
 
                 PrimaryButton(
-                    title = if (isTransmitting) "Syncing..." else "Sync Fatigue Profile to Cloud",
-                    icon = Icons.Default.CloudUpload,
+                    title = if (isTransmitting) "Saving..." else "Save Fatigue Profile",
+                    icon = Icons.Default.Save,
                     onClick = {
                         isTransmitting = true
                         scope.launch {
@@ -878,7 +878,7 @@ fun GrowthAnalysisScreen(
                                 mapOf("defectId" to (defect?.id ?: "NOMINAL"), "deltaK" to "N/A", "remainingDays" to "N/A")
                             )
                             isTransmitting = false
-                            transmitMsg = "Fatigue simulation archived in Cloud DB ✓"
+                            transmitMsg = "Fatigue simulation saved ✓"
                         }
                     }
                 )
@@ -960,8 +960,8 @@ fun ImageComparisonScreen(
                 }
 
                 PrimaryButton(
-                    title = if (isTransmitting) "Syncing..." else "Upload Delta Comparison to Cloud",
-                    icon = Icons.Default.CloudUpload,
+                    title = if (isTransmitting) "Saving..." else "Save Delta Comparison",
+                    icon = Icons.Default.Save,
                     onClick = {
                         isTransmitting = true
                         scope.launch {
@@ -970,7 +970,7 @@ fun ImageComparisonScreen(
                                 mapOf("defectId" to (defect?.id ?: "NOMINAL"), "baselineStatus" to "Verified")
                             )
                             isTransmitting = false
-                            transmitMsg = "Visual delta synced to Cloud DB ✓"
+                            transmitMsg = "Visual delta saved ✓"
                         }
                     }
                 )
@@ -1069,8 +1069,8 @@ fun ObjectDetectionScreen(
                 }
 
                 PrimaryButton(
-                    title = if (isTransmitting) "Syncing..." else "Push AI Segmentation to Cloud",
-                    icon = Icons.Default.CloudUpload,
+                    title = if (isTransmitting) "Saving..." else "Save AI Segmentation",
+                    icon = Icons.Default.Save,
                     onClick = {
                         isTransmitting = true
                         scope.launch {
@@ -1079,7 +1079,7 @@ fun ObjectDetectionScreen(
                                 mapOf("railheadConf" to "${defect?.aiConfidencePercent ?: 0}%", "sleeperConf" to "Nominal")
                             )
                             isTransmitting = false
-                            transmitMsg = "Segmentation telemetry saved to Cloud ✓"
+                            transmitMsg = "Segmentation telemetry saved ✓"
                         }
                     }
                 )
@@ -1167,8 +1167,8 @@ fun AlignmentAnalysisScreen(
                 }
 
                 PrimaryButton(
-                    title = if (isTransmitting) "Syncing..." else "Upload Track Geometry to Cloud",
-                    icon = Icons.Default.CloudUpload,
+                    title = if (isTransmitting) "Saving..." else "Save Track Geometry",
+                    icon = Icons.Default.Save,
                     onClick = {
                         isTransmitting = true
                         scope.launch {
@@ -1177,7 +1177,7 @@ fun AlignmentAnalysisScreen(
                                 mapOf("gauge" to "1435.2 mm", "cant" to "+0.4 mm", "twist" to "0.2 mm/m")
                             )
                             isTransmitting = false
-                            transmitMsg = "Track geometry saved to Cloud DB ✓"
+                            transmitMsg = "Track geometry saved ✓"
                         }
                     }
                 )
@@ -1347,16 +1347,16 @@ fun AllObservationsScreen(observations: List<ObservationItem>, onBack: () -> Uni
                         RailGuardFirebaseService.instance.saveObservation(obs)
                     }
                     isSyncingObs = false
-                    syncObsMsg = "All observations pushed to Cloud DB ✓"
+                    syncObsMsg = "All observations saved ✓"
                 }
             },
             enabled = !isSyncingObs,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp)
         ) {
-            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text(if (isSyncingObs) "Syncing..." else "Sync Observations to Cloud Telemetry", fontSize = 12.sp)
+            Text(if (isSyncingObs) "Saving..." else "Save Observations", fontSize = 12.sp)
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -1383,7 +1383,7 @@ fun AllObservationsScreen(observations: List<ObservationItem>, onBack: () -> Uni
                                 tone = Tone.INFO
                             )
                             RailGuardFirebaseService.instance.saveObservation(obs)
-                            syncObsMsg = "Observation saved to Cloud DB ✓"
+                            syncObsMsg = "Observation saved ✓"
                         }
                     }
                 }) {

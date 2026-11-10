@@ -106,21 +106,6 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.LightMode, contentDescription = null, tint = Color(0xFF0284C7))
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text("Theme: High-Visibility Field Light Mode", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        }
-                        com.example.railguard.components.StatusPill(label = "ACTIVE", tone = com.example.railguard.model.Tone.HEALTHY)
-                    }
-
                     SettingsRowTile(
                         icon = Icons.Default.Security,
                         title = "Security & PIN Lock",
@@ -146,35 +131,18 @@ fun SettingsScreen(
         }
 
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Button(
+                onClick = {
+                    firebaseService.signOut()
+                    onSignOut()
+                },
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
             ) {
-                Button(
-                    onClick = onLockApp,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFE2E8F0),
-                        contentColor = Color(0xFF0F172A)
-                    )
-                ) {
-                    Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Lock Terminal", fontSize = 12.sp)
-                }
-
-                Button(
-                    onClick = {
-                        firebaseService.signOut()
-                        onSignOut()
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-                ) {
-                    Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Sign Out", fontSize = 12.sp)
-                }
+                Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Sign Out", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -267,7 +235,7 @@ fun ProfileScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                PrimaryButton(title = "Save Inspector Credentials", onClick = {
+                PrimaryButton(title = "Save", onClick = {
                     keyboardController?.hide()
                     focusManager.clearFocus(force = true)
                     onSave(editName, editEmail)
@@ -278,33 +246,6 @@ fun ProfileScreen(
                     }
                     onBack()
                 })
-
-                val firebaseService = RailGuardFirebaseService.instance
-                Spacer(modifier = Modifier.height(14.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Text(
-                    text = "CENTRAL CLOUD IDENTITY & ACCESS",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF0284C7)
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Cloud Inspector UID: ${firebaseService.currentUser?.localId ?: "Local Session"}",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Network Status: Authenticated & Linked",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
     }
@@ -455,8 +396,8 @@ fun AppSettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Auto-Sync Cloud RTDB", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Text("Continuous 5Hz sensor stream to cloud database", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Auto-Sync Sensor Data", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Continuous telemetry stream from sensors", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = autoSyncRtdb, onCheckedChange = { autoSyncRtdb = it })
                 }
@@ -511,8 +452,8 @@ fun AppSettingsScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 PrimaryButton(
-                    title = "Save & Push to Cloud RTDB",
-                    icon = Icons.Default.CloudSync,
+                    title = "Save",
+                    icon = Icons.Default.Save,
                     onClick = {
                         scope.launch {
                             RailGuardFirebaseService.instance.saveUserSettings(
@@ -534,7 +475,7 @@ fun AppSettingsScreen(
                                     tsrInterlockEnabled = tsrInterlockEnabled
                                 )
                             )
-                            syncFeedbackMsg = "✓ System preferences synchronized with Cloud Realtime DB"
+                            syncFeedbackMsg = "✓ System preferences saved"
                         }
                     }
                 )
@@ -558,7 +499,7 @@ fun SecurityScreen(
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        SubScreenHeader(title = "Security & Terminal Lock", subtitle = "Mission-critical authorization", onBack = onBack)
+        SubScreenHeader(title = "Security & App Lock", subtitle = "Mission-critical authorization", onBack = onBack)
         Spacer(modifier = Modifier.height(16.dp))
         RailCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -594,7 +535,7 @@ fun SecurityScreen(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                PrimaryButton(title = "Lock Terminal Now", onClick = onLockApp)
+                PrimaryButton(title = "Lock Session Now", onClick = onLockApp)
             }
         }
     }
@@ -683,7 +624,7 @@ fun AboutScreen(onBack: () -> Unit) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("RailGuard Autonomous Track AI", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0284C7))
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("Version 1.0.0 (Connected to Firebase Cloud)", fontSize = 12.sp, color = Color.Gray)
+                Text("Version 1.0.0", fontSize = 12.sp, color = Color.Gray)
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("Enterprise mobile inspection platform for automated track surveillance, flaw detection, and predictive maintenance.", fontSize = 12.sp)
             }

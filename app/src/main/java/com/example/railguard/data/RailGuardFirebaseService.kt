@@ -2,6 +2,8 @@ package com.example.railguard.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -137,6 +139,8 @@ class RailGuardFirebaseService private constructor() {
     var liveAiOracle by mutableStateOf<AiOracleData?>(null)
     var isDirectWifiConnected by mutableStateOf(false)
     var directWifiLatencyMs by mutableStateOf(0L)
+    var latestPiCameraBitmap by mutableStateOf<Bitmap?>(null)
+    var latestPiCameraTimestamp by mutableStateOf(0L)
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -2331,6 +2335,10 @@ class RailGuardFirebaseService private constructor() {
 
     fun updateLocalWifiIp(newIp: String) {
         val clean = newIp.trim()
+            .removePrefix("http://")
+            .removePrefix("https://")
+            .split("/")[0]
+            .split(":")[0]
         if (clean.isNotBlank()) {
             localWifiIp = clean
             sharedPreferences?.edit()?.putString(KEY_RPI_WIFI_IP, clean)?.apply()
@@ -2339,12 +2347,18 @@ class RailGuardFirebaseService private constructor() {
 
     suspend fun testDirectWifiConnection(ip: String = localWifiIp): Pair<Boolean, Long> {
         return withContext(Dispatchers.IO) {
+            val cleanHost = ip.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
             val startMs = System.currentTimeMillis()
             try {
-                val conn = (URL("http://$ip:8080/api/health").openConnection() as HttpURLConnection).apply {
+                val conn = (URL("http://$cleanHost:8080/api/health").openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
-                    connectTimeout = 1500
-                    readTimeout = 1500
+                    connectTimeout = 2500
+                    readTimeout = 2500
                 }
                 val code = conn.responseCode
                 val latency = System.currentTimeMillis() - startMs
@@ -2365,7 +2379,12 @@ class RailGuardFirebaseService private constructor() {
 
     suspend fun connectDirectWifi(targetIp: String = localWifiIp): Pair<Boolean, String> {
         return withContext(Dispatchers.IO) {
-            val cleanIp = targetIp.trim().ifBlank { "192.168.4.1" }
+            val cleanIp = targetIp.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
             updateLocalWifiIp(cleanIp)
             val (ok, latency) = testDirectWifiConnection(cleanIp)
             if (ok) {
@@ -2374,12 +2393,12 @@ class RailGuardFirebaseService private constructor() {
                     isDirectWifiConnected = true
                     directWifiLatencyMs = latency
                 }
-                Pair(true, "Successfully connected to Raspberry Pi on $cleanIp:8080 (${latency}ms)")
+                Pair(true, "Connected to Raspberry Pi on $cleanIp:8080 (${latency}ms)")
             } else {
                 withContext(Dispatchers.Main) {
                     isDirectWifiConnected = false
                 }
-                Pair(false, "Cannot reach http://$cleanIp:8080. Check Pi Wi-Fi hotspot & port 8080.")
+                Pair(false, "Cannot reach http://$cleanIp:8080. Ensure phone is connected to Pi Wi-Fi hotspot.")
             }
         }
     }
@@ -2390,6 +2409,77 @@ class RailGuardFirebaseService private constructor() {
     }
 
     /**
+     * Fetches the latest optical camera frame from Raspberry Pi over Wi-Fi
+     */
+    suspend fun fetchPiCameraFrame(host: String = localWifiIp, port: Int = 8080): Bitmap? {
+        return withContext(Dispatchers.IO) {
+            val cleanHost = host.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
+            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            for (candidate in candidateHosts) {
+                try {
+                    val conn = (URL("http://$candidate:$port/api/camera_frame").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 2500
+                        readTimeout = 2500
+                    }
+                    if (conn.responseCode in 200..299) {
+                        val bytes = conn.inputStream.use { it.readBytes() }
+                        if (bytes.isNotEmpty()) {
+                            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            if (bitmap != null) {
+                                withContext(Dispatchers.Main) {
+                                    latestPiCameraBitmap = bitmap
+                                    latestPiCameraTimestamp = System.currentTimeMillis()
+                                    isDirectWifiConnected = true
+                                }
+                                return@withContext bitmap
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            null
+        }
+    }
+
+    /**
+     * Commands Raspberry Pi to trigger high-resolution optical camera snapshot
+     */
+    suspend fun triggerPiCameraCapture(host: String = localWifiIp, port: Int = 8080): Pair<Boolean, String> {
+        return withContext(Dispatchers.IO) {
+            val cleanHost = host.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
+            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            for (candidate in candidateHosts) {
+                try {
+                    val conn = (URL("http://$candidate:$port/api/camera_capture").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 3000
+                        readTimeout = 3000
+                    }
+                    if (conn.responseCode in 200..299) {
+                        val body = conn.inputStream.bufferedReader().use { it.readText() }
+                        fetchPiCameraFrame(candidate, port)
+                        return@withContext Pair(true, "Snapshot captured")
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            Pair(false, "Failed to capture snapshot from Pi camera")
+        }
+    }
+
+    /**
      * Complete live system sync over direct Wi-Fi:
      * Pulls telemetry, hardware health, defects, work orders, inspections, reports, and AI physics metrics
      */
@@ -2397,14 +2487,20 @@ class RailGuardFirebaseService private constructor() {
         onSuccess: (List<Defect>, List<MaintenanceTask>, List<InspectionRecord>) -> Unit = { _, _, _ -> }
     ): Boolean {
         return withContext(Dispatchers.IO) {
-            val candidateHosts = listOf(localWifiIp, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            val cleanHost = localWifiIp.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
+            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
             for (candidate in candidateHosts) {
                 val startMs = System.currentTimeMillis()
                 try {
                     val conn = (URL("http://$candidate:8080/api/all_data").openConnection() as HttpURLConnection).apply {
                         requestMethod = "GET"
-                        connectTimeout = 1000
-                        readTimeout = 1000
+                        connectTimeout = 2000
+                        readTimeout = 2000
                     }
                     if (conn.responseCode in 200..299) {
                         val roundTripMs = System.currentTimeMillis() - startMs

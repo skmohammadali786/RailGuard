@@ -718,7 +718,7 @@ fun RealTimeTrainLineMap(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "No cloud defect records loaded",
+                            text = "No defect records loaded",
                             color = Color(0xFFCBD5E1),
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,

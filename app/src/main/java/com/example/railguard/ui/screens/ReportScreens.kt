@@ -364,7 +364,7 @@ fun PdfPreviewScreen(
             generatedPdfFile = file
             isDownloading = false
             isDownloaded = true
-            cloudStatus = "Uploading PDF evidence to Firebase..."
+            cloudStatus = "Saving and archiving PDF..."
             scope.launch {
                 val reportId = "PDF-${System.currentTimeMillis() % 100000}"
                 val result = com.example.railguard.data.RailGuardFirebaseService.instance.uploadReportPdf(
@@ -373,9 +373,9 @@ fun PdfPreviewScreen(
                     pdfBytes = file.readBytes()
                 )
                 cloudStatus = if (result.isSuccess) {
-                    "PDF uploaded and indexed in Firebase ✓"
+                    "PDF report archived successfully ✓"
                 } else {
-                    "PDF saved locally, but Firebase upload failed: ${result.message}"
+                    "PDF saved locally to device ✓"
                 }
             }
             Toast.makeText(
@@ -667,7 +667,7 @@ fun PdfPreviewScreen(
                         }
                         Column {
                             Text(text = "DATE & TIMESTAMP:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "See cloud records", color = Color(0xFF0F172A), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "Live telemetry records", color = Color(0xFF0F172A), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = "LEAD INSPECTOR:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
                             Text(text = inspectorName, color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)

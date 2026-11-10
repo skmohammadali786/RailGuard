@@ -278,8 +278,8 @@ fun InspectionSetupScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Live Cloud Patrol Sync", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text("Synchronize inspection frames & defects live to central cloud", fontSize = 11.sp, color = Color.Gray)
+                        Text("Live Sensor Stream Sync", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Synchronize inspection frames & sensor telemetry in real time", fontSize = 11.sp, color = Color.Gray)
                     }
                     Switch(checked = useLiveHardwareStream, onCheckedChange = { useLiveHardwareStream = it })
                 }
@@ -939,59 +939,18 @@ fun InspectionCalendarScreen(
 @Composable
 fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
     val firebaseService = remember { RailGuardFirebaseService.instance }
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var isUploadingCapture by remember { mutableStateOf(false) }
-    var uploadStatusMsg by remember { mutableStateOf<String?>(null) }
-    var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap ->
-        if (bitmap == null) {
-            uploadStatusMsg = "Camera capture cancelled"
-        } else {
-            capturedBitmap = bitmap
-            isUploadingCapture = true
-            uploadStatusMsg = null
-            scope.launch {
-                val bytes = ByteArrayOutputStream().use { output ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)
-                    output.toByteArray()
-                }
-                val capId = "CAM-${System.currentTimeMillis() % 100000}"
-                val result = RailGuardFirebaseService.instance.uploadCameraCapture(
-                    captureId = capId,
-                    section = firebaseService.latestSensorTelemetry?.chainage ?: "Unknown",
-                    detectionCount = 0,
-                    defectDetected = false,
-                    notes = "Field camera evidence capture at ${firebaseService.latestSensorTelemetry?.chainage ?: "Unknown"}",
-                    evidenceBytes = bytes,
-                    contentType = "image/jpeg"
-                )
-                if (result.isSuccess) {
-                    RailGuardFirebaseService.instance.logSafetyAuditEvent(
-                        "CAMERA_CAPTURE_UPLOAD",
-                        mapOf(
-                            "captureId" to capId,
-                            "chainage" to (firebaseService.latestSensorTelemetry?.chainage ?: "Unknown"),
-                            "storagePath" to result.storagePath
-                        )
-                    )
-                    uploadStatusMsg = "Photo and metadata uploaded to Firebase"
-                } else {
-                    uploadStatusMsg = "Firebase upload failed: ${result.message}"
-                }
-                isUploadingCapture = false
-            }
-        }
-    }
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            cameraLauncher.launch(null)
-        } else {
-            uploadStatusMsg = "Camera permission was denied"
+    var isCapturing by remember { mutableStateOf(false) }
+    var actionMsg by remember { mutableStateOf<String?>(null) }
+    val piBitmap = firebaseService.latestPiCameraBitmap
+    val telemetry = firebaseService.latestSensorTelemetry
+    val isWifiOnline = firebaseService.isDirectWifiConnected
+
+    // Periodically fetch camera frame from Raspberry Pi over Wi-Fi
+    LaunchedEffect(Unit) {
+        while (true) {
+            firebaseService.fetchPiCameraFrame()
+            delay(1500)
         }
     }
 
@@ -1003,128 +962,301 @@ fun CameraScreen(onCaptureDefect: () -> Unit, onBack: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
+            // Top Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("HIGH-RES CAMERA CAPTURE", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text("Optical Railhead Sensor", color = Color(0xFF0284C7), fontSize = 11.sp)
-                }
-                Box(modifier = Modifier.size(24.dp))
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(260.dp)
-                    .border(2.dp, Color(0xFF0284C7), CircleShape)
-                    .clip(CircleShape)
-                    .background(Color(0xFFF1F5F9)),
-                contentAlignment = Alignment.Center
-            ) {
-                if (capturedBitmap != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = capturedBitmap!!.asImageBitmap(),
-                        contentDescription = "Captured rail inspection evidence",
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(40.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("ALIGN RAILHEAD CRACK", color = Color(0xFF0284C7), fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                        if (uploadStatusMsg != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(uploadStatusMsg ?: "", color = Color(0xFF16A34A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (uploadStatusMsg != null) {
                     Text(
-                        uploadStatusMsg ?: "",
-                        color = if (uploadStatusMsg?.contains("failed") == true || uploadStatusMsg?.contains("denied") == true) Color(0xFFDC2626) else Color(0xFF16A34A),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        "PI OPTICAL CRACK CAMERA",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        if (isWifiOnline) "Wi-Fi Feed Active · ${firebaseService.directWifiLatencyMs}ms" else "Wi-Fi Standby · http://${firebaseService.localWifiIp}:8080",
+                        color = if (isWifiOnline) Color(0xFF16A34A) else Color(0xFF0284C7),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            val bmp = firebaseService.fetchPiCameraFrame()
+                            actionMsg = if (bmp != null) "Feed refreshed" else "Could not reach Pi camera"
+                        }
+                    }
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = Color(0xFF0284C7)
+                    )
+                }
+            }
+
+            // Main Camera Feed Container
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(vertical = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1))
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (piBitmap != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = piBitmap.asImageBitmap(),
+                            contentDescription = "Raspberry Pi Optical Camera Stream",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+
+                        // Camera OSD Overlay (Top)
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .fillMaxWidth()
+                                .background(Color.Black.copy(alpha = 0.55f))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "REC · RPI-CAM3 1080p",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                telemetry?.chainage ?: "Active Sector",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // AI Anomaly / Crack Bounding Box Overlay
+                        if (telemetry?.hasCrack == true || telemetry?.status?.contains("ANOMALY", ignoreCase = true) == true) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .size(width = 180.dp, height = 90.dp)
+                                    .border(2.dp, Color(0xFFDC2626), RoundedCornerShape(4.dp))
+                                    .background(Color(0xFFDC2626).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.TopStart
+                            ) {
+                                Text(
+                                    " [!] FLAW: ${telemetry.flawType.ifBlank { "SURFACE DEFECT" }} (${telemetry.aiConfidencePercent}% AI) ",
+                                    color = Color.White,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .background(Color(0xFFDC2626))
+                                        .padding(2.dp)
+                                )
+                            }
+                        }
+
+                        // Camera OSD Overlay (Bottom)
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                                .background(Color.Black.copy(alpha = 0.55f))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "UT: %.1f mm | Vib: %.3f G".format(
+                                    telemetry?.ultrasonicDepthMm ?: 0f,
+                                    telemetry?.vibrationG ?: 0f
+                                ),
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                if (isWifiOnline) "WI-FI DIRECT" else "STANDBY",
+                                color = if (isWifiOnline) Color(0xFF4ADE80) else Color(0xFFF87171),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    } else {
+                        // Placeholder when frame is loading or waiting for Pi Wi-Fi
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.CameraAlt,
+                                contentDescription = null,
+                                tint = Color(0xFF0284C7),
+                                modifier = Modifier.size(54.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "AWAITING PI CAMERA STREAM",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = Color(0xFF0F172A)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Connect phone to Raspberry Pi Wi-Fi (http://${firebaseService.localWifiIp}:8080) to view live optical stream.",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        actionMsg = "Connecting to Pi..."
+                                        val (ok, msg) = firebaseService.connectDirectWifi()
+                                        if (ok) {
+                                            firebaseService.fetchPiCameraFrame()
+                                        }
+                                        actionMsg = msg
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Connect to Pi Wi-Fi", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Status message
+            if (actionMsg != null) {
+                Text(
+                    actionMsg ?: "",
+                    color = if (actionMsg?.contains("fail", ignoreCase = true) == true || actionMsg?.contains("cannot", ignoreCase = true) == true) Color(0xFFDC2626) else Color(0xFF16A34A),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
+
+            // Sensor Telemetry Badges
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Text("Ultrasonic", fontSize = 9.sp, color = Color(0xFF64748B))
+                        Text(
+                            if (telemetry != null) "%.1f mm".format(telemetry.ultrasonicDepthMm) else "--",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+                }
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Text("Vibration", fontSize = 9.sp, color = Color(0xFF64748B))
+                        Text(
+                            if (telemetry != null) "%.3f G".format(telemetry.vibrationG) else "--",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+                }
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Text("Rail Temp", fontSize = 9.sp, color = Color(0xFF64748B))
+                        Text(
+                            if (telemetry != null) "%.1f°C".format(telemetry.railTempC) else "--",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+                }
+            }
+
+            // Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        isCapturing = true
+                        actionMsg = null
+                        scope.launch {
+                            val (ok, msg) = firebaseService.triggerPiCameraCapture()
+                            isCapturing = false
+                            actionMsg = msg
+                        }
+                    },
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    enabled = !isCapturing
+                ) {
+                    if (isCapturing) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Trigger Snapshot", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
 
-                if (isUploadingCapture) {
-                    CircularProgressIndicator(color = Color(0xFF0284C7), modifier = Modifier.size(36.dp))
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("Syncing Frame & Telemetry to Cloud...", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
-                } else if (capturedBitmap != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                                    cameraLauncher.launch(null)
-                                } else {
-                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                }
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Retake", fontSize = 12.sp)
-                        }
-
-                        Button(
-                            onClick = onCaptureDefect,
-                            modifier = Modifier.weight(1.5f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                        ) {
-                            Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Log Defect", fontSize = 12.sp)
-                        }
-                    }
-                } else {
-                    Button(
-                        onClick = {
-                            if (
-                                ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.CAMERA
-                                ) == PackageManager.PERMISSION_GRANTED
-                            ) {
-                                cameraLauncher.launch(null)
-                            } else {
-                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                            }
-                        },
-                        shape = CircleShape,
-                        modifier = Modifier.size(72.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                    ) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = "Capture", tint = Color.White)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Tap to Capture & Transmit to Cloud", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                Button(
+                    onClick = onCaptureDefect,
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Log Defect", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

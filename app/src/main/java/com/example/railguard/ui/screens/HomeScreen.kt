@@ -124,7 +124,7 @@ fun HomeScreen(
                 )
                 Text(
                     text = when {
-                        topDefect != null -> "Chainage ${topDefect.chainageCoordinate} · Cloud defect record"
+                        topDefect != null -> "Chainage ${topDefect.chainageCoordinate} · Track defect record"
                         telemetry != null -> "Chainage ${telemetry.chainage} · Gateway packet received"
                         else -> "No Raspberry Pi packet received"
                     },
@@ -145,7 +145,7 @@ fun HomeScreen(
                     text = if (gatewayOnline) {
                         "Gateway: ${telemetry?.nodeId} · ${telemetry?.status}"
                     } else {
-                        "Gateway: waiting for a current Firebase packet"
+                        "Gateway: awaiting telemetry stream"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = colorScheme.onSurfaceVariant
@@ -173,7 +173,7 @@ fun HomeScreen(
                         text = if (topDefect != null) {
                             "${topDefect.aiConfidencePercent}% Conf · Risk ${topDefect.score}"
                         } else {
-                            "No cloud analysis available"
+                            "Awaiting analysis"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,

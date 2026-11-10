@@ -412,7 +412,7 @@ fun LoginScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Sign in to authenticate and sync track inspection telemetry to the central safety cloud.",
+                        text = "Sign in to authenticate and access track inspection telemetry.",
                         style = MaterialTheme.typography.bodySmall,
                         color = colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -478,7 +478,7 @@ fun LoginScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     PrimaryButton(
-                        title = if (isLoading) "Connecting to Cloud Network..." else settings.translate("sign_in"),
+                        title = if (isLoading) "Authenticating..." else settings.translate("sign_in"),
                         icon = Icons.AutoMirrored.Filled.ArrowForward,
                         onClick = {
                             if (!email.contains("@")) {
@@ -665,26 +665,6 @@ fun LoginScreen(
                             .fillMaxWidth()
                             .clickable { authMode = 0 }
                     )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = colorScheme.outline.copy(alpha = 0.25f))
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedButton(
-                    onClick = {
-                        keyboardController?.hide()
-                        focusManager.clearFocus(force = true)
-                        onLoginSuccess()
-                    },
-                    modifier = Modifier.fillMaxWidth().height(42.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0284C7)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f))
-                ) {
-                    Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Direct Raspberry Pi Wi-Fi Mode (Offline)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

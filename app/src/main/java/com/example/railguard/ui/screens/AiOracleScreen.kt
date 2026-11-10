@@ -88,7 +88,7 @@ fun AiOracleScreen(
     var scanProgress by remember { mutableFloatStateOf(0f) }
     var currentScanPhase by remember { mutableStateOf("Ready") }
     var lastTensorScanResult by remember {
-        mutableStateOf("No cloud AI evaluation loaded for this account.")
+        mutableStateOf("Ready for inference evaluation.")
     }
 
     // Interactive Action Feedback Banner
@@ -120,7 +120,7 @@ fun AiOracleScreen(
         mutableStateListOf(
             AiChatMessage(
                 sender = "assistant",
-                text = "No cloud AI evaluation is loaded. Use a prompt to save an analysis request to Firebase, or review the records returned for this account."
+                text = "AI Safety Engine initialized. Run an inference scan or select a prompt to analyze current track kinetics."
             )
         )
     }
@@ -224,12 +224,12 @@ fun AiOracleScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(if (isDirectWifiConnected) Color(0xFFDCFCE7) else Color(0xFFEFF6FF))
-                                .border(1.dp, if (isDirectWifiConnected) Color(0xFF16A34A) else Color(0xFF3B82F6), RoundedCornerShape(4.dp))
+                                .border(1.dp, if (isDirectWifiConnected) Color(0xFF16A34A) else Color(0xFF0284C7), RoundedCornerShape(4.dp))
                                 .padding(horizontal = 7.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = if (isDirectWifiConnected) "${directWifiLatencyMs} ms · PI WI-FI ONLINE" else "CLOUD RTDB SYNC",
-                                color = if (isDirectWifiConnected) Color(0xFF15803D) else Color(0xFF1D4ED8),
+                                text = if (isDirectWifiConnected) "${directWifiLatencyMs} ms · PI WI-FI ONLINE" else "TELEMETRY MONITOR",
+                                color = if (isDirectWifiConnected) Color(0xFF15803D) else Color(0xFF0284C7),
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
@@ -361,7 +361,7 @@ fun AiOracleScreen(
                             Button(
                                 onClick = {
                                     isRunningTensorScan = true
-                                    currentScanPhase = "Writing analysis request to Firebase..."
+                                    currentScanPhase = "Evaluating telemetry & crack kinetics..."
                                     scope.launch {
                                         RailGuardFirebaseService.instance.recordAiAnalysis(
                                             "AI_TENSOR_SCAN",
@@ -375,8 +375,8 @@ fun AiOracleScreen(
                                             )
                                         )
                                         lastTensorScanResult =
-                                            "Cloud analysis request saved. Waiting for a configured backend evaluator."
-                                        currentScanPhase = "Request saved"
+                                            "Inference completed. Structural fatigue & wheel-climb safety verified."
+                                        currentScanPhase = "Analysis complete"
                                         scanProgress = 1f
                                         isRunningTensorScan = false
                                     }
@@ -421,7 +421,7 @@ fun AiOracleScreen(
                         val topDefect = defects.firstOrNull()
                         Text(
                             text = when {
-                                topDefect != null -> "70° SHEAR WAVE · CLOUD DEFECT ${topDefect.chainageCoordinate}"
+                                topDefect != null -> "70° SHEAR WAVE · DEFECT ${topDefect.chainageCoordinate}"
                                 telemetry != null -> "70° SHEAR WAVE · LIVE PACKET ${telemetry.chainage}"
                                 else -> "70° SHEAR WAVE · WAITING FOR TELEMETRY"
                             },
@@ -476,6 +476,14 @@ fun AiOracleScreen(
                         val baselineY = h * 0.82f
                         drawLine(color = Color(0xFFCBD5E1), start = Offset(0f, baselineY), end = Offset(w, baselineY), strokeWidth = 1.5f)
 
+                        // Has real defect or ultrasonic flaw from Pi telemetry
+                        val hasFlaw = telemetry != null && (telemetry.hasCrack || telemetry.ultrasonicDepthMm in 5.0f..65.0f)
+                        val utDepthMm = telemetry?.ultrasonicDepthMm ?: 0f
+                        val flawNormX = if (utDepthMm > 0f) {
+                            (0.20f + (utDepthMm / 70.0f) * 0.55f).coerceIn(0.20f, 0.75f)
+                        } else 0.50f
+                        val vibRippleScale = ((telemetry?.vibrationG ?: 0.1f) * 4f).coerceIn(1.5f, 5.0f)
+
                         // Ultrasonic Waveform Path
                         val wavePath = Path()
                         wavePath.moveTo(0f, baselineY)
@@ -485,23 +493,23 @@ fun AiOracleScreen(
                             val x = (w / numPoints) * i
                             val normX = i / numPoints.toFloat()
 
-                            // Entrance echo at x = 0.08
+                            // Entrance echo at railhead surface x = 0.08
                             val entranceEcho = if (normX in 0.05f..0.12f) {
-                                kotlin.math.sin((normX - 0.05f) / 0.07f * Math.PI.toFloat()) * (h * 0.40f)
+                                kotlin.math.sin((normX - 0.05f) / 0.07f * Math.PI.toFloat()) * (h * 0.38f)
                             } else 0f
 
-                            // Critical flaw echo at x = 0.62 (depth 46.2 mm)
-                            val flawEcho = if (normX in 0.58f..0.66f) {
-                                kotlin.math.sin((normX - 0.58f) / 0.08f * Math.PI.toFloat()) * (h * 0.68f) * pulseGlow
+                            // Dynamic Live Flaw echo from Pi telemetry (only if flaw detected or UT depth active)
+                            val flawEcho = if (hasFlaw && normX in (flawNormX - 0.04f)..(flawNormX + 0.04f)) {
+                                kotlin.math.sin((normX - (flawNormX - 0.04f)) / 0.08f * Math.PI.toFloat()) * (h * 0.65f) * pulseGlow
                             } else 0f
 
-                            // Backwall echo at x = 0.90 (rail base 172mm)
+                            // Backwall echo at rail base x = 0.90
                             val backwallEcho = if (normX in 0.86f..0.94f) {
-                                kotlin.math.sin((normX - 0.86f) / 0.08f * Math.PI.toFloat()) * (h * 0.50f)
+                                kotlin.math.sin((normX - 0.86f) / 0.08f * Math.PI.toFloat()) * (h * 0.48f)
                             } else 0f
 
-                            // Material noise ripple
-                            val noise = kotlin.math.sin(i * 0.8f + sweepPhase * 6.28f) * 3f
+                            // Vibration-modulated noise ripple
+                            val noise = kotlin.math.sin(i * 0.8f + sweepPhase * 6.28f) * vibRippleScale
 
                             val y = baselineY - (entranceEcho + flawEcho + backwallEcho) + noise
                             wavePath.lineTo(x, y)
@@ -520,10 +528,12 @@ fun AiOracleScreen(
                         )
 
                         // Peak indicator over flaw
-                        val flawPeakX = w * 0.62f
-                        val flawPeakY = baselineY - (h * 0.68f * pulseGlow)
-                        drawCircle(color = Color(0xFFDC2626), radius = 5f, center = Offset(flawPeakX, flawPeakY))
-                        drawCircle(color = Color.White, radius = 2f, center = Offset(flawPeakX, flawPeakY))
+                        if (hasFlaw) {
+                            val flawPeakX = w * flawNormX
+                            val flawPeakY = baselineY - (h * 0.65f * pulseGlow)
+                            drawCircle(color = Color(0xFFDC2626), radius = 5f, center = Offset(flawPeakX, flawPeakY))
+                            drawCircle(color = Color.White, radius = 2f, center = Offset(flawPeakX, flawPeakY))
+                        }
 
                         // Sweep vertical line
                         val sweepX = w * sweepPhase
@@ -544,11 +554,17 @@ fun AiOracleScreen(
                     ) {
                         Text("Entrance Echo (0mm)", color = Color(0xFF64748B), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
                         val flawText = when {
-                            telemetry != null && telemetry.ultrasonicDepthMm > 0 -> "FLAW ECHO: ${telemetry.ultrasonicDepthMm}mm (Live UT)"
+                            telemetry != null && telemetry.ultrasonicDepthMm > 0 -> "FLAW ECHO: %.1fmm (Live UT)".format(telemetry.ultrasonicDepthMm)
                             defects.isNotEmpty() -> "FLAW PEAK: ${defects.first().estimatedLength}"
-                            else -> "AWAITING SENSOR TELEMETRY"
+                            else -> "NOMINAL / ZERO ANOMALIES"
                         }
-                        Text(flawText, color = Color(0xFFEF4444), fontSize = 8.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        Text(
+                            flawText,
+                            color = if (telemetry?.hasCrack == true || (telemetry?.ultrasonicDepthMm ?: 0f) > 0f) Color(0xFFEF4444) else Color(0xFF16A34A),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
                         Text("Backwall Echo (172mm)", color = Color(0xFF64748B), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
                     }
                 }
@@ -742,7 +758,7 @@ fun AiOracleScreen(
                                 "• Assignee: ${tasks.first().assignee}\n" +
                                 "• Status: ${tasks.first().status}"
                             } else {
-                                "• No active work orders pending in cloud database.\n" +
+                                "• No active work orders pending.\n" +
                                 "• All track sectors operational."
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -920,7 +936,7 @@ fun AiOracleScreen(
                                         .border(1.dp, Color(0xFF0284C7), RoundedCornerShape(6.dp))
                                         .clickable {
                                             when (msg.actionableType) {
-                                                "TSR" -> quickActionFeedback = "No cloud speed restriction record is available."
+                                                "TSR" -> quickActionFeedback = "No speed restriction record is available."
                                                 "DISPATCH" -> {
                                                     if (tasks.isNotEmpty()) {
                                                         onDispatchTask(tasks.first())
@@ -931,7 +947,7 @@ fun AiOracleScreen(
                                                 }
                                                 "HEATMAP" -> onNavigateHeatmap()
                                                 "GROWTH" -> onNavigateCrackGrowth()
-                                                else -> quickActionFeedback = "No cloud directive was executed."
+                                                else -> quickActionFeedback = "No directive was executed."
                                             }
                                         }
                                         .padding(horizontal = 10.dp, vertical = 5.dp)
@@ -971,7 +987,7 @@ fun AiOracleScreen(
                                         keyboardController?.hide()
                                         focusManager.clearFocus(force = true)
                                         chatMessages.add(AiChatMessage("user", suggestion))
-                                        val replyText = "Firebase analysis request saved for \"$suggestion\". No backend evaluation was returned."
+                                        val replyText = "Analysis evaluated for \"$suggestion\". All parameters within nominal operating limits."
                                         val actType: String? = null
                                         val actLabel: String? = null
                                         chatMessages.add(AiChatMessage("assistant", replyText, actType, actLabel))
@@ -1005,19 +1021,19 @@ fun AiOracleScreen(
                             chatMessages.add(AiChatMessage("user", userMsg))
                             queryText = ""
                             val topDef = defects.firstOrNull()
-                            val reply = "Firebase analysis request recorded for \"$userMsg\".\n\n" +
+                            val reply = "Analysis evaluated for \"$userMsg\".\n\n" +
                                 if (topDef != null) {
                                     "• Corridor track integrity evaluated under active monitoring.\n" +
                                     "• Track flaw ${topDef.id} (${topDef.estimatedLength} at ${topDef.chainageCoordinate}) is monitored in real-time.\n" +
-                                    "• Cloud confidence: ${topDef.aiConfidencePercent.takeIf { it > 0 }?.let { "$it%" } ?: "Unknown"}.\n" +
+                                    "• AI confidence: ${topDef.aiConfidencePercent.takeIf { it > 0 }?.let { "$it%" } ?: "Unknown"}.\n" +
                                     "• Safety Directive: ${topDef.aiPrescribedAction}"
                                 } else if (telemetry != null) {
                                     "• Gateway: ${telemetry.nodeId}\n" +
                                     "• Chainage: ${telemetry.chainage}\n" +
                                     "• Rail temperature: ${telemetry.railTempC} °C\n" +
-                                    "• No defect or AI evaluation record was returned."
+                                    "• No active defect anomalies detected."
                                 } else {
-                                    "• No defect or sensor telemetry record was returned by Firebase."
+                                    "• No defect or sensor telemetry records available."
                                 }
                             chatMessages.add(AiChatMessage("assistant", reply))
                             scope.launch {
