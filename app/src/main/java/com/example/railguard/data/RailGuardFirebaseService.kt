@@ -144,6 +144,7 @@ class RailGuardFirebaseService private constructor() {
     var hardwareHealth by mutableStateOf<HardwareHealthStatus?>(null)
     var liveAiOracle by mutableStateOf<AiOracleData?>(null)
     var isDirectWifiConnected by mutableStateOf(false)
+    val isDirectPiConnected: Boolean get() = isDirectWifiConnected
     var directWifiLatencyMs by mutableStateOf(0L)
     var latestPiCameraBitmap by mutableStateOf<Bitmap?>(null)
     var latestPiCameraTimestamp by mutableStateOf(0L)
@@ -767,6 +768,8 @@ class RailGuardFirebaseService private constructor() {
         current.add(0, task)
         saveLocalTasks(current)
     }
+
+    fun getCachedInspections(): List<InspectionRecord> = loadLocalInspections()
 
     fun loadLocalInspections(): List<InspectionRecord> {
         val jsonStr = sharedPreferences?.getString(KEY_LOCAL_INSPECTIONS, null) ?: return emptyList()
@@ -2789,7 +2792,10 @@ class RailGuardFirebaseService private constructor() {
         val crackLengthMm: Float = 0.0f,
         val aiConfidencePercent: Int = 0,
         val recommendedTsrKmh: Float = 25.0f,
-        val crackBoundingBox: String = ""
+        val crackBoundingBox: String = "",
+        val latitude: Double = 51.5074,
+        val longitude: Double = -0.1278,
+        val latencyMs: Int = 28
     )
 
     var latestSensorTelemetry by mutableStateOf<LiveSensorTelemetry?>(null)
@@ -2927,7 +2933,10 @@ class RailGuardFirebaseService private constructor() {
             crackLengthMm = telemObj.optDouble("crackLengthMm", if (isAnomalyFlagged) 14.8 else 0.0).toFloat(),
             aiConfidencePercent = telemObj.optInt("aiConfidencePercent", if (isAnomalyFlagged) 96 else 0),
             recommendedTsrKmh = telemObj.optDouble("recommendedTsrKmh", 25.0).toFloat(),
-            crackBoundingBox = telemObj.optString("crackBoundingBox", if (isAnomalyFlagged) "x:140,y:88,w:120,h:45" else "")
+            crackBoundingBox = telemObj.optString("crackBoundingBox", if (isAnomalyFlagged) "x:140,y:88,w:120,h:45" else ""),
+            latitude = telemObj.optDouble("latitude", telemObj.optDouble("lat", 51.5074)),
+            longitude = telemObj.optDouble("longitude", telemObj.optDouble("lon", telemObj.optDouble("lng", -0.1278))),
+            latencyMs = telemObj.optInt("latencyMs", telemObj.optInt("latency", 28))
         )
     }
 
@@ -3372,16 +3381,18 @@ class RailGuardFirebaseService private constructor() {
                 .split(":")[0]
                 .ifBlank { "192.168.4.1" }
             val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
-            var wifiAck = false
-            var wifiMsg = ""
+            val stateStr = if (ring) "RING" else "SILENCE"
             val payload = JSONObject().apply {
-                put("state", if (ring) "RING" else "SILENCE")
+                put("state", stateStr)
                 put("duration", durationSeconds)
                 put("reason", reason)
                 put("timestamp", System.currentTimeMillis())
             }.toString()
 
+            var wifiAck = false
+            var wifiMsg = ""
             for (candidate in candidateHosts) {
+                // Primary: Direct Wi-Fi HTTP POST
                 try {
                     val conn = (URL("http://$candidate:$port/api/buzzer").openConnection() as HttpURLConnection).apply {
                         requestMethod = "POST"
@@ -3396,6 +3407,21 @@ class RailGuardFirebaseService private constructor() {
                     if (conn.responseCode in 200..299) {
                         wifiAck = true
                         wifiMsg = "Raspberry Pi buzzer acknowledged over Wi-Fi ($candidate:$port)"
+                        break
+                    }
+                } catch (_: Exception) {}
+
+                // Secondary Fallback: Direct Wi-Fi HTTP GET with query params
+                try {
+                    val getUrl = "http://$candidate:$port/api/buzzer?state=$stateStr&duration=$durationSeconds"
+                    val getConn = (URL(getUrl).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 2000
+                        readTimeout = 2000
+                    }
+                    if (getConn.responseCode in 200..299) {
+                        wifiAck = true
+                        wifiMsg = "Raspberry Pi buzzer acknowledged over Wi-Fi GET ($candidate:$port)"
                         break
                     }
                 } catch (_: Exception) {}

@@ -72,52 +72,201 @@ START_TIME_MS: int = int(time.time() * 1000)
 LATEST_CAMERA_FRAME_BYTES: Optional[bytes] = None
 LATEST_FRAME_CAPTURED_AT: int = int(time.time() * 1000)
 
-# Hardware GPIO Buzzer Pin (BCM GPIO 18 / Physical Pin 12 by default)
+# =============================================================================
+# HARDWARE PIN CONFIGURATION (Raspberry Pi Zero W / Pi 3 / Pi 4 / Pi 5)
+# =============================================================================
+# Buzzer Pin (BCM GPIO 18 / Physical Pin 12 by default)
 BUZZER_PIN: int = int(os.getenv("RAILGUARD_BUZZER_PIN", "18"))
+BUZZER_ACTIVE_LOW: bool = os.getenv("RAILGUARD_BUZZER_ACTIVE_LOW", "0").lower() in ("1", "true", "yes")
+
+# Hardware Ultrasonic Sensor Pins (HC-SR04 / JSN-SR04T)
+# TRIG: BCM GPIO 23 / Physical Pin 16
+# ECHO: BCM GPIO 24 / Physical Pin 18 (via 1k/2k voltage divider for 3.3V safety)
+ULTRASONIC_TRIG_PIN: int = int(os.getenv("RAILGUARD_TRIG_PIN", "23"))
+ULTRASONIC_ECHO_PIN: int = int(os.getenv("RAILGUARD_ECHO_PIN", "24"))
+
+# 1-Wire Temperature Sensor (DS18B20)
+# DATA: BCM GPIO 4 / Physical Pin 7 (with 4.7k pullup resistor to 3.3V)
+ONEWIRE_PIN: int = int(os.getenv("RAILGUARD_ONEWIRE_PIN", "4"))
+
 IS_BUZZER_RINGING: bool = False
 BUZZER_TRIGGERED_AT: int = 0
 BUZZER_THREAD: Optional[threading.Thread] = None
 BUZZER_STOP_EVENT = threading.Event()
+LAST_HARDWARE_ACQUISITION_MS: int = 0
+
+
+class HardwareGpioPin:
+    """
+    Robust multi-backend GPIO driver for Raspberry Pi (Bookworm, Bullseye, legacy, or headless).
+    Tries in order:
+    1. RPi.GPIO
+    2. gpiozero (DigitalOutputDevice / DigitalInputDevice)
+    3. Linux 'pinctrl' CLI utility (standard on Debian Bookworm / Raspberry Pi 5 / Pi Zero 2W)
+    4. Linux 'raspi-gpio' CLI utility
+    5. Linux sysfs GPIO (/sys/class/gpio)
+    """
+    def __init__(self, pin: int, is_output: bool = True, active_low: bool = False):
+        self.pin = pin
+        self.is_output = is_output
+        self.active_low = active_low
+        self.backend = "simulation"
+        self._gpio_zero_dev = None
+        self._setup()
+
+    def _setup(self):
+        # Backend 1: RPi.GPIO
+        try:
+            import RPi.GPIO as GPIO
+            GPIO.setwarnings(False)
+            GPIO.setmode(GPIO.BCM)
+            if self.is_output:
+                init_val = GPIO.HIGH if self.active_low else GPIO.LOW
+                GPIO.setup(self.pin, GPIO.OUT, initial=init_val)
+            else:
+                GPIO.setup(self.pin, GPIO.IN)
+            self.backend = "RPi.GPIO"
+            return
+        except Exception:
+            pass
+
+        # Backend 2: gpiozero
+        try:
+            from gpiozero import DigitalOutputDevice, DigitalInputDevice
+            if self.is_output:
+                self._gpio_zero_dev = DigitalOutputDevice(self.pin, active_high=not self.active_low, initial_value=False)
+            else:
+                self._gpio_zero_dev = DigitalInputDevice(self.pin)
+            self.backend = "gpiozero"
+            return
+        except Exception:
+            pass
+
+        # Backend 3: pinctrl (Pi OS Bookworm)
+        try:
+            import shutil, subprocess
+            if shutil.which("pinctrl"):
+                mode = "op" if self.is_output else "ip"
+                val = "dh" if (self.is_output and self.active_low) else "dl"
+                subprocess.run(["pinctrl", "set", str(self.pin), mode, val], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.backend = "pinctrl"
+                return
+        except Exception:
+            pass
+
+        # Backend 4: raspi-gpio
+        try:
+            import shutil, subprocess
+            if shutil.which("raspi-gpio"):
+                mode = "op" if self.is_output else "ip"
+                val = "dh" if (self.is_output and self.active_low) else "dl"
+                subprocess.run(["raspi-gpio", "set", str(self.pin), mode, val], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.backend = "raspi-gpio"
+                return
+        except Exception:
+            pass
+
+        # Backend 5: sysfs /sys/class/gpio
+        try:
+            gpio_path = f"/sys/class/gpio/gpio{self.pin}"
+            if not os.path.exists(gpio_path):
+                with open("/sys/class/gpio/export", "w") as f:
+                    f.write(str(self.pin))
+                time.sleep(0.05)
+            with open(f"{gpio_path}/direction", "w") as f:
+                f.write("out" if self.is_output else "in")
+            self.backend = "sysfs"
+            return
+        except Exception:
+            pass
+
+        self.backend = "simulation"
+
+    def write(self, high: bool):
+        effective_high = not high if self.active_low else high
+        if self.backend == "RPi.GPIO":
+            try:
+                import RPi.GPIO as GPIO
+                GPIO.output(self.pin, GPIO.HIGH if effective_high else GPIO.LOW)
+            except Exception:
+                pass
+        elif self.backend == "gpiozero" and self._gpio_zero_dev:
+            try:
+                if high:
+                    self._gpio_zero_dev.on()
+                else:
+                    self._gpio_zero_dev.off()
+            except Exception:
+                pass
+        elif self.backend == "pinctrl":
+            try:
+                import subprocess
+                val = "dh" if effective_high else "dl"
+                subprocess.run(["pinctrl", "set", str(self.pin), val], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        elif self.backend == "raspi-gpio":
+            try:
+                import subprocess
+                val = "dh" if effective_high else "dl"
+                subprocess.run(["raspi-gpio", "set", str(self.pin), val], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        elif self.backend == "sysfs":
+            try:
+                with open(f"/sys/class/gpio/gpio{self.pin}/value", "w") as f:
+                    f.write("1" if effective_high else "0")
+            except Exception:
+                pass
+
+    def read(self) -> int:
+        if self.backend == "RPi.GPIO":
+            try:
+                import RPi.GPIO as GPIO
+                return GPIO.input(self.pin)
+            except Exception:
+                return 0
+        elif self.backend == "gpiozero" and self._gpio_zero_dev:
+            try:
+                return 1 if self._gpio_zero_dev.is_active else 0
+            except Exception:
+                return 0
+        elif self.backend == "sysfs":
+            try:
+                with open(f"/sys/class/gpio/gpio{self.pin}/value", "r") as f:
+                    return int(f.read().strip())
+            except Exception:
+                return 0
+        return 0
+
+
+BUZZER_PIN_CONTROLLER: Optional[HardwareGpioPin] = None
 
 
 def _buzzer_worker(duration_seconds: float, reason: str):
-    global IS_BUZZER_RINGING, BUZZER_TRIGGERED_AT
+    global IS_BUZZER_RINGING, BUZZER_TRIGGERED_AT, BUZZER_PIN_CONTROLLER
     IS_BUZZER_RINGING = True
     BUZZER_TRIGGERED_AT = int(time.time() * 1000)
     log.warning("🚨 [BUZZER ALARM ACTIVE] Ringing Raspberry Pi Buzzer on BCM GPIO %d (Reason: %s, Duration: %.1fs)",
                 BUZZER_PIN, reason, duration_seconds)
 
-    has_gpio = False
-    gpio_mod = None
-    try:
-        import RPi.GPIO as GPIO
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(BUZZER_PIN, GPIO.OUT, initial=GPIO.LOW)
-        has_gpio = True
-        gpio_mod = GPIO
-    except Exception:
-        pass
+    if BUZZER_PIN_CONTROLLER is None:
+        BUZZER_PIN_CONTROLLER = HardwareGpioPin(BUZZER_PIN, is_output=True, active_low=BUZZER_ACTIVE_LOW)
 
     start_time = time.time()
     try:
         while not BUZZER_STOP_EVENT.is_set() and (time.time() - start_time < duration_seconds):
             # Pulse buzzer: 180ms ON, 80ms OFF for emergency cadence
-            if has_gpio and gpio_mod:
-                gpio_mod.output(BUZZER_PIN, gpio_mod.HIGH)
+            BUZZER_PIN_CONTROLLER.write(True)
             sys.stdout.write("\a")
             sys.stdout.flush()
             time.sleep(0.18)
 
-            if has_gpio and gpio_mod:
-                gpio_mod.output(BUZZER_PIN, gpio_mod.LOW)
+            BUZZER_PIN_CONTROLLER.write(False)
             time.sleep(0.08)
     finally:
-        if has_gpio and gpio_mod:
-            try:
-                gpio_mod.output(BUZZER_PIN, gpio_mod.LOW)
-            except Exception:
-                pass
+        if BUZZER_PIN_CONTROLLER:
+            BUZZER_PIN_CONTROLLER.write(False)
         IS_BUZZER_RINGING = False
         log.info("[✓] Raspberry Pi Buzzer returned to IDLE (BCM GPIO %d)", BUZZER_PIN)
 
@@ -142,14 +291,198 @@ def activate_buzzer(duration_seconds: float = 8.0, reason: str = "CRACK_ALERT") 
 
 
 def silence_buzzer() -> Dict[str, Any]:
-    global BUZZER_STOP_EVENT
+    global BUZZER_STOP_EVENT, BUZZER_PIN_CONTROLLER
     BUZZER_STOP_EVENT.set()
+    if BUZZER_PIN_CONTROLLER:
+        BUZZER_PIN_CONTROLLER.write(False)
     return {
         "status": "SUCCESS",
         "buzzer": "SILENCED",
         "gpioPin": BUZZER_PIN,
         "timestamp": int(time.time() * 1000)
     }
+
+
+# =============================================================================
+# HARDWARE ULTRASONIC SENSOR DRIVER (HC-SR04 / JSN-SR04T)
+# =============================================================================
+class HardwareUltrasonicSensor:
+    """
+    HC-SR04 / JSN-SR04T hardware ultrasonic transducer driver.
+    Measures pulse return time on ECHO pin after 10us TRIG pulse.
+    Speed of sound in air: ~343 m/s -> Distance(cm) = (duration * 34300) / 2.
+    Nominal rail depth for UIC 60 is 68.2 mm.
+    """
+    def __init__(self, trig_pin: int = ULTRASONIC_TRIG_PIN, echo_pin: int = ULTRASONIC_ECHO_PIN):
+        self.trig_pin = trig_pin
+        self.echo_pin = echo_pin
+        self.trig_dev = HardwareGpioPin(trig_pin, is_output=True, active_low=False)
+        self.echo_dev = HardwareGpioPin(echo_pin, is_output=False, active_low=False)
+        self.last_valid_distance_mm: Optional[float] = None
+        self.last_read_timestamp: int = 0
+        self.is_hardware_present: bool = False
+        log.info("[i] Hardware Ultrasonic Sensor initialized (TRIG: BCM %d, ECHO: BCM %d, Backend: %s)",
+                 self.trig_pin, self.echo_pin, self.trig_dev.backend)
+
+    def measure_distance_mm(self) -> Optional[float]:
+        # High precision microsecond timing with RPi.GPIO if available
+        try:
+            import RPi.GPIO as GPIO
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self.trig_pin, GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(self.echo_pin, GPIO.IN)
+
+            time.sleep(0.002)
+            GPIO.output(self.trig_pin, GPIO.HIGH)
+            time.sleep(0.00001)  # 10 microsecond trigger pulse
+            GPIO.output(self.trig_pin, GPIO.LOW)
+
+            pulse_start = time.time()
+            timeout_start = pulse_start
+            while GPIO.input(self.echo_pin) == 0:
+                pulse_start = time.time()
+                if pulse_start - timeout_start > 0.035:
+                    return None
+
+            pulse_end = time.time()
+            timeout_end = pulse_end
+            while GPIO.input(self.echo_pin) == 1:
+                pulse_end = time.time()
+                if pulse_end - timeout_end > 0.035:
+                    return None
+
+            pulse_duration = pulse_end - pulse_start
+            distance_cm = (pulse_duration * 34300.0) / 2.0
+            distance_mm = round(distance_cm * 10.0, 1)
+
+            if 15.0 <= distance_mm <= 4500.0:
+                self.last_valid_distance_mm = distance_mm
+                self.last_read_timestamp = int(time.time() * 1000)
+                self.is_hardware_present = True
+                return distance_mm
+        except Exception:
+            pass
+
+        # gpiozero DistanceSensor fallback
+        try:
+            from gpiozero import DistanceSensor
+            ds = DistanceSensor(echo=self.echo_pin, trigger=self.trig_pin, max_distance=4.0)
+            dist_m = ds.distance
+            dist_mm = round(dist_m * 1000.0, 1)
+            ds.close()
+            if 15.0 <= dist_mm <= 4500.0:
+                self.last_valid_distance_mm = dist_mm
+                self.last_read_timestamp = int(time.time() * 1000)
+                self.is_hardware_present = True
+                return dist_mm
+        except Exception:
+            pass
+
+        return None
+
+
+def read_hardware_temperature() -> Optional[float]:
+    """Reads temperature in Celsius from DS18B20 1-Wire probe."""
+    try:
+        w1_dir = "/sys/bus/w1/devices"
+        if os.path.exists(w1_dir):
+            for dev in os.listdir(w1_dir):
+                if dev.startswith("28-"):
+                    slave_path = os.path.join(w1_dir, dev, "w1_slave")
+                    if os.path.exists(slave_path):
+                        with open(slave_path, "r") as f:
+                            lines = f.readlines()
+                        if len(lines) >= 2 and "YES" in lines[0]:
+                            idx = lines[1].find("t=")
+                            if idx != -1:
+                                temp_raw = float(lines[1][idx + 2:].strip())
+                                return round(temp_raw / 1000.0, 1)
+    except Exception:
+        pass
+    return None
+
+
+def probe_serial_sensors() -> Optional[Dict[str, Any]]:
+    """Reads serial JSON telemetry if an external microcontroller is attached via USB/UART."""
+    for port in ("/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyACM0", "/dev/ttyAMA0"):
+        if os.path.exists(port):
+            try:
+                import serial
+                with serial.Serial(port, 115200, timeout=0.1) as ser:
+                    line = ser.readline().decode("utf-8", errors="ignore").strip()
+                    if line.startswith("{") and line.endswith("}"):
+                        data = json.loads(line)
+                        return data
+            except Exception:
+                pass
+    return None
+
+
+HARDWARE_ULTRASONIC_SENSOR: Optional[HardwareUltrasonicSensor] = None
+ACQUISITION_THREAD: Optional[threading.Thread] = None
+
+
+def sensor_acquisition_worker():
+    """Continuously queries connected physical sensors and updates LATEST_TELEMETRY."""
+    global LATEST_TELEMETRY, HARDWARE_ULTRASONIC_SENSOR, LAST_HARDWARE_ACQUISITION_MS
+    try:
+        HARDWARE_ULTRASONIC_SENSOR = HardwareUltrasonicSensor(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN)
+    except Exception as e:
+        log.warning("Could not initialize HardwareUltrasonicSensor: %s", e)
+
+    log.info("[✓] Background Hardware Sensor Acquisition Worker active (Polling 400ms)")
+    while True:
+        try:
+            now_ms = int(time.time() * 1000)
+            updated = False
+
+            # 1. Ultrasonic sensor measurement
+            if HARDWARE_ULTRASONIC_SENSOR:
+                dist_mm = HARDWARE_ULTRASONIC_SENSOR.measure_distance_mm()
+                if dist_mm is not None:
+                    LATEST_TELEMETRY["ultrasonicDepthMm"] = dist_mm
+                    LATEST_TELEMETRY["timestamp"] = now_ms
+                    LAST_HARDWARE_ACQUISITION_MS = now_ms
+                    updated = True
+
+                    # Flaw check: if distance differs by more than 10mm from nominal 68.2mm, flag crack/void
+                    if dist_mm < 58.0 or dist_mm > 78.0:
+                        LATEST_TELEMETRY["hasCrack"] = True
+                        LATEST_TELEMETRY["flawType"] = "Transverse Ultrasonic Flaw Echo"
+                        LATEST_TELEMETRY["crackLengthMm"] = round(abs(68.2 - dist_mm) * 0.8, 1)
+
+            # 2. Temperature sensor measurement (DS18B20 1-Wire)
+            temp_c = read_hardware_temperature()
+            if temp_c is not None:
+                LATEST_TELEMETRY["railTempC"] = temp_c
+                LATEST_TELEMETRY["timestamp"] = now_ms
+                LAST_HARDWARE_ACQUISITION_MS = now_ms
+                updated = True
+
+            # 3. Serial sensor gateway packet
+            serial_data = probe_serial_sensors()
+            if serial_data and isinstance(serial_data, dict):
+                for k in ("ultrasonicDepthMm", "vibrationG", "railTempC", "axleSpeedKmh", "chainage"):
+                    if k in serial_data:
+                        LATEST_TELEMETRY[k] = serial_data[k]
+                LATEST_TELEMETRY["timestamp"] = now_ms
+                LAST_HARDWARE_ACQUISITION_MS = now_ms
+                updated = True
+
+            if updated:
+                LATEST_TELEMETRY["status"] = "ALL_SENSORS_ONLINE"
+
+        except Exception as e:
+            log.debug("Sensor acquisition error: %s", e)
+
+        time.sleep(0.4)
+
+
+def ensure_sensor_acquisition_started():
+    global ACQUISITION_THREAD
+    if ACQUISITION_THREAD is None or not ACQUISITION_THREAD.is_alive():
+        ACQUISITION_THREAD = threading.Thread(target=sensor_acquisition_worker, daemon=True)
+        ACQUISITION_THREAD.start()
 
 
 def generate_optical_rail_image(w: int = 480, h: int = 320, has_crack: bool = False, bbox: Optional[Dict[str, int]] = None) -> bytes:
@@ -484,6 +817,20 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             else:
                 self._send_json(200, result)
         elif clean_path == "/api/buzzer":
+            # Support query parameters: ?state=RING&duration=8
+            query_str = self.path.split("?")[1] if "?" in self.path else ""
+            if "state=RING" in query_str.upper():
+                dur = 8.0
+                for part in query_str.split("&"):
+                    if part.startswith("duration="):
+                        try:
+                            dur = float(part.split("=")[1])
+                        except Exception:
+                            pass
+                activate_buzzer(duration_seconds=dur, reason="HTTP_GET_TRIGGER")
+            elif "state=SILENCE" in query_str.upper() or "state=STOP" in query_str.upper() or "state=OFF" in query_str.upper():
+                silence_buzzer()
+
             self._send_json(200, {
                 "status": "ONLINE",
                 "buzzer": "RINGING" if IS_BUZZER_RINGING else "IDLE",
@@ -500,7 +847,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(200, {
                 "status": "ONLINE",
                 "service": "RailGuard Camera Crack Detector",
-                "hardware": "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
+                "hardware": "Raspberry Pi Zero W / Camera Module 3 / Piezo UT",
                 "buzzerPin": BUZZER_PIN,
                 "buzzerActive": IS_BUZZER_RINGING,
                 "patrolActive": ACTIVE_PATROL_STATUS.get("status") == "PATROL_ACTIVE",
@@ -512,7 +859,21 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         clean_path = self.path.split("?")[0].rstrip("/")
-        if clean_path == "/api/tsr":
+        if clean_path in ("/api/telemetry", "/api/sensors", "/api/sensor_data"):
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+            try:
+                req_data = json.loads(body) if body.strip() else {}
+                global LATEST_TELEMETRY, LAST_HARDWARE_ACQUISITION_MS
+                for k, v in req_data.items():
+                    LATEST_TELEMETRY[k] = v
+                LATEST_TELEMETRY["timestamp"] = int(time.time() * 1000)
+                LATEST_TELEMETRY["status"] = "ALL_SENSORS_ONLINE"
+                LAST_HARDWARE_ACQUISITION_MS = int(time.time() * 1000)
+                self._send_json(200, {"status": "INGESTED", "telemetry": LATEST_TELEMETRY})
+            except Exception as e:
+                self._send_json(400, {"error": str(e)})
+        elif clean_path == "/api/tsr":
             content_len = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
             try:
@@ -586,6 +947,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
 def start_local_wifi_server(host: str = "0.0.0.0", port: int = 8080) -> Optional[http.server.HTTPServer]:
     """Launches local Wi-Fi direct API server in a background thread."""
     try:
+        ensure_sensor_acquisition_started()
         class ReusableServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
             allow_reuse_address = True
 
@@ -890,24 +1252,31 @@ def run_continuous_camera_scan(
                     device_id=device_id
                 )
             else:
-                # Nominal frame scan telemetry
+                # Nominal frame scan telemetry - preserve real physical sensor readings
                 now_ms = int(time.time() * 1000)
-                norm_telem = {
+                has_hw = (now_ms - LAST_HARDWARE_ACQUISITION_MS < 5000)
+                ut_depth = LATEST_TELEMETRY.get("ultrasonicDepthMm") if has_hw else round(68.2 + random.uniform(-0.3, 0.3), 1)
+                vib_g = LATEST_TELEMETRY.get("vibrationG") if has_hw else round(random.uniform(0.02, 0.05), 3)
+                rail_temp = LATEST_TELEMETRY.get("railTempC") if has_hw else round(31.5 + random.uniform(-0.2, 0.2), 1)
+                speed_kmh = LATEST_TELEMETRY.get("axleSpeedKmh", 45.0)
+
+                norm_telem = dict(LATEST_TELEMETRY)
+                norm_telem.update({
                     "nodeId": device_id,
-                    "ultrasonicDepthMm": round(68.2 + random.uniform(-0.3, 0.3), 1),
-                    "vibrationG": round(random.uniform(0.02, 0.05), 3),
-                    "railTempC": round(31.5 + random.uniform(-0.2, 0.2), 1),
-                    "axleSpeedKmh": 45.0,
+                    "ultrasonicDepthMm": ut_depth,
+                    "vibrationG": vib_g,
+                    "railTempC": rail_temp,
+                    "axleSpeedKmh": speed_kmh,
                     "chainage": chainage,
-                    "hardware": "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
-                    "status": "ACTIVE_SYNC",
+                    "hardware": "Raspberry Pi Zero W / Camera Module 3 / Piezo UT",
+                    "status": "ALL_SENSORS_ONLINE" if has_hw else "ACTIVE_SYNC",
                     "timestamp": now_ms,
-                    "hasCrack": False
-                }
+                    "hasCrack": LATEST_TELEMETRY.get("hasCrack", False)
+                })
                 LATEST_TELEMETRY = norm_telem
                 post_to_firebase(db_url, f"railguard/users/{uid}/live_sensors/telemetry", norm_telem, id_token)
-                log.info("[%d] Scan Frame Nominal -> %s | Depth: %.1fmm | Speed: %.1fkm/h",
-                         step, chainage, norm_telem["ultrasonicDepthMm"], norm_telem["axleSpeedKmh"])
+                log.info("[%d] Scan Frame Nominal -> %s | Depth: %.1fmm (%s) | Speed: %.1fkm/h",
+                         step, chainage, norm_telem["ultrasonicDepthMm"], "LIVE HW" if has_hw else "SIM", norm_telem["axleSpeedKmh"])
 
             time.sleep(scan_interval)
     except KeyboardInterrupt:
@@ -924,7 +1293,11 @@ def main():
     parser.add_argument("--port", type=int, help="Local Wi-Fi HTTP API port", default=8080)
     parser.add_argument("--interval", type=float, help="Seconds between camera scans", default=2.5)
     parser.add_argument("--buzzer-pin", type=int, help="BCM GPIO pin for physical buzzer", default=None)
+    parser.add_argument("--buzzer-active-low", action="store_true", help="Set if physical buzzer is active-low")
+    parser.add_argument("--trig-pin", type=int, help="BCM GPIO pin for ultrasonic TRIG", default=None)
+    parser.add_argument("--echo-pin", type=int, help="BCM GPIO pin for ultrasonic ECHO", default=None)
     parser.add_argument("--test-buzzer", action="store_true", help="Immediately test ring the buzzer for 3 seconds and exit")
+    parser.add_argument("--test-sensors", action="store_true", help="Test read physical ultrasonic and temp sensors once and exit")
     parser.add_argument("--trigger-once", action="store_true", help="Immediately trigger one crack detection and exit")
 
     args = parser.parse_args()
@@ -934,11 +1307,35 @@ def main():
         BUZZER_PIN = args.buzzer_pin
         log.info("[i] Buzzer pin configured to BCM GPIO %d", BUZZER_PIN)
 
+    if args.buzzer_active_low:
+        global BUZZER_ACTIVE_LOW
+        BUZZER_ACTIVE_LOW = True
+        log.info("[i] Buzzer polarity set to ACTIVE-LOW")
+
+    if args.trig_pin is not None:
+        global ULTRASONIC_TRIG_PIN
+        ULTRASONIC_TRIG_PIN = args.trig_pin
+        log.info("[i] Ultrasonic TRIG pin configured to BCM GPIO %d", ULTRASONIC_TRIG_PIN)
+
+    if args.echo_pin is not None:
+        global ULTRASONIC_ECHO_PIN
+        ULTRASONIC_ECHO_PIN = args.echo_pin
+        log.info("[i] Ultrasonic ECHO pin configured to BCM GPIO %d", ULTRASONIC_ECHO_PIN)
+
     if args.test_buzzer:
         log.info("Testing Raspberry Pi buzzer on GPIO %d for 3 seconds...", BUZZER_PIN)
         activate_buzzer(duration_seconds=3.0, reason="MANUAL_TEST")
         time.sleep(3.2)
         log.info("Buzzer test completed.")
+        return
+
+    if args.test_sensors:
+        log.info("Testing connected physical sensors...")
+        sensor = HardwareUltrasonicSensor(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN)
+        dist = sensor.measure_distance_mm()
+        temp = read_hardware_temperature()
+        log.info("[✓] Ultrasonic Depth: %s mm (Hardware Present: %s)", dist, sensor.is_hardware_present)
+        log.info("[✓] DS18B20 Temperature: %s °C", temp)
         return
 
     if args.trigger_once:

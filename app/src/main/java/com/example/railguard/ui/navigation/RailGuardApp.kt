@@ -803,6 +803,7 @@ fun RailGuardApp() {
                             inspectorName = profileName,
                             defects = defects,
                             tasks = tasks,
+                            telemetry = latestSensorTelemetry,
                             onBack = { navigateBack() }
                         )
                         Screen.ShareReport.route -> ShareReportScreen(
