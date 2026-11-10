@@ -207,50 +207,70 @@ fun DefectsListScreen(
         }
 
         item {
+            val settings = com.example.railguard.model.LocalAppSettings.current
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Button(
                     onClick = onOpenDefectMap,
                     modifier = Modifier.weight(1f).testTag("defect_map_btn"),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
                         contentColor = if (isDark) Color.White else Color(0xFF0F172A)
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Geo-Plot", fontSize = 12.sp)
+                    Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = settings.translate("geo_plot"),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
 
                 Button(
                     onClick = onOpenCrackGrowth,
                     modifier = Modifier.weight(1f).testTag("crack_growth_btn"),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
                         contentColor = if (isDark) Color.White else Color(0xFF0F172A)
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(Icons.Default.TrendingUp, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Growth AI", fontSize = 12.sp)
+                    Icon(Icons.Default.TrendingUp, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = settings.translate("growth_ai"),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
 
                 Button(
                     onClick = onViewObservations,
-                    modifier = Modifier.weight(1f).testTag("observations_btn"),
+                    modifier = Modifier.weight(1.2f).testTag("observations_btn"),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
                         contentColor = if (isDark) Color.White else Color(0xFF0F172A)
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Observations", fontSize = 12.sp)
+                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = settings.translate("observations"),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
                 }
             }
         }

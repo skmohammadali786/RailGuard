@@ -3282,6 +3282,14 @@ class RailGuardFirebaseService private constructor() {
                                 }
                             }
 
+                            // TSR Speed Sync
+                            val tsrVal = json.optInt("activeTsrSpeed", json.optInt("activeTsrSpeedKmH", json.optInt("tsrSpeed", 0)))
+                            if (tsrVal > 0) {
+                                withContext(Dispatchers.Main) {
+                                    activeTsrSpeed = tsrVal
+                                }
+                            }
+
                             // 4. Defects, Tasks, Inspections
                             val rDefects = mutableListOf<Defect>()
                             val defectsArr = json.optJSONArray("defects")

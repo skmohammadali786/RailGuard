@@ -153,6 +153,7 @@ fun RailGuardApp() {
     var profileEmail by remember {
         mutableStateOf(firebaseService.currentUser?.email ?: "")
     }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
 
     fun updatePreferences(updated: AppPreferences) {
@@ -166,6 +167,13 @@ fun RailGuardApp() {
             AppLanguage.EN_UK -> java.util.Locale.UK
         }
         java.util.Locale.setDefault(loc)
+        try {
+            val resources = context.resources
+            val config = resources.configuration
+            config.setLocale(loc)
+            @Suppress("DEPRECATION")
+            resources.updateConfiguration(config, resources.displayMetrics)
+        } catch (_: Exception) {}
         scope.launch {
             firebaseService.saveUserSettings(
                 mapOf(

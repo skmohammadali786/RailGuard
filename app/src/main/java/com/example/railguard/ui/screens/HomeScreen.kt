@@ -47,7 +47,9 @@ fun HomeScreen(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDark.current
+    val settings = com.example.railguard.model.LocalAppSettings.current
     val scope = rememberCoroutineScope()
+    val fbService = com.example.railguard.data.RailGuardFirebaseService.instance
     val gatewayOnline = telemetry != null &&
         (telemetry.timestamp == 0L || System.currentTimeMillis() - telemetry.timestamp < 30_000L)
     var showWifiDialog by remember { mutableStateOf(false) }
@@ -86,6 +88,8 @@ fun HomeScreen(
         item {
             val topDefect = defects.firstOrNull()
             val criticalDefect = defects.firstOrNull { it.tone == Tone.CRITICAL }
+            val isDataStreaming = gatewayOnline || fbService.isDirectWifiConnected ||
+                (telemetry != null && telemetry.chainage != "Unknown" && telemetry.chainage != "Awaiting Chainage")
 
             RailCard(
                 modifier = Modifier.padding(vertical = 4.dp),
@@ -97,11 +101,19 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     StatusPill(
-                        label = if (criticalDefect != null) "CRITICAL ATTENTION" else "PATROL IN PROGRESS",
-                        tone = if (criticalDefect != null) Tone.CRITICAL else Tone.INFO
+                        label = when {
+                            criticalDefect != null -> settings.translate("critical_attention")
+                            isDataStreaming -> settings.translate("patrol_in_progress")
+                            else -> settings.translate("standby_awaiting_sensors")
+                        },
+                        tone = when {
+                            criticalDefect != null -> Tone.CRITICAL
+                            isDataStreaming -> Tone.INFO
+                            else -> Tone.NEUTRAL
+                        }
                     )
                     Text(
-                        text = "Active Shift",
+                        text = settings.translate("active_shift"),
                         style = MaterialTheme.typography.labelSmall,
                         color = colorScheme.onSurfaceVariant
                     )
@@ -286,6 +298,8 @@ fun HomeScreen(
             val scope = rememberCoroutineScope()
             var tsrFeedback by remember { mutableStateOf<String?>(null) }
             val isStale = telemetry != null && telemetry.timestamp > 0L && (System.currentTimeMillis() - telemetry.timestamp > 30_000L)
+            val isAnySensorActive = fbService.isDirectWifiConnected || gatewayOnline || telemetry != null ||
+                (fbService.hardwareHealth?.let { it.cameraOnline || it.ultrasonicOnline || it.vibrationOnline || it.temperatureOnline || it.gpsOnline } == true)
 
             RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                 Column(modifier = Modifier.padding(14.dp)) {
@@ -298,7 +312,7 @@ fun HomeScreen(
                             Icon(Icons.Default.Sensors, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "LIVE TRACK SENSOR TELEMETRY",
+                                text = settings.translate("live_track_telemetry"),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
@@ -306,8 +320,12 @@ fun HomeScreen(
                             )
                         }
                         StatusPill(
-                            label = if (telemetry == null) "OFFLINE" else if (isStale) "STALE" else "LIVE",
-                            tone = if (telemetry == null) Tone.NEUTRAL else if (isStale) Tone.WARNING else Tone.HEALTHY
+                            label = if (isAnySensorActive) {
+                                if (isStale) "STALE" else settings.translate("online")
+                            } else settings.translate("offline"),
+                            tone = if (isAnySensorActive) {
+                                if (isStale) Tone.WARNING else Tone.HEALTHY
+                            } else Tone.NEUTRAL
                         )
                     }
 
@@ -320,13 +338,13 @@ fun HomeScreen(
                     ) {
                         MetricTile(
                             value = telemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "Awaiting sensor",
-                            label = "Ultrasonic Depth",
+                            label = settings.translate("ultrasonic_depth"),
                             tone = if (telemetry != null && (telemetry.hasCrack || telemetry.ultrasonicDepthMm in 10.0..55.0)) Tone.CRITICAL else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
                             value = telemetry?.let { "${it.vibrationG} g" } ?: "Awaiting sensor",
-                            label = "Vibration Shock",
+                            label = settings.translate("vibration_shock"),
                             tone = if (telemetry != null && (telemetry.vibrationG > 0.35 || telemetry.hasCrack)) Tone.CRITICAL else if (telemetry != null && telemetry.vibrationG > 0.15) Tone.WARNING else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
@@ -340,13 +358,13 @@ fun HomeScreen(
                     ) {
                         MetricTile(
                             value = telemetry?.let { "${it.railTempC} °C" } ?: "Awaiting sensor",
-                            label = "Rail Temp (CWR)",
+                            label = settings.translate("rail_temp"),
                             tone = if (telemetry != null && telemetry.railTempC > 45.0) Tone.WARNING else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
                             value = telemetry?.let { "${it.axleSpeedKmh} km/h" } ?: "Awaiting sensor",
-                            label = "Patrol / Axle Speed",
+                            label = settings.translate("axle_speed"),
                             tone = if (telemetry != null && telemetry.axleSpeedKmh > 80.0) Tone.WARNING else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
@@ -362,9 +380,9 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("TSR Speed Order:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurfaceVariant)
+                            Text(settings.translate("tsr_speed_order"), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurfaceVariant)
                             Text(
-                                text = "Active Limit: ${activeTsr ?: 25} km/h",
+                                text = "${settings.translate("active_limit")}: ${activeTsr ?: 25} km/h",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if ((activeTsr ?: 25) <= 25) Color(0xFFDC2626) else Color(0xFF0284C7)
@@ -797,21 +815,21 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 WorkspaceTile(
-                    title = "Audit Sign-Off",
-                    subtitle = "Engineer seal",
+                    title = settings.translate("audit_signoff"),
+                    subtitle = settings.translate("engineer_seal"),
                     icon = Icons.Default.VerifiedUser,
                     onClick = { onNavigate("engineer_verification") },
                     modifier = Modifier.weight(1f)
                 )
                 WorkspaceTile(
-                    title = "Live Patrol",
-                    subtitle = "Camera & sensor sweep",
+                    title = settings.translate("live_patrol"),
+                    subtitle = settings.translate("camera_sweep"),
                     icon = Icons.Default.Sensors,
                     onClick = { onNavigate("live_inspection") },
                     modifier = Modifier.weight(1f)
                 )
                 WorkspaceTile(
-                    title = "Track Health",
+                    title = settings.translate("track_health_title"),
                     subtitle = if (defects.isEmpty()) "100% Optimal" else "${maxOf(60, 100 - defects.size * 5)}% Condition",
                     icon = Icons.Default.HealthAndSafety,
                     onClick = { onNavigate("track_health") },

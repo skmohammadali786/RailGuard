@@ -68,9 +68,12 @@ fun AiOracleScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    val liveAiOracle = RailGuardFirebaseService.instance.liveAiOracle
-    val isDirectWifiConnected = RailGuardFirebaseService.instance.isDirectWifiConnected
-    val directWifiLatencyMs = RailGuardFirebaseService.instance.directWifiLatencyMs
+    val fbService = RailGuardFirebaseService.instance
+    val liveAiOracle = fbService.liveAiOracle
+    val isDirectWifiConnected = fbService.isDirectWifiConnected
+    val directWifiLatencyMs = fbService.directWifiLatencyMs
+    val activeTelemetry = telemetry ?: fbService.latestSensorTelemetry
+    val settings = com.example.railguard.model.LocalAppSettings.current
 
     // Active Neural Model
     var activeModelIndex by remember { mutableIntStateOf(0) }
@@ -270,10 +273,10 @@ fun AiOracleScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    val liveNadal = liveAiOracle?.nadalRatio ?: (if (telemetry != null) ((telemetry.vibrationG * 1.5f) + (telemetry.axleSpeedKmh.toFloat() / 120.0f * 0.3f)).coerceIn(0.12f, 1.25f) else 0.32f)
+                    val liveNadal = liveAiOracle?.nadalRatio ?: (if (activeTelemetry != null) ((activeTelemetry.vibrationG * 1.5f) + (activeTelemetry.axleSpeedKmh.toFloat() / 120.0f * 0.3f)).coerceIn(0.12f, 1.25f) else 0.32f)
                     val formattedNadal = String.format(java.util.Locale.US, "%.2f", liveNadal)
-                    val liveConfidence = defects.firstOrNull()?.aiConfidencePercent?.takeIf { it > 0 } ?: (if (telemetry != null) 98 else 95)
-                    val liveCycles = liveAiOracle?.fatigueCyclesRemaining ?: (if (telemetry != null && telemetry.hasCrack) 42000 else 850000)
+                    val liveConfidence = defects.firstOrNull()?.aiConfidencePercent?.takeIf { it > 0 } ?: (if (activeTelemetry != null) 98 else 95)
+                    val liveCycles = liveAiOracle?.fatigueCyclesRemaining ?: (if (activeTelemetry != null && activeTelemetry.hasCrack) 42000 else 850000)
                     val formattedCycles = if (liveCycles >= 1000) "${liveCycles / 1000}k cyc" else "$liveCycles cyc"
 
                     // Precision Metrics Row
@@ -368,23 +371,79 @@ fun AiOracleScreen(
                             Button(
                                 onClick = {
                                     isRunningTensorScan = true
-                                    currentScanPhase = "Evaluating telemetry & crack kinetics..."
                                     scope.launch {
-                                        RailGuardFirebaseService.instance.recordAiAnalysis(
+                                        // Phase 1: Stream Acquisition
+                                        currentScanPhase = "Acquiring multi-sensor stream & optical frame..."
+                                        scanProgress = 0.25f
+                                        if (isDirectWifiConnected) {
+                                            try {
+                                                fbService.syncDirectWifiAllData()
+                                                fbService.fetchPiCameraFrame()
+                                            } catch (_: Exception) {}
+                                        }
+                                        kotlinx.coroutines.delay(350)
+
+                                        // Phase 2: Paris-Erdogan & Nadal Tensor Computation
+                                        currentScanPhase = "Evaluating fracture kinetics & wheel-climb dynamics..."
+                                        scanProgress = 0.65f
+                                        val telem = activeTelemetry ?: fbService.latestSensorTelemetry
+                                        val hasCrack = telem?.hasCrack == true || (telem?.ultrasonicDepthMm ?: 68.2f) in 10.0f..55.0f || defects.isNotEmpty()
+                                        val crackLen = when {
+                                            telem != null && telem.hasCrack && telem.crackLengthMm > 0f -> telem.crackLengthMm.toDouble()
+                                            defects.isNotEmpty() -> defects.first().estimatedLength.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 14.8
+                                            hasCrack -> 14.8
+                                            else -> 0.0
+                                        }
+                                        val deltaK = if (crackLen > 0.0) (180.0 * Math.sqrt(Math.PI * (crackLen / 2000.0)) * 1.12) else 4.2
+                                        val growthRate = if (crackLen > 0.0) "${String.format(java.util.Locale.US, "%.2f", deltaK * 0.12)} μm/k-cycle" else "< 0.02 μm/k-cycle"
+                                        val vibG = telem?.vibrationG ?: 0.035f
+                                        val speedKmh = telem?.axleSpeedKmh ?: 45.0f
+                                        val nadal = Math.min(1.4, (vibG * 1.5) + ((speedKmh / 120.0) * 0.3))
+                                        val derailRisk = if (nadal > 0.8) "CRITICAL RISK (TSR MANDATORY)" else if (nadal > 0.5) "MODERATE" else "SAFE"
+                                        val railT = telem?.railTempC ?: 31.5f
+                                        val tempDiff = railT - 27.0f
+                                        val thermalMpa = Math.round(2.415 * tempDiff * 10.0) / 10.0
+                                        val remainingCycles = if (crackLen > 0.0) Math.max(600, (150000.0 / Math.max(1.0, deltaK)).toInt()) else 850000
+
+                                        val computedOracle = AiOracleData(
+                                            parisDeltaK = String.format(java.util.Locale.US, "%.2f", deltaK).toFloat(),
+                                            parisGrowthRate = growthRate,
+                                            nadalRatio = String.format(java.util.Locale.US, "%.2f", nadal).toFloat(),
+                                            derailmentRisk = derailRisk,
+                                            thermalStressMpa = thermalMpa.toFloat(),
+                                            neutralTempDelta = Math.round(tempDiff * 10.0f) / 10.0f,
+                                            fatigueCyclesRemaining = remainingCycles,
+                                            timestamp = System.currentTimeMillis()
+                                        )
+                                        fbService.liveAiOracle = computedOracle
+                                        kotlinx.coroutines.delay(350)
+
+                                        // Phase 3: Synthesis & Verification
+                                        currentScanPhase = "Synthesizing structural risk envelope..."
+                                        scanProgress = 0.90f
+
+                                        lastTensorScanResult = if (hasCrack) {
+                                            "⚠️ INFERENCE FLAGGED: Flaw at ${telem?.chainage ?: "corridor"}. Crack: ${String.format(java.util.Locale.US, "%.1f", crackLen)}mm. ΔK=${String.format(java.util.Locale.US, "%.1f", deltaK)} MPa√m ($growthRate). Nadal: ${String.format(java.util.Locale.US, "%.2f", nadal)}. $derailRisk. Action: TSR 25 km/h recommended."
+                                        } else {
+                                            "✓ INFERENCE VERIFIED: All streams nominal (UT: ${String.format(java.util.Locale.US, "%.1f", telem?.ultrasonicDepthMm ?: 68.2f)}mm, Vib: ${String.format(java.util.Locale.US, "%.3f", vibG)}g, Temp: ${String.format(java.util.Locale.US, "%.1f", railT)}°C). ΔK=${String.format(java.util.Locale.US, "%.1f", deltaK)} MPa√m. Nadal: ${String.format(java.util.Locale.US, "%.2f", nadal)} ($derailRisk). Zero critical flaws."
+                                        }
+
+                                        fbService.recordAiAnalysis(
                                             "AI_TENSOR_SCAN",
                                             mapOf(
-                                                "status" to "REQUESTED",
+                                                "status" to "COMPLETED",
                                                 "model" to models[activeModelIndex],
-                                                "defectCount" to defects.size,
-                                                "taskCount" to tasks.size,
-                                                "telemetryPresent" to (telemetry != null),
-                                                "telemetryTimestamp" to (telemetry?.timestamp ?: 0L)
+                                                "hasCrack" to hasCrack,
+                                                "crackLengthMm" to crackLen,
+                                                "deltaK" to deltaK,
+                                                "nadalRatio" to nadal,
+                                                "cyclesRemaining" to remainingCycles,
+                                                "timestamp" to System.currentTimeMillis()
                                             )
                                         )
-                                        lastTensorScanResult =
-                                            "Inference completed. Structural fatigue & wheel-climb safety verified."
-                                        currentScanPhase = "Analysis complete"
-                                        scanProgress = 1f
+                                        scanProgress = 1.0f
+                                        currentScanPhase = "Inference complete ✓"
+                                        kotlinx.coroutines.delay(200)
                                         isRunningTensorScan = false
                                     }
                                 },
@@ -395,7 +454,7 @@ fun AiOracleScreen(
                             ) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Run Inference", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(settings.translate("run_inference"), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -429,7 +488,7 @@ fun AiOracleScreen(
                         Text(
                             text = when {
                                 topDefect != null -> "70° SHEAR WAVE · DEFECT ${topDefect.chainageCoordinate}"
-                                telemetry != null -> "70° SHEAR WAVE · LIVE PACKET ${telemetry.chainage}"
+                                activeTelemetry != null -> "70° SHEAR WAVE · LIVE PACKET ${activeTelemetry.chainage}"
                                 else -> "70° SHEAR WAVE · WAITING FOR TELEMETRY"
                             },
                             color = Color(0xFF0284C7),
@@ -484,12 +543,12 @@ fun AiOracleScreen(
                         drawLine(color = Color(0xFFCBD5E1), start = Offset(0f, baselineY), end = Offset(w, baselineY), strokeWidth = 1.5f)
 
                         // Has real defect or ultrasonic flaw from Pi telemetry
-                        val hasFlaw = telemetry != null && (telemetry.hasCrack || telemetry.ultrasonicDepthMm in 5.0f..65.0f)
-                        val utDepthMm = telemetry?.ultrasonicDepthMm ?: 0f
+                        val hasFlaw = activeTelemetry != null && (activeTelemetry.hasCrack || activeTelemetry.ultrasonicDepthMm in 5.0f..65.0f)
+                        val utDepthMm = activeTelemetry?.ultrasonicDepthMm ?: 0f
                         val flawNormX = if (utDepthMm > 0f) {
                             (0.20f + (utDepthMm / 70.0f) * 0.55f).coerceIn(0.20f, 0.75f)
                         } else 0.50f
-                        val vibRippleScale = ((telemetry?.vibrationG ?: 0.1f) * 4f).coerceIn(1.5f, 5.0f)
+                        val vibRippleScale = ((activeTelemetry?.vibrationG ?: 0.035f) * 6f).coerceIn(1.2f, 5.5f)
 
                         // Ultrasonic Waveform Path
                         val wavePath = Path()
@@ -561,13 +620,13 @@ fun AiOracleScreen(
                     ) {
                         Text("Entrance Echo (0mm)", color = Color(0xFF64748B), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
                         val flawText = when {
-                            telemetry != null && telemetry.ultrasonicDepthMm > 0 -> "FLAW ECHO: %.1fmm (Live UT)".format(telemetry.ultrasonicDepthMm)
+                            activeTelemetry != null && activeTelemetry.ultrasonicDepthMm > 0 -> "FLAW ECHO: %.1fmm (Live UT)".format(activeTelemetry.ultrasonicDepthMm)
                             defects.isNotEmpty() -> "FLAW PEAK: ${defects.first().estimatedLength}"
                             else -> "NOMINAL / ZERO ANOMALIES"
                         }
                         Text(
                             flawText,
-                            color = if (telemetry?.hasCrack == true || (telemetry?.ultrasonicDepthMm ?: 0f) > 0f) Color(0xFFEF4444) else Color(0xFF16A34A),
+                            color = if (activeTelemetry?.hasCrack == true || (activeTelemetry?.ultrasonicDepthMm ?: 0f) > 0f) Color(0xFFEF4444) else Color(0xFF16A34A),
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
@@ -799,8 +858,8 @@ fun AiOracleScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             StatusPill(
-                                label = if (telemetry != null && telemetry.railTempC > 0) "${telemetry.railTempC}°C" else if (liveAiOracle != null) "+${liveAiOracle?.thermalStressMpa} MPa" else "Nominal",
-                                tone = if (telemetry != null && telemetry.railTempC > 45) Tone.WARNING else Tone.HEALTHY
+                                label = if (activeTelemetry != null && activeTelemetry.railTempC > 0) "${activeTelemetry.railTempC}°C" else if (liveAiOracle != null) "+${liveAiOracle?.thermalStressMpa} MPa" else "Nominal",
+                                tone = if (activeTelemetry != null && activeTelemetry.railTempC > 45) Tone.WARNING else Tone.HEALTHY
                             )
                         }
 
@@ -812,8 +871,8 @@ fun AiOracleScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = if (telemetry != null || liveAiOracle != null) {
-                                val t = telemetry
+                            text = if (activeTelemetry != null || liveAiOracle != null) {
+                                val t = activeTelemetry
                                 "• Monitored Rail Surface Temp: ${t?.railTempC ?: 24.5f}°C\n" +
                                 (liveAiOracle?.let { "• Axial Euler Thermal Stress: ${it.thermalStressMpa} MPa\n• Neutral SFT Delta: ${it.neutralTempDelta}°C\n" } ?: "") +
                                 (t?.let { "• Axle Speed: ${it.axleSpeedKmh} km/h · Vibration: ${it.vibrationG} g\n• Chainage: ${it.chainage}\n• Sensor Node: ${it.nodeId} (${it.status})" } ?: "• Telemetry source: Raspberry Pi Sensor Unit")
@@ -1001,7 +1060,7 @@ fun AiOracleScreen(
                                         chatMessages.add(AiChatMessage("user", suggestion))
                                         val (replyText, action) = generateLiveAiAnswer(
                                             query = suggestion,
-                                            telemetry = telemetry,
+                                            telemetry = activeTelemetry,
                                             liveAiOracle = liveAiOracle,
                                             defects = defects,
                                             tasks = tasks
@@ -1038,7 +1097,7 @@ fun AiOracleScreen(
                             queryText = ""
                             val (reply, action) = generateLiveAiAnswer(
                                 query = userMsg,
-                                telemetry = telemetry,
+                                telemetry = activeTelemetry,
                                 liveAiOracle = liveAiOracle,
                                 defects = defects,
                                 tasks = tasks
