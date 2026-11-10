@@ -168,10 +168,33 @@ def apply_calibration(command: Dict[str, Any]) -> None:
     log.warning("Calibration command received: %s", command.get("command"))
 
 
+def apply_buzzer(command: Dict[str, Any]) -> None:
+    """Ring physical buzzer on Raspberry Pi hardware GPIO pin."""
+    pin = int(os.getenv("RAILGUARD_BUZZER_PIN", "18"))
+    state = str(command.get("state", "RING")).upper()
+    duration = float(command.get("duration", 6.0))
+    log.warning("🚨 [ALARM] Raspberry Pi Buzzer commanded (%s) on GPIO %d for %.1fs", state, pin, duration)
+    try:
+        import RPi.GPIO as GPIO
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(pin, GPIO.OUT)
+        if state in ("RING", "ON"):
+            GPIO.output(pin, GPIO.HIGH)
+            time.sleep(min(3.0, duration))
+            GPIO.output(pin, GPIO.LOW)
+        else:
+            GPIO.output(pin, GPIO.LOW)
+    except Exception:
+        sys.stdout.write("\a\a\a")
+        sys.stdout.flush()
+
+
 @dataclass
 class CommandCursor:
     last_tsr_timestamp: int = 0
     last_calibration_timestamp: int = 0
+    last_buzzer_timestamp: int = 0
 
 
 def poll_commands(cursor: CommandCursor) -> None:
@@ -180,6 +203,7 @@ def poll_commands(cursor: CommandCursor) -> None:
 
     train_path = f"railguard/users/{USER_UID}/trains/{DEVICE_ID}/tsr"
     calibration_path = f"railguard/users/{USER_UID}/esp_sensors/{DEVICE_ID}/command"
+    buzzer_path = f"railguard/users/{USER_UID}/commands/buzzer"
 
     tsr = db.reference(train_path).get() or {}
     tsr_timestamp = int(tsr.get("issuedAt", 0) or 0)
@@ -204,6 +228,15 @@ def poll_commands(cursor: CommandCursor) -> None:
             apply_calibration(calibration)
             acknowledge(calibration_path, calibration, "EXECUTED")
         cursor.last_calibration_timestamp = calibration_timestamp
+
+    buzzer_cmd = db.reference(buzzer_path).get() or {}
+    buzzer_timestamp = int(buzzer_cmd.get("timestamp", 0) or 0)
+    buzzer_status = buzzer_cmd.get("gatewayStatus", "")
+    if buzzer_timestamp > cursor.last_buzzer_timestamp and buzzer_status != "EXECUTED":
+        if now_ms - buzzer_timestamp <= MAX_COMMAND_AGE_MS:
+            apply_buzzer(buzzer_cmd)
+            acknowledge(buzzer_path, buzzer_cmd, "EXECUTED")
+        cursor.last_buzzer_timestamp = buzzer_timestamp
 
 
 def run() -> None:

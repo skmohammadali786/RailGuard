@@ -53,6 +53,85 @@ START_TIME_MS: int = int(time.time() * 1000)
 LATEST_CAMERA_FRAME_BYTES: Optional[bytes] = None
 LATEST_FRAME_CAPTURED_AT: int = int(time.time() * 1000)
 
+# Hardware GPIO Buzzer Pin (BCM GPIO 18 / Physical Pin 12 by default)
+BUZZER_PIN: int = int(os.getenv("RAILGUARD_BUZZER_PIN", "18"))
+IS_BUZZER_RINGING: bool = False
+BUZZER_TRIGGERED_AT: int = 0
+BUZZER_THREAD: Optional[threading.Thread] = None
+BUZZER_STOP_EVENT = threading.Event()
+
+
+def _buzzer_worker(duration_seconds: float, reason: str):
+    global IS_BUZZER_RINGING, BUZZER_TRIGGERED_AT
+    IS_BUZZER_RINGING = True
+    BUZZER_TRIGGERED_AT = int(time.time() * 1000)
+    log.warning("🚨 [BUZZER ALARM ACTIVE] Ringing Raspberry Pi Buzzer on BCM GPIO %d (Reason: %s, Duration: %.1fs)",
+                BUZZER_PIN, reason, duration_seconds)
+
+    has_gpio = False
+    gpio_mod = None
+    try:
+        import RPi.GPIO as GPIO
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(BUZZER_PIN, GPIO.OUT, initial=GPIO.LOW)
+        has_gpio = True
+        gpio_mod = GPIO
+    except Exception:
+        pass
+
+    start_time = time.time()
+    try:
+        while not BUZZER_STOP_EVENT.is_set() and (time.time() - start_time < duration_seconds):
+            # Pulse buzzer: 180ms ON, 80ms OFF for emergency cadence
+            if has_gpio and gpio_mod:
+                gpio_mod.output(BUZZER_PIN, gpio_mod.HIGH)
+            sys.stdout.write("\a")
+            sys.stdout.flush()
+            time.sleep(0.18)
+
+            if has_gpio and gpio_mod:
+                gpio_mod.output(BUZZER_PIN, gpio_mod.LOW)
+            time.sleep(0.08)
+    finally:
+        if has_gpio and gpio_mod:
+            try:
+                gpio_mod.output(BUZZER_PIN, gpio_mod.LOW)
+            except Exception:
+                pass
+        IS_BUZZER_RINGING = False
+        log.info("[✓] Raspberry Pi Buzzer returned to IDLE (BCM GPIO %d)", BUZZER_PIN)
+
+
+def activate_buzzer(duration_seconds: float = 8.0, reason: str = "CRACK_ALERT") -> Dict[str, Any]:
+    global BUZZER_THREAD, BUZZER_STOP_EVENT
+    BUZZER_STOP_EVENT.set()
+    if BUZZER_THREAD and BUZZER_THREAD.is_alive():
+        BUZZER_THREAD.join(timeout=0.3)
+
+    BUZZER_STOP_EVENT.clear()
+    BUZZER_THREAD = threading.Thread(target=_buzzer_worker, args=(duration_seconds, reason), daemon=True)
+    BUZZER_THREAD.start()
+    return {
+        "status": "SUCCESS",
+        "buzzer": "RINGING",
+        "gpioPin": BUZZER_PIN,
+        "durationSeconds": duration_seconds,
+        "reason": reason,
+        "timestamp": int(time.time() * 1000)
+    }
+
+
+def silence_buzzer() -> Dict[str, Any]:
+    global BUZZER_STOP_EVENT
+    BUZZER_STOP_EVENT.set()
+    return {
+        "status": "SUCCESS",
+        "buzzer": "SILENCED",
+        "gpioPin": BUZZER_PIN,
+        "timestamp": int(time.time() * 1000)
+    }
+
 
 def generate_optical_rail_image(w: int = 480, h: int = 320, has_crack: bool = False, bbox: Optional[Dict[str, int]] = None) -> bytes:
     """Generates an optical railhead surface inspection frame."""
@@ -262,16 +341,27 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
             self.wfile.write(img_bytes)
+        elif clean_path == "/api/buzzer":
+            self._send_json(200, {
+                "status": "ONLINE",
+                "buzzer": "RINGING" if IS_BUZZER_RINGING else "IDLE",
+                "gpioPin": BUZZER_PIN,
+                "active": IS_BUZZER_RINGING,
+                "lastTriggered": BUZZER_TRIGGERED_AT,
+                "timestamp": int(time.time() * 1000)
+            })
         elif clean_path == "/api/health":
             self._send_json(200, {
                 "status": "ONLINE",
                 "service": "RailGuard Camera Crack Detector",
                 "hardware": "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
+                "buzzerPin": BUZZER_PIN,
+                "buzzerActive": IS_BUZZER_RINGING,
                 "wifiDirectActive": True,
                 "timestamp": int(time.time() * 1000)
             })
         else:
-            self._send_json(404, {"error": "Endpoint not found", "available": ["/api/all_data", "/api/telemetry", "/api/camera_frame", "/api/latest_crack", "/api/defects", "/api/tasks", "/api/inspections", "/api/reports", "/api/hardware", "/api/ai_oracle", "/api/health", "/api/tsr"]})
+            self._send_json(404, {"error": "Endpoint not found", "available": ["/api/all_data", "/api/telemetry", "/api/camera_frame", "/api/latest_crack", "/api/defects", "/api/tasks", "/api/inspections", "/api/reports", "/api/hardware", "/api/ai_oracle", "/api/buzzer", "/api/health", "/api/tsr"]})
 
     def do_POST(self):
         clean_path = self.path.split("?")[0].rstrip("/")
@@ -289,6 +379,21 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                     "activeTsrSpeedKmH": speed,
                     "acknowledgedAt": int(time.time() * 1000)
                 })
+            except Exception as e:
+                self._send_json(400, {"error": str(e)})
+        elif clean_path == "/api/buzzer":
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+            try:
+                req_data = json.loads(body) if body.strip() else {}
+                state = str(req_data.get("state", "RING")).upper()
+                duration = float(req_data.get("duration", 8.0))
+                reason = str(req_data.get("reason", "APP_REMOTE_INSTRUCTION"))
+                if state in ("OFF", "SILENCE", "STOP"):
+                    res = silence_buzzer()
+                else:
+                    res = activate_buzzer(duration_seconds=duration, reason=reason)
+                self._send_json(200, res)
             except Exception as e:
                 self._send_json(400, {"error": str(e)})
         elif clean_path in ("/api/camera_capture", "/api/camera/capture"):
@@ -463,6 +568,9 @@ def trigger_crack_detection_pipeline(
     """
     log.info("[!] CRACK DETECTED at %s! Initiating automated safety pipeline...", chainage)
 
+    # Immediately activate Raspberry Pi physical buzzer and acoustic alarm
+    activate_buzzer(duration_seconds=8.0, reason=f"CRACK_DETECTED_{chainage}")
+
     defect = build_camera_defect(chainage=chainage, bounding_box=bounding_box)
     report = build_incident_report(defect)
     notif = build_safety_notification(defect)
@@ -635,9 +743,23 @@ def main():
     parser.add_argument("--device", help="Device Node ID", default="RPI-TRACK-01")
     parser.add_argument("--port", type=int, help="Local Wi-Fi HTTP API port", default=8080)
     parser.add_argument("--interval", type=float, help="Seconds between camera scans", default=2.5)
+    parser.add_argument("--buzzer-pin", type=int, help="BCM GPIO pin for physical buzzer", default=None)
+    parser.add_argument("--test-buzzer", action="store_true", help="Immediately test ring the buzzer for 3 seconds and exit")
     parser.add_argument("--trigger-once", action="store_true", help="Immediately trigger one crack detection and exit")
 
     args = parser.parse_args()
+
+    if args.buzzer_pin is not None:
+        global BUZZER_PIN
+        BUZZER_PIN = args.buzzer_pin
+        log.info("[i] Buzzer pin configured to BCM GPIO %d", BUZZER_PIN)
+
+    if args.test_buzzer:
+        log.info("Testing Raspberry Pi buzzer on GPIO %d for 3 seconds...", BUZZER_PIN)
+        activate_buzzer(duration_seconds=3.0, reason="MANUAL_TEST")
+        time.sleep(3.2)
+        log.info("Buzzer test completed.")
+        return
 
     if args.trigger_once:
         start_local_wifi_server(host="0.0.0.0", port=args.port)

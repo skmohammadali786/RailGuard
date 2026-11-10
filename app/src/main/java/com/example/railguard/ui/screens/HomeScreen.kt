@@ -321,13 +321,13 @@ fun HomeScreen(
                         MetricTile(
                             value = telemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "Awaiting sensor",
                             label = "Ultrasonic Depth",
-                            tone = if (telemetry != null && telemetry.ultrasonicDepthMm in 40.0..55.0) Tone.WARNING else Tone.HEALTHY,
+                            tone = if (telemetry != null && (telemetry.hasCrack || telemetry.ultrasonicDepthMm in 10.0..55.0)) Tone.CRITICAL else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
                             value = telemetry?.let { "${it.vibrationG} g" } ?: "Awaiting sensor",
                             label = "Vibration Shock",
-                            tone = if (telemetry != null && telemetry.vibrationG > 0.2) Tone.WARNING else Tone.HEALTHY,
+                            tone = if (telemetry != null && (telemetry.vibrationG > 0.35 || telemetry.hasCrack)) Tone.CRITICAL else if (telemetry != null && telemetry.vibrationG > 0.15) Tone.WARNING else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -392,7 +392,8 @@ fun HomeScreen(
                         Text(tsrFeedback ?: "", fontSize = 11.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
                     }
 
-                    val hw = com.example.railguard.data.RailGuardFirebaseService.instance.hardwareHealth
+                    val fbService = com.example.railguard.data.RailGuardFirebaseService.instance
+                    val hw = fbService.hardwareHealth
                     if (hw != null) {
                         Spacer(modifier = Modifier.height(10.dp))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
@@ -414,6 +415,69 @@ fun HomeScreen(
                                 fontFamily = FontFamily.Monospace,
                                 color = Color(0xFF64748B)
                             )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Pi Hardware Track Buzzer Status & Control Banner
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (fbService.isPiBuzzerActive) Color(0xFFFEF2F2) else Color(0xFFF8FAFC),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (fbService.isPiBuzzerActive) Color(0xFFF87171) else Color(0xFFE2E8F0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Notifications,
+                                    contentDescription = null,
+                                    tint = if (fbService.isPiBuzzerActive) Color(0xFFDC2626) else Color(0xFF64748B),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = if (fbService.isPiBuzzerActive) "Pi Hardware Buzzer: RINGING" else "Pi Hardware Buzzer: IDLE (GPIO 18)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (fbService.isPiBuzzerActive) Color(0xFFDC2626) else Color(0xFF475569)
+                                    )
+                                    Text(
+                                        text = if (fbService.isPiBuzzerActive) "Active alarm on track & phone" else "Armed: rings immediately on crack",
+                                        fontSize = 10.sp,
+                                        color = if (fbService.isPiBuzzerActive) Color(0xFF991B1B) else Color(0xFF64748B)
+                                    )
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        fbService.triggerPiBuzzer(ring = !fbService.isPiBuzzerActive, durationSeconds = 6)
+                                    }
+                                },
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (fbService.isPiBuzzerActive) Color(0xFFDC2626) else Color(0xFF0284C7))
+                            ) {
+                                Text(
+                                    text = if (fbService.isPiBuzzerActive) "Silence" else "Test Buzzer",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (fbService.isPiBuzzerActive) Color(0xFFDC2626) else Color(0xFF0284C7)
+                                )
+                            }
                         }
                     }
                 }

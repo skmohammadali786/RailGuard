@@ -81,3 +81,23 @@ railguard/users/{RAILGUARD_USER_UID}/esp_sensors/{DEVICE_ID}/command
 The gateway acknowledges consumed commands at the same paths. Implement
 `apply_tsr` and `apply_calibration` for the actual train controller and sensor
 hardware before operating a real railway system.
+
+## 4. Trackside Hardware Buzzer Connection
+
+When a crack or track anomaly is detected:
+1. The Raspberry Pi immediately triggers the physical buzzer via GPIO.
+2. The Android app displays a high-priority emergency crack modal and simultaneously commands the buzzer over direct Wi-Fi HTTP (`/api/buzzer`) and Firebase Cloud.
+
+### Hardware Wiring:
+- **Buzzer Positive (+)**: Connect to **GPIO 18** (Physical Pin 12) on Raspberry Pi header.
+- **Buzzer Negative (-)**: Connect to **GND** (Physical Pin 14) on Raspberry Pi header.
+- *Configurable Pin*: Set `export RAILGUARD_BUZZER_PIN=<gpio_number>` or pass `--buzzer-pin <number>`.
+
+### Testing the Buzzer:
+```bash
+# Test ring buzzer for 3 seconds directly on the Pi
+python3 camera_crack_detector.py --test-buzzer
+
+# Or test via HTTP from terminal/phone
+curl -X POST http://<pi_ip>:8080/api/buzzer -H "Content-Type: application/json" -d '{"state":"RING","duration":5}'
+```

@@ -874,6 +874,12 @@ fun RailGuardApp() {
         if (crackAlert != null) {
             InstantCrackAlertModal(
                 alert = crackAlert,
+                isBuzzerActive = firebaseService.isPiBuzzerActive,
+                onToggleBuzzer = {
+                    scope.launch {
+                        firebaseService.triggerPiBuzzer(!firebaseService.isPiBuzzerActive)
+                    }
+                },
                 onEngageTsr = {
                     scope.launch {
                         firebaseService.issueEmergencyTsr(25)
@@ -907,10 +913,12 @@ fun RailGuardApp() {
                         defects.add(0, matchingDefect)
                     }
                     firebaseService.latestCrackAlert = null
+                    scope.launch { firebaseService.triggerPiBuzzer(false) }
                     navigateTo(Screen.DefectDetails.route)
                 },
                 onDismiss = {
                     firebaseService.latestCrackAlert = null
+                    scope.launch { firebaseService.triggerPiBuzzer(false) }
                 }
             )
         }
@@ -922,6 +930,8 @@ fun RailGuardApp() {
 @Composable
 fun InstantCrackAlertModal(
     alert: CrackAlertData,
+    isBuzzerActive: Boolean,
+    onToggleBuzzer: () -> Unit,
     onEngageTsr: () -> Unit,
     onViewDefect: () -> Unit,
     onDismiss: () -> Unit
@@ -1004,6 +1014,63 @@ fun InstantCrackAlertModal(
                         fontSize = 12.sp,
                         color = Color(0xFF64748B)
                     )
+                }
+
+                // Raspberry Pi Hardware Buzzer Alarm Status Banner
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isBuzzerActive) Color(0xFFFEF2F2) else Color(0xFFF1F5F9),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isBuzzerActive) Color(0xFFF87171) else Color(0xFFCBD5E1)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                Icons.Default.Notifications,
+                                contentDescription = null,
+                                tint = if (isBuzzerActive) Color(0xFFDC2626) else Color(0xFF64748B),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = if (isBuzzerActive) "PI HARDWARE BUZZER: ALARM ACTIVE" else "PI HARDWARE BUZZER: IDLE / MUTED",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (isBuzzerActive) Color(0xFFDC2626) else Color(0xFF475569)
+                                )
+                                Text(
+                                    text = if (isBuzzerActive) "Trackside GPIO 18 alarm sounding & phone vibrating" else "Buzzer armed on standby",
+                                    fontSize = 10.sp,
+                                    color = if (isBuzzerActive) Color(0xFF991B1B) else Color(0xFF64748B)
+                                )
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = onToggleBuzzer,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(28.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isBuzzerActive) Color(0xFFDC2626) else Color(0xFF0284C7))
+                        ) {
+                            Text(
+                                text = if (isBuzzerActive) "Silence Buzzer" else "Ring Pi",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isBuzzerActive) Color(0xFFDC2626) else Color(0xFF0284C7)
+                            )
+                        }
+                    }
                 }
 
                 // Visual Optical Viewfinder Preview Box

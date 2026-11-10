@@ -49,6 +49,7 @@ def generate_packet(step: int, device_id: str = "RPI-TRACK-01") -> dict:
         "chainage": chainage,
         "hardware": "ESP32-WROOM-32 / Piezo UT / ADXL345 / PT100",
         "status": "ANOMALY_FLAGGED" if has_flaw else "ACTIVE_SYNC",
+        "hasCrack": has_flaw,
         "timestamp": int(time.time() * 1000)
     }
 
@@ -148,11 +149,17 @@ def main():
                         "timestamp": now_ms
                     }
 
-                    # Push defect, report, and notification in parallel
+                    # Push defect, report, notification, and buzzer command in parallel
                     for sub_path, payload in [
                         (f"railguard/users/{args.uid}/defects/{defect_id}", defect_body),
                         (f"railguard/users/{args.uid}/reports/{report_body['id']}", report_body),
-                        (f"railguard/users/{args.uid}/notifications/{notif_body['id']}", notif_body)
+                        (f"railguard/users/{args.uid}/notifications/{notif_body['id']}", notif_body),
+                        (f"railguard/users/{args.uid}/commands/buzzer", {
+                            "state": "RING",
+                            "duration": 8.0,
+                            "reason": f"SENSOR_CRACK_DETECTED_{packet['chainage']}",
+                            "timestamp": now_ms
+                        })
                     ]:
                         try:
                             ep = f"{clean_db}/{sub_path}.json{auth_q}"
@@ -162,7 +169,7 @@ def main():
                         except Exception as e:
                             print(f"[!] Auto-log sync warning ({sub_path}): {e}")
 
-                    print(f"     [⚡ AUTO-PIPELINE] Defect {defect_id}, Incident Report & Alert Notification logged to Firebase RTDB!")
+                    print(f"     [⚡ AUTO-PIPELINE] Defect {defect_id}, Incident Report, Alert Notification & Buzzer Command logged!")
 
             if args.count > 0 and step >= args.count:
                 break

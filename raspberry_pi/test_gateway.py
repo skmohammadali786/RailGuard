@@ -155,6 +155,36 @@ class TestCameraCrackDetector(unittest.TestCase):
             self.assertEqual(data["status"], "EXECUTED")
             self.assertEqual(data["activeTsrSpeedKmH"], 25)
 
+        # 6. Buzzer Ring POST & Status GET
+        req_buzzer = urllib.request.Request(
+            "http://127.0.0.1:18080/api/buzzer",
+            data=json.dumps({"state": "RING", "duration": 0.5, "reason": "TEST_UNIT"}).encode(),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req_buzzer, timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "SUCCESS")
+            self.assertEqual(data["buzzer"], "RINGING")
+
+        with urllib.request.urlopen("http://127.0.0.1:18080/api/buzzer", timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "ONLINE")
+            self.assertIn("buzzer", data)
+
+        # 7. Buzzer Silence POST
+        req_silence = urllib.request.Request(
+            "http://127.0.0.1:18080/api/buzzer",
+            data=json.dumps({"state": "SILENCE"}).encode(),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req_silence, timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "SUCCESS")
+            self.assertEqual(data["buzzer"], "SILENCED")
+
         if server:
             server.shutdown()
 
