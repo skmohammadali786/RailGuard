@@ -2,8 +2,10 @@ package com.example.railguard.ui.screens
 
 import android.Manifest
 import android.graphics.Bitmap
+import android.app.DatePickerDialog
 import android.content.pm.PackageManager
 import java.io.ByteArrayOutputStream
+import java.util.Calendar
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -636,9 +638,18 @@ fun InspectionCalendarScreen(
     var schedules by remember { mutableStateOf<List<PatrolSchedule>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
+    val context = LocalContext.current
+    val calendar = remember { Calendar.getInstance() }
+    val initialDateStr = remember {
+        val y = calendar.get(Calendar.YEAR)
+        val m = String.format("%02d", calendar.get(Calendar.MONTH) + 1)
+        val d = String.format("%02d", calendar.get(Calendar.DAY_OF_MONTH))
+        "$y-$m-$d"
+    }
+
     // Form inputs for new schedule
     var newSection by remember { mutableStateOf("Mainline Track Corridor") }
-    var newDate by remember { mutableStateOf("Tomorrow") }
+    var newDate by remember { mutableStateOf(initialDateStr) }
     var newTime by remember { mutableStateOf("06:00") }
     var newShift by remember { mutableStateOf("Morning Shift") }
     var newInspector by remember {
@@ -647,6 +658,20 @@ fun InspectionCalendarScreen(
     var newPatrolType by remember { mutableStateOf("Automated Optical & Ultrasonic") }
     var newFrequency by remember { mutableStateOf("Daily") }
     var newNotes by remember { mutableStateOf("") }
+
+    val datePickerDialog = remember(context) {
+        DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val formattedMonth = String.format("%02d", month + 1)
+                val formattedDay = String.format("%02d", dayOfMonth)
+                newDate = "$year-$formattedMonth-$formattedDay"
+            },
+            calendar.get(Calendar.YEAR),
+            calendar.get(Calendar.MONTH),
+            calendar.get(Calendar.DAY_OF_MONTH)
+        )
+    }
 
     fun refreshSchedules() {
         isLoading = true
@@ -796,10 +821,11 @@ fun InspectionCalendarScreen(
                                 if (item.status != "Completed") {
                                     TextButton(
                                         onClick = {
+                                            val completed = item.copy(status = "Completed")
+                                            schedules = schedules.map { if (it.id == item.id) completed else it }
+                                            firebaseService.addCachedSchedule(completed)
                                             scope.launch {
-                                                val completed = item.copy(status = "Completed")
                                                 firebaseService.saveSchedule(completed)
-                                                refreshSchedules()
                                             }
                                         }
                                     ) {
@@ -812,9 +838,10 @@ fun InspectionCalendarScreen(
 
                                 TextButton(
                                     onClick = {
+                                        schedules = schedules.filter { it.id != item.id }
+                                        firebaseService.deleteCachedSchedule(item.id)
                                         scope.launch {
                                             firebaseService.deleteSchedule(item.id)
-                                            refreshSchedules()
                                         }
                                     }
                                 ) {
@@ -851,13 +878,26 @@ fun InspectionCalendarScreen(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = newDate,
-                            onValueChange = { newDate = it },
-                            label = { Text("Date") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedTextField(
+                                value = newDate,
+                                onValueChange = { newDate = it },
+                                label = { Text("Date") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                trailingIcon = {
+                                    IconButton(onClick = { datePickerDialog.show() }) {
+                                        Icon(Icons.Default.CalendarToday, contentDescription = "Select Date", tint = Color(0xFF0284C7), modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            )
+                            // Invisible overlay making the entire date field clickable for the calendar picker
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { datePickerDialog.show() }
+                            )
+                        }
                         OutlinedTextField(
                             value = newTime,
                             onValueChange = { newTime = it },
@@ -916,9 +956,10 @@ fun InspectionCalendarScreen(
                             status = "Scheduled",
                             notes = newNotes
                         )
+                        schedules = listOf(schedule) + schedules.filter { it.id != schedule.id }
+                        firebaseService.addCachedSchedule(schedule)
                         scope.launch {
                             firebaseService.saveSchedule(schedule)
-                            refreshSchedules()
                         }
                         showDialog = false
                     },

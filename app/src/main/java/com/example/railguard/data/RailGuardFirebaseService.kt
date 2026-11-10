@@ -440,7 +440,25 @@ class RailGuardFirebaseService private constructor() {
         }
     }
 
+    private val cachedSchedules = mutableListOf<PatrolSchedule>()
+
+    fun getCachedSchedules(): List<PatrolSchedule> = synchronized(cachedSchedules) { cachedSchedules.toList() }
+
+    fun addCachedSchedule(schedule: PatrolSchedule) {
+        synchronized(cachedSchedules) {
+            cachedSchedules.removeAll { it.id == schedule.id }
+            cachedSchedules.add(0, schedule)
+        }
+    }
+
+    fun deleteCachedSchedule(scheduleId: String) {
+        synchronized(cachedSchedules) {
+            cachedSchedules.removeAll { it.id == scheduleId }
+        }
+    }
+
     suspend fun saveSchedule(schedule: PatrolSchedule): Boolean {
+        addCachedSchedule(schedule)
         return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
@@ -502,16 +520,31 @@ class RailGuardFirebaseService private constructor() {
                     )
                 }
             }
-            withContext(Dispatchers.Main) { onSuccess(result) }
+            val merged = synchronized(cachedSchedules) {
+                val map = linkedMapOf<String, PatrolSchedule>()
+                cachedSchedules.forEach { map[it.id] = it }
+                result.forEach { map[it.id] = it }
+                map.values.toList()
+            }
+            synchronized(cachedSchedules) {
+                cachedSchedules.clear()
+                cachedSchedules.addAll(merged)
+            }
+            withContext(Dispatchers.Main) { onSuccess(merged) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w("RailGuardFirebase", "Schedules pull error: ${e.message}")
-            withContext(Dispatchers.Main) { onError(e.message ?: "Schedules could not be loaded.") }
+            val fallback = getCachedSchedules()
+            withContext(Dispatchers.Main) {
+                if (fallback.isNotEmpty()) onSuccess(fallback)
+                else onError(e.message ?: "Schedules could not be loaded.")
+            }
         }
     }
 
     suspend fun deleteSchedule(scheduleId: String): Boolean {
+        deleteCachedSchedule(scheduleId)
         return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()

@@ -290,7 +290,11 @@ fun RailGuardApp() {
                     modifier = Modifier.fillMaxSize(),
                     bottomBar = {
                         if (isTabScreen) {
-                            NavigationBar {
+                            NavigationBar(
+                                containerColor = Color.White,
+                                tonalElevation = 0.dp,
+                                windowInsets = WindowInsets(0, 0, 0, 0)
+                            ) {
                                 tabs.forEach { tab ->
                                     val selected = currentRoute == tab.route
                                     NavigationBarItem(
@@ -307,7 +311,20 @@ fun RailGuardApp() {
                                                 contentDescription = tab.title
                                             )
                                         },
-                                        label = { Text(tab.title) }
+                                        label = {
+                                            Text(
+                                                text = tab.title,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 11.sp
+                                            )
+                                        },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                                            unselectedIconColor = Color(0xFF64748B),
+                                            unselectedTextColor = Color(0xFF64748B),
+                                            indicatorColor = Color.Transparent
+                                        )
                                     )
                                 }
                             }
@@ -608,6 +625,12 @@ fun RailGuardApp() {
                         Screen.Comments.route -> CommentsScreen(onBack = { navigateBack() })
                         Screen.AllObservations.route -> AllObservationsScreen(
                             observations = observations,
+                            onAddObservation = { newObs ->
+                                observations.add(0, newObs)
+                                scope.launch {
+                                    firebaseService.saveObservation(newObs)
+                                }
+                            },
                             onBack = { navigateBack() }
                         )
 
