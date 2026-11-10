@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -18,21 +20,82 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.railguard.data.RailGuardFirebaseService
 import com.example.railguard.model.Defect
 import com.example.railguard.model.LocalAppSettings
 import com.example.railguard.model.Tone
 import com.example.railguard.theme.LocalIsDark
+import com.example.railguard.theme.toneBgColor
+import com.example.railguard.theme.toneBorderColor
 import com.example.railguard.theme.toneColor
-import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.launch
+
+/**
+ * Meta Astryx Live Beacon
+ * Continuously pulsing concentric radar wave indicating real-time telemetry or active sensor streaming.
+ */
+@Composable
+fun AstryxLiveBeacon(
+    tone: Tone = Tone.HEALTHY,
+    size: androidx.compose.ui.unit.Dp = 8.dp,
+    modifier: Modifier = Modifier
+) {
+    val color = toneColor(tone, isDark = false)
+    val infiniteTransition = rememberInfiniteTransition(label = "beaconPulse")
+    val waveScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 2.4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "waveScale"
+    )
+    val waveAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.55f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "waveAlpha"
+    )
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier.size(size * 2.4f)
+    ) {
+        // Outer pulsing radar wave
+        Box(
+            modifier = Modifier
+                .size(size)
+                .graphicsLayer {
+                    scaleX = waveScale
+                    scaleY = waveScale
+                    alpha = waveAlpha
+                }
+                .clip(CircleShape)
+                .background(color)
+        )
+        // Core beacon dot
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(color)
+        )
+    }
+}
 
 @Composable
 fun Header(
@@ -44,7 +107,6 @@ fun Header(
     actions: @Composable (RowScope.() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val isDark = LocalIsDark.current
     val colorScheme = MaterialTheme.colorScheme
 
     Row(
@@ -57,33 +119,33 @@ fun Header(
             Box(
                 modifier = Modifier
                     .size(42.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colorScheme.surfaceVariant.copy(alpha = 0.7f))
-                    .border(1.dp, colorScheme.outline, RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFFF1F5F9))
+                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
                     .clickable { onBack() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = colorScheme.onSurface,
+                    tint = Color(0xFF0F172A),
                     modifier = Modifier.size(20.dp)
                 )
             }
         } else {
-            // Logo Mark
+            // Astryx Logo Mark (Shield with subtle Meta Blue tint)
             Box(
                 modifier = Modifier
                     .size(42.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colorScheme.primary)
-                    .border(1.dp, colorScheme.primary, RoundedCornerShape(10.dp)),
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF0064E0))
+                    .border(1.dp, Color(0xFF0052B8), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Shield,
                     contentDescription = "RailGuard",
-                    tint = colorScheme.onPrimary,
+                    tint = Color.White,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -95,14 +157,14 @@ fun Header(
             Text(
                 text = "RAILGUARD",
                 style = MaterialTheme.typography.labelSmall,
-                color = colorScheme.primary,
+                color = Color(0xFF0064E0),
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
+                letterSpacing = 1.2.sp
             )
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
-                color = colorScheme.onBackground,
+                color = Color(0xFF0F172A),
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -111,7 +173,7 @@ fun Header(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant,
+                    color = Color(0xFF64748B),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -126,30 +188,35 @@ fun Header(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Wi-Fi Quick Access Chip
+            // Astryx Wi-Fi Quick Access Pill with Live Beacon
             Box(
                 modifier = Modifier
                     .height(38.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isWifiOnline) Color(0xFF16A34A).copy(alpha = 0.12f) else colorScheme.surfaceVariant.copy(alpha = 0.7f))
-                    .border(1.dp, if (isWifiOnline) Color(0xFF16A34A).copy(alpha = 0.4f) else colorScheme.outline, RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(9999.dp))
+                    .background(if (isWifiOnline) Color(0xFFF0FDF4) else Color(0xFFF1F5F9))
+                    .border(1.dp, if (isWifiOnline) Color(0xFFBBF7D0) else Color(0xFFE2E8F0), RoundedCornerShape(9999.dp))
                     .clickable { showHeaderWifiDialog = true }
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Wifi,
-                        contentDescription = "Pi Wi-Fi",
-                        tint = if (isWifiOnline) Color(0xFF16A34A) else colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    if (isWifiOnline) {
+                        AstryxLiveBeacon(tone = Tone.HEALTHY, size = 6.dp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Wifi,
+                            contentDescription = "Pi Wi-Fi",
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                    }
                     Text(
                         text = if (isWifiOnline) "${fbService.directWifiLatencyMs}ms" else "Pi Wi-Fi",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isWifiOnline) Color(0xFF16A34A) else colorScheme.onSurfaceVariant
+                        color = if (isWifiOnline) Color(0xFF16A34A) else Color(0xFF475569)
                     )
                 }
             }
@@ -160,16 +227,16 @@ fun Header(
                 Box(
                     modifier = Modifier
                         .size(38.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(colorScheme.surfaceVariant.copy(alpha = 0.7f))
-                        .border(1.dp, colorScheme.outline, RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFFF1F5F9))
+                        .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
                         .clickable { onNotificationClick() },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Notifications,
                         contentDescription = "Notifications",
-                        tint = colorScheme.onSurface,
+                        tint = Color(0xFF0F172A),
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -192,26 +259,34 @@ fun StatusPill(
     val displayLabel = if (title.isNotEmpty()) title else label
     val isDark = LocalIsDark.current
     val color = toneColor(tone, isDark)
+    val bgColor = toneBgColor(tone, isDark)
+    val borderColor = toneBorderColor(tone, isDark)
+
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(color.copy(alpha = 0.12f))
-            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .clip(RoundedCornerShape(9999.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(9999.dp))
+            .padding(horizontal = 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(color)
-        )
+        if (tone == Tone.CRITICAL || tone == Tone.WARNING) {
+            AstryxLiveBeacon(tone = tone, size = 6.dp)
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(color)
+            )
+        }
         Text(
             text = displayLabel,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
-            color = color
+            color = color,
+            letterSpacing = 0.2.sp
         )
     }
 }
@@ -223,7 +298,6 @@ fun SectionLabel(
     onAction: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val colorScheme = MaterialTheme.colorScheme
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -234,16 +308,16 @@ fun SectionLabel(
         Text(
             text = title,
             style = MaterialTheme.typography.labelSmall,
-            color = colorScheme.onSurfaceVariant,
+            color = Color(0xFF64748B),
             fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp
+            letterSpacing = 1.1.sp
         )
         if (action != null && onAction != null) {
             Text(
                 text = action,
                 style = MaterialTheme.typography.labelMedium,
-                color = colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF0064E0),
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.clickable { onAction() }
             )
         }
@@ -254,18 +328,44 @@ fun SectionLabel(
 fun RailCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
-    backgroundColor: Color = MaterialTheme.colorScheme.surface,
-    borderColor: Color = MaterialTheme.colorScheme.outline,
+    backgroundColor: Color = Color.White,
+    borderColor: Color = Color(0xFFE2E8F0),
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && onClick != null) 0.985f else 1f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+        label = "cardScale"
+    )
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(
+                elevation = 1.dp,
+                shape = RoundedCornerShape(14.dp),
+                clip = false,
+                ambientColor = Color(0x0A0F172A),
+                spotColor = Color(0x0A0F172A)
+            )
+            .clip(RoundedCornerShape(14.dp))
             .background(backgroundColor)
-            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .padding(14.dp),
+            .border(1.dp, borderColor, RoundedCornerShape(14.dp))
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null
+                    ) { onClick() }
+                } else Modifier
+            )
+            .padding(16.dp),
         content = content
     )
 }
@@ -280,28 +380,57 @@ fun MetricTile(
 ) {
     val isDark = LocalIsDark.current
     val color = toneColor(tone, isDark)
-    val colorScheme = MaterialTheme.colorScheme
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && onClick != null) 0.97f else 1f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+        label = "metricScale"
+    )
 
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(colorScheme.surface)
-            .border(1.dp, colorScheme.outline, RoundedCornerShape(8.dp))
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White)
+            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null
+                    ) { onClick() }
+                } else Modifier
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
+        // Astryx Top Micro Accent Bar
+        Box(
+            modifier = Modifier
+                .width(22.dp)
+                .height(3.dp)
+                .clip(RoundedCornerShape(9999.dp))
+                .background(color)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = value,
             fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = color
+            fontWeight = FontWeight.ExtraBold,
+            color = color,
+            letterSpacing = (-0.4).sp
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
-            color = colorScheme.onSurfaceVariant,
-            maxLines = 1
+            color = Color(0xFF64748B),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -318,31 +447,50 @@ fun ListRow(
 ) {
     val isDark = LocalIsDark.current
     val color = toneColor(tone, isDark)
-    val colorScheme = MaterialTheme.colorScheme
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && onClick != null) 0.985f else 1f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+        label = "listRowScale"
+    )
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(colorScheme.surface)
-            .border(1.dp, colorScheme.outline, RoundedCornerShape(8.dp))
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(vertical = 3.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White)
+            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null
+                    ) { onClick() }
+                } else Modifier
+            )
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(color.copy(alpha = 0.12f)),
+                .size(38.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(toneBgColor(tone, isDark))
+                .border(1.dp, toneBorderColor(tone, isDark), RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = color,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(19.dp)
             )
         }
 
@@ -352,7 +500,7 @@ fun ListRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                color = colorScheme.onSurface,
+                color = Color(0xFF0F172A),
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -361,7 +509,7 @@ fun ListRow(
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = colorScheme.onSurfaceVariant,
+                color = Color(0xFF64748B),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -382,8 +530,8 @@ fun ListRow(
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = null,
-                tint = colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp)
+                tint = Color(0xFF94A3B8),
+                modifier = Modifier.size(18.dp)
             )
         }
     }
@@ -398,19 +546,36 @@ fun PrimaryButton(
     disabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && !disabled) 0.98f else 1f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+        label = "btnScale"
+    )
 
     Button(
         onClick = onClick,
         enabled = !disabled,
-        shape = RoundedCornerShape(8.dp),
+        interactionSource = interactionSource,
+        shape = RoundedCornerShape(10.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (secondary) colorScheme.secondary else colorScheme.primary,
-            contentColor = if (secondary) colorScheme.onSecondary else colorScheme.onPrimary
+            containerColor = if (secondary) Color(0xFFF1F5F9) else Color(0xFF0064E0),
+            contentColor = if (secondary) Color(0xFF1E293B) else Color.White,
+            disabledContainerColor = Color(0xFFE2E8F0),
+            disabledContentColor = Color(0xFF94A3B8)
+        ),
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = if (secondary) 0.dp else 1.dp,
+            pressedElevation = 0.dp
         ),
         modifier = modifier
             .fillMaxWidth()
-            .height(46.dp)
+            .height(48.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -425,7 +590,7 @@ fun PrimaryButton(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(17.dp)
             )
         }
     }
@@ -440,29 +605,27 @@ fun EmptyState(
     onAction: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .border(1.dp, colorScheme.outline, RoundedCornerShape(8.dp))
-            .padding(18.dp),
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFFF8FAFC))
+            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(14.dp))
+            .padding(22.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(44.dp)
                 .clip(CircleShape)
-                .background(colorScheme.secondary),
+                .background(Color(0xFFEFF6FF)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = colorScheme.primary,
-                modifier = Modifier.size(20.dp)
+                tint = Color(0xFF0064E0),
+                modifier = Modifier.size(22.dp)
             )
         }
         Spacer(modifier = Modifier.height(10.dp))
@@ -470,13 +633,13 @@ fun EmptyState(
             text = title,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            color = colorScheme.onSurface
+            color = Color(0xFF0F172A)
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = body,
             style = MaterialTheme.typography.bodySmall,
-            color = colorScheme.onSurfaceVariant,
+            color = Color(0xFF64748B),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
         if (action != null && onAction != null) {
@@ -785,17 +948,38 @@ fun SecondaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) 0.98f else 1f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+        label = "secBtnScale"
+    )
+
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth().height(48.dp),
         enabled = enabled,
-        shape = RoundedCornerShape(8.dp)
+        interactionSource = interactionSource,
+        shape = RoundedCornerShape(10.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = Color.White,
+            contentColor = Color(0xFF0F172A),
+            disabledContainerColor = Color(0xFFF8FAFC),
+            disabledContentColor = Color(0xFF94A3B8)
+        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
     ) {
         Text(
             text = title,
             style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
@@ -857,11 +1041,9 @@ fun RaspberryPiWifiGatewayCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(if (isConnected) Color(0xFF16A34A) else Color(0xFFE11D48))
+                    AstryxLiveBeacon(
+                        tone = if (isConnected) Tone.HEALTHY else Tone.CRITICAL,
+                        size = 7.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -869,22 +1051,22 @@ fun RaspberryPiWifiGatewayCard(
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = if (isConnected) Color(0xFF16A34A) else Color(0xFFE11D48)
+                        color = if (isConnected) Color(0xFF16A34A) else Color(0xFFDC2626)
                     )
                 }
 
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (isConnected) Color(0xFF16A34A).copy(alpha = 0.12f) else Color(0xFF0284C7).copy(alpha = 0.12f))
-                        .border(1.dp, if (isConnected) Color(0xFF16A34A).copy(alpha = 0.3f) else Color(0xFF0284C7).copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                        .clip(RoundedCornerShape(9999.dp))
+                        .background(if (isConnected) Color(0xFFF0FDF4) else Color(0xFFEFF6FF))
+                        .border(1.dp, if (isConnected) Color(0xFFBBF7D0) else Color(0xFFBFDBFE), RoundedCornerShape(9999.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
                         text = if (isConnected) "${latency}ms · sub-50ms LAN" else "DIRECT WI-FI",
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isConnected) Color(0xFF16A34A) else Color(0xFF0284C7)
+                        color = if (isConnected) Color(0xFF16A34A) else Color(0xFF0064E0)
                     )
                 }
             }

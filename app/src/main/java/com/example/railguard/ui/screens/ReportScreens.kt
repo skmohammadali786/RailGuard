@@ -268,25 +268,6 @@ fun BuildEvidencePackageScreen(
         }
 
         item {
-            Spacer(modifier = Modifier.height(10.dp))
-            RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(
-                    text = "OFFICIAL FIELD INSPECTION SEAL",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "INSPECTION SEAL: VERIFIED & COMPLIANT (EN 13848-1)",
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        item {
             Spacer(modifier = Modifier.height(16.dp))
             PrimaryButton(
                 title = "Compile & Sign Evidence Pack",
@@ -950,30 +931,12 @@ fun PdfPreviewScreen(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
-                        text = "6. Official Field Inspection Seal & Safety Certification",
+                        text = "6. Inspection Sign-Off",
                         color = Color(0xFF0F172A),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF0F172A))
-                            .clip(RoundedCornerShape(6.dp))
-                            .padding(10.dp)
-                    ) {
-                        Text("SAFETY CERTIFICATION STATUS:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                        Text("VERIFIED & OFFICIALLY SEALED", color = Color(0xFF38BDF8), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("PERMANENT WAY STANDARD:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                        Text("EN 13848-1 / AREMA SAFETY CODE", color = Color(0xFF818CF8), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("AUDIT CERTIFICATE: COMPLIANT ✓", color = Color(0xFF4ADE80), fontSize = 8.sp, fontFamily = FontFamily.Monospace)
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Official Digital Signature Block
                     Row(

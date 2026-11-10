@@ -1,6 +1,5 @@
 package com.example.railguard.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -36,8 +35,9 @@ private val LightColorScheme = lightColorScheme(
     surface = LightSurface,
     onSurface = LightForeground,
     surfaceVariant = LightSurfaceInset,
-    onSurfaceVariant = LightMutedForeground,
+    onSurfaceVariant = LightForegroundSecondary,
     outline = LightBorder,
+    outlineVariant = LightBorderSubtle,
     error = LightCritical,
     onError = LightPrimaryForeground
 )
@@ -47,7 +47,7 @@ fun RailGuardTheme(
     darkTheme: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    // Permanently Light Mode across the entire application
+    // 100% Light Mode Astryx Design System
     CompositionLocalProvider(LocalIsDark provides false) {
         MaterialTheme(
             colorScheme = LightColorScheme,
