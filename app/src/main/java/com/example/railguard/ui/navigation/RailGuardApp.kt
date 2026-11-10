@@ -610,6 +610,7 @@ fun RailGuardApp() {
                         )
                         Screen.Gps.route -> GpsScreen(onBack = { navigateBack() })
                         Screen.Camera.route -> CameraScreen(
+                            telemetry = latestSensorTelemetry,
                             onCaptureDefect = {
                                 selectedDefect = defects.firstOrNull()
                                 if (selectedDefect != null) {

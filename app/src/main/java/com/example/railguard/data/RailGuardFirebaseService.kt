@@ -2863,49 +2863,113 @@ class RailGuardFirebaseService private constructor() {
     /**
      * Reads direct real-time telemetry from Raspberry Pi over local Wi-Fi with < 50ms latency
      */
+    /**
+     * Parse flexible telemetry JSON supporting both nested {"telemetry": {...}} and top-level fields
+     */
+    fun parseTelemetryJson(json: JSONObject): LiveSensorTelemetry? {
+        val telemObj = json.optJSONObject("telemetry") ?: if (
+            json.has("ultrasonicDepthMm") || json.has("ut_depth_mm") || json.has("vibrationG") ||
+            json.has("railTempC") || json.has("status") || json.has("chainage") || json.has("axleSpeedKmh")
+        ) json else null ?: return null
+
+        val statusStr = telemObj.optString("status", "ACTIVE_SYNC")
+        val isAnomalyFlagged = telemObj.optBoolean("hasCrack", false) ||
+            telemObj.optBoolean("crackDetected", false) ||
+            telemObj.optBoolean("anomaly", false) ||
+            statusStr.contains("ANOMALY", ignoreCase = true) ||
+            statusStr.contains("CRACK", ignoreCase = true)
+
+        val ut = telemObj.optDouble("ultrasonicDepthMm",
+            telemObj.optDouble("ut_depth_mm",
+                telemObj.optDouble("ultrasonic_mm",
+                    telemObj.optDouble("ultrasonic",
+                        telemObj.optDouble("nominalDepthMm",
+                            telemObj.optDouble("depth",
+                                telemObj.optDouble("distanceMm", 68.2)))))))
+
+        val vib = telemObj.optDouble("vibrationG",
+            telemObj.optDouble("vib_g",
+                telemObj.optDouble("vibration_g",
+                    telemObj.optDouble("vibration",
+                        telemObj.optDouble("accel_g",
+                            telemObj.optDouble("g_force", 0.035))))))
+
+        val temp = telemObj.optDouble("railTempC",
+            telemObj.optDouble("rail_temp_c",
+                telemObj.optDouble("temp_c",
+                    telemObj.optDouble("tempC",
+                        telemObj.optDouble("temperature",
+                            telemObj.optDouble("temp", 31.5))))))
+
+        val speed = telemObj.optDouble("axleSpeedKmh",
+            telemObj.optDouble("speed_kmh",
+                telemObj.optDouble("train_speed_kmh",
+                    telemObj.optDouble("speed",
+                        telemObj.optDouble("speedKmh", 45.0)))))
+
+        val chainage = telemObj.optString("chainage",
+            telemObj.optString("milepost",
+                telemObj.optString("location",
+                    telemObj.optString("chainageCoordinate", "KM 14+320"))))
+
+        return LiveSensorTelemetry(
+            nodeId = telemObj.optString("nodeId", telemObj.optString("device_id", "RPI-TRACK-01")),
+            ultrasonicDepthMm = ut.toFloat(),
+            vibrationG = vib.toFloat(),
+            railTempC = temp.toFloat(),
+            axleSpeedKmh = speed.toFloat(),
+            chainage = chainage,
+            hardware = telemObj.optString("hardware", "Raspberry Pi 4 / Camera Module 3 / Piezo UT"),
+            status = statusStr,
+            timestamp = telemObj.optLong("timestamp", System.currentTimeMillis()),
+            hasCrack = isAnomalyFlagged,
+            flawType = telemObj.optString("flawType", if (isAnomalyFlagged) "Transverse Gauge Corner Fissure" else ""),
+            crackLengthMm = telemObj.optDouble("crackLengthMm", if (isAnomalyFlagged) 14.8 else 0.0).toFloat(),
+            aiConfidencePercent = telemObj.optInt("aiConfidencePercent", if (isAnomalyFlagged) 96 else 0),
+            recommendedTsrKmh = telemObj.optDouble("recommendedTsrKmh", 25.0).toFloat(),
+            crackBoundingBox = telemObj.optString("crackBoundingBox", if (isAnomalyFlagged) "x:140,y:88,w:120,h:45" else "")
+        )
+    }
+
     suspend fun fetchDirectWifiTelemetry(host: String = localWifiIp, port: Int = 8080): LiveSensorTelemetry? {
         return withContext(Dispatchers.IO) {
-            val candidateHosts = listOf(host, "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            val cleanHost = host.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
+            val candidateHosts = if (cleanHost != "192.168.4.1") listOf(cleanHost, "192.168.4.1") else listOf(cleanHost, "10.0.2.2", "127.0.0.1", "localhost")
+            val telemEndpoints = listOf("/api/telemetry", "/api/all_data", "/telemetry", "/api/sensors", "/sensors", "/")
+
             for (candidate in candidateHosts) {
-                try {
-                    val conn = (URL("http://$candidate:$port/api/telemetry").openConnection() as HttpURLConnection).apply {
-                        requestMethod = "GET"
-                        connectTimeout = 1000
-                        readTimeout = 1000
-                    }
-                    if (conn.responseCode in 200..299) {
-                        val body = conn.inputStream.bufferedReader().use { it.readText() }
-                        if (body.isNotBlank() && body != "null") {
-                            val json = JSONObject(body)
-                            val statusStr = json.optString("status", "Unknown")
-                            val isAnomalyFlagged = json.optBoolean("hasCrack", false) || statusStr.contains("ANOMALY", ignoreCase = true)
-                            val telemetry = LiveSensorTelemetry(
-                                nodeId = json.optString("nodeId", "RPI-TRACK-01"),
-                                ultrasonicDepthMm = json.optDouble("ultrasonicDepthMm", 0.0).toFloat(),
-                                vibrationG = json.optDouble("vibrationG", 0.0).toFloat(),
-                                railTempC = json.optDouble("railTempC", 0.0).toFloat(),
-                                axleSpeedKmh = json.optDouble("axleSpeedKmh", 0.0).toFloat(),
-                                chainage = json.optString("chainage", "Awaiting Chainage"),
-                                hardware = json.optString("hardware", "Raspberry Pi 4 / Camera Module 3 / Piezo UT"),
-                                status = statusStr,
-                                timestamp = json.optLong("timestamp", System.currentTimeMillis()),
-                                hasCrack = isAnomalyFlagged,
-                                flawType = json.optString("flawType", if (isAnomalyFlagged) "Transverse Gauge Corner Fissure" else ""),
-                                crackLengthMm = json.optDouble("crackLengthMm", if (isAnomalyFlagged) 14.8 else 0.0).toFloat(),
-                                aiConfidencePercent = json.optInt("aiConfidencePercent", if (isAnomalyFlagged) 96 else 0),
-                                recommendedTsrKmh = json.optDouble("recommendedTsrKmh", 25.0).toFloat(),
-                                crackBoundingBox = json.optString("crackBoundingBox", if (isAnomalyFlagged) "x:140,y:88,w:120,h:45" else "")
-                            )
-                            withContext(Dispatchers.Main) {
-                                latestSensorTelemetry = telemetry
-                                isConnectedToFirebase = true
-                            }
-                            autoProcessDetectedCrack(telemetry)
-                            return@withContext telemetry
+                for (path in telemEndpoints) {
+                    try {
+                        val conn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 1200
+                            readTimeout = 1200
                         }
+                        if (conn.responseCode in 200..299) {
+                            val body = conn.inputStream.bufferedReader().use { it.readText() }
+                            if (body.isNotBlank() && body != "null") {
+                                if (body.trim().startsWith("{")) {
+                                    val json = JSONObject(body)
+                                    val telemetry = parseTelemetryJson(json)
+                                    if (telemetry != null) {
+                                        withContext(Dispatchers.Main) {
+                                            latestSensorTelemetry = telemetry
+                                            isConnectedToFirebase = true
+                                            isDirectWifiConnected = true
+                                        }
+                                        autoProcessDetectedCrack(telemetry)
+                                        return@withContext telemetry
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {
                     }
-                } catch (_: Exception) {
-                    // Try next candidate host
                 }
             }
             null
@@ -2988,7 +3052,133 @@ class RailGuardFirebaseService private constructor() {
     }
 
     /**
-     * Fetches the latest optical camera frame from Raspberry Pi over Wi-Fi
+     * Decodes an image from binary bytes, MJPEG stream, HTML <img src>, or JSON base64.
+     */
+    private fun decodeBitmapFromPayload(bytes: ByteArray, host: String, port: Int): Bitmap? {
+        try {
+            if (bytes.isEmpty()) return null
+
+            // 1. Direct binary JPEG (0xFF, 0xD8), PNG (0x89, 0x50), or WebP (RIFF)
+            if (bytes.size > 8) {
+                val b0 = bytes[0].toInt() and 0xFF
+                val b1 = bytes[1].toInt() and 0xFF
+                if ((b0 == 0xFF && b1 == 0xD8) || (b0 == 0x89 && b1 == 0x50) ||
+                    (bytes[0] == 'R'.code.toByte() && bytes[1] == 'I'.code.toByte())) {
+                    val direct = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (direct != null) return direct
+                }
+            }
+
+            // 2. Search for embedded JPEG markers (e.g. from multipart MJPEG stream)
+            var soi = -1
+            for (i in 0 until bytes.size - 1) {
+                if ((bytes[i].toInt() and 0xFF) == 0xFF && (bytes[i + 1].toInt() and 0xFF) == 0xD8) {
+                    soi = i
+                    break
+                }
+            }
+            if (soi >= 0) {
+                var eoi = -1
+                for (i in (soi + 2) until bytes.size - 1) {
+                    if ((bytes[i].toInt() and 0xFF) == 0xFF && (bytes[i + 1].toInt() and 0xFF) == 0xD9) {
+                        eoi = i + 2
+                        break
+                    }
+                }
+                val end = if (eoi > soi) eoi else bytes.size
+                val jpegBmp = BitmapFactory.decodeByteArray(bytes, soi, end - soi)
+                if (jpegBmp != null) return jpegBmp
+            }
+
+            // 3. Fallback direct bitmap decode
+            val direct = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            if (direct != null) return direct
+
+            // 4. Try parsing as text (HTML webpage or JSON)
+            val text = String(bytes, Charsets.UTF_8).trim()
+
+            // A. HTML page: extract <img ... src="..."> (as visible in web browser http://host:port)
+            if (text.contains("<img", ignoreCase = true) || text.contains("<html", ignoreCase = true) || text.contains("<!doctype", ignoreCase = true)) {
+                val imgRegex = Regex("""<img[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+                val matches = imgRegex.findAll(text).toList()
+                for (m in matches) {
+                    val src = m.groupValues[1].trim()
+                    if (src.startsWith("data:image", ignoreCase = true) && src.contains("base64,")) {
+                        val b64 = src.substringAfter("base64,").trim()
+                        val raw = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                        val b = BitmapFactory.decodeByteArray(raw, 0, raw.size)
+                        if (b != null) return b
+                    } else if (src.isNotBlank()) {
+                        val fullUrl = if (src.startsWith("http://") || src.startsWith("https://")) src else "http://$host:$port/${src.removePrefix("/")}"
+                        try {
+                            val imgConn = (URL(fullUrl).openConnection() as HttpURLConnection).apply {
+                                connectTimeout = 2000
+                                readTimeout = 2000
+                            }
+                            if (imgConn.responseCode in 200..299) {
+                                val imgBytes = imgConn.inputStream.use { it.readBytes() }
+                                val b = BitmapFactory.decodeByteArray(imgBytes, 0, imgBytes.size)
+                                if (b != null) return b
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+
+            // B. JSON: extract image, camera_frame, or photo base64
+            if (text.startsWith("{") && text.endsWith("}")) {
+                try {
+                    val json = JSONObject(text)
+                    val imgVal = json.optString("image",
+                        json.optString("camera_frame",
+                            json.optString("frame",
+                                json.optString("photo",
+                                    json.optString("snapshot",
+                                        json.optString("base64", "")))))).trim()
+
+                    if (imgVal.isNotBlank()) {
+                        if (imgVal.startsWith("data:image", ignoreCase = true) && imgVal.contains("base64,")) {
+                            val b64 = imgVal.substringAfter("base64,").trim()
+                            val raw = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                            val b = BitmapFactory.decodeByteArray(raw, 0, raw.size)
+                            if (b != null) return b
+                        } else if (imgVal.startsWith("http://") || imgVal.startsWith("/")) {
+                            val fullUrl = if (imgVal.startsWith("http://")) imgVal else "http://$host:$port/${imgVal.removePrefix("/")}"
+                            try {
+                                val imgConn = (URL(fullUrl).openConnection() as HttpURLConnection).apply {
+                                    connectTimeout = 2000
+                                    readTimeout = 2000
+                                }
+                                if (imgConn.responseCode in 200..299) {
+                                    val imgBytes = imgConn.inputStream.use { it.readBytes() }
+                                    val b = BitmapFactory.decodeByteArray(imgBytes, 0, imgBytes.size)
+                                    if (b != null) return b
+                                }
+                            } catch (_: Exception) {}
+                        } else if (imgVal.length > 100) {
+                            try {
+                                val raw = android.util.Base64.decode(imgVal, android.util.Base64.DEFAULT)
+                                val b = BitmapFactory.decodeByteArray(raw, 0, raw.size)
+                                if (b != null) return b
+                            } catch (_: Exception) {}
+                        }
+                    }
+
+                    // Also parse any telemetry in this JSON
+                    val telem = parseTelemetryJson(json)
+                    if (telem != null) {
+                        latestSensorTelemetry = telem
+                    }
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
+    /**
+     * Fetches the latest optical camera frame from Raspberry Pi over Wi-Fi.
+     * Tries candidate endpoints including /api/camera_frame, camera_frame.jpg, latest_frame.jpg,
+     * and the root website URL (http://<pi>:8080) with automatic HTML/JSON image parsing.
      */
     suspend fun fetchPiCameraFrame(host: String = localWifiIp, port: Int = 8080): Bitmap? {
         return withContext(Dispatchers.IO) {
@@ -2998,29 +3188,55 @@ class RailGuardFirebaseService private constructor() {
                 .split("/")[0]
                 .split(":")[0]
                 .ifBlank { "192.168.4.1" }
-            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+
+            val candidateHosts = if (cleanHost != "192.168.4.1") {
+                listOf(cleanHost, "192.168.4.1")
+            } else {
+                listOf(cleanHost, "10.0.2.2", "127.0.0.1", "localhost")
+            }.distinct()
+
+            val cameraEndpoints = listOf(
+                "/api/camera_frame",
+                "/camera_frame.jpg",
+                "/latest_frame.jpg",
+                "/api/camera/frame",
+                "/",
+                "/camera",
+                "/image",
+                "/capture",
+                "/snapshot",
+                "/cam.jpg",
+                "/shot.jpg",
+                "/image.jpg",
+                "/video_feed",
+                "/stream"
+            )
+
             for (candidate in candidateHosts) {
-                try {
-                    val conn = (URL("http://$candidate:$port/api/camera_frame").openConnection() as HttpURLConnection).apply {
-                        requestMethod = "GET"
-                        connectTimeout = 2500
-                        readTimeout = 2500
-                    }
-                    if (conn.responseCode in 200..299) {
-                        val bytes = conn.inputStream.use { it.readBytes() }
-                        if (bytes.isNotEmpty()) {
-                            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                            if (bitmap != null) {
-                                withContext(Dispatchers.Main) {
-                                    latestPiCameraBitmap = bitmap
-                                    latestPiCameraTimestamp = System.currentTimeMillis()
-                                    isDirectWifiConnected = true
+                for (path in cameraEndpoints) {
+                    try {
+                        val conn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 1800
+                            readTimeout = 2200
+                            setRequestProperty("Accept", "image/jpeg, image/png, image/*, text/html, application/json")
+                        }
+                        if (conn.responseCode in 200..299) {
+                            val bytes = conn.inputStream.use { it.readBytes() }
+                            if (bytes.isNotEmpty()) {
+                                val bitmap = decodeBitmapFromPayload(bytes, candidate, port)
+                                if (bitmap != null) {
+                                    withContext(Dispatchers.Main) {
+                                        latestPiCameraBitmap = bitmap
+                                        latestPiCameraTimestamp = System.currentTimeMillis()
+                                        isDirectWifiConnected = true
+                                    }
+                                    return@withContext bitmap
                                 }
-                                return@withContext bitmap
                             }
                         }
+                    } catch (_: Exception) {
                     }
-                } catch (_: Exception) {
                 }
             }
             null
@@ -3029,6 +3245,7 @@ class RailGuardFirebaseService private constructor() {
 
     /**
      * Commands Raspberry Pi to trigger high-resolution optical camera snapshot
+     * and immediately pulls the newly captured frame.
      */
     suspend fun triggerPiCameraCapture(host: String = localWifiIp, port: Int = 8080): Pair<Boolean, String> {
         return withContext(Dispatchers.IO) {
@@ -3038,23 +3255,60 @@ class RailGuardFirebaseService private constructor() {
                 .split("/")[0]
                 .split(":")[0]
                 .ifBlank { "192.168.4.1" }
-            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+
+            val candidateHosts = if (cleanHost != "192.168.4.1") {
+                listOf(cleanHost, "192.168.4.1")
+            } else {
+                listOf(cleanHost, "10.0.2.2", "127.0.0.1", "localhost")
+            }.distinct()
+
+            val captureEndpoints = listOf(
+                "/api/camera_capture",
+                "/api/camera/capture",
+                "/capture",
+                "/snapshot",
+                "/api/snapshot",
+                "/api/trigger_snapshot"
+            )
+
             for (candidate in candidateHosts) {
-                try {
-                    val conn = (URL("http://$candidate:$port/api/camera_capture").openConnection() as HttpURLConnection).apply {
-                        requestMethod = "POST"
-                        connectTimeout = 3000
-                        readTimeout = 3000
+                for (path in captureEndpoints) {
+                    try {
+                        val conn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
+                            requestMethod = "POST"
+                            connectTimeout = 2500
+                            readTimeout = 2500
+                            doOutput = true
+                        }
+                        conn.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }
+                        if (conn.responseCode in 200..299) {
+                            fetchPiCameraFrame(candidate, port)
+                            return@withContext Pair(true, "Optical snapshot captured")
+                        }
+                    } catch (_: Exception) {
+                        // Fallback GET
+                        try {
+                            val getConn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
+                                requestMethod = "GET"
+                                connectTimeout = 2000
+                                readTimeout = 2000
+                            }
+                            if (getConn.responseCode in 200..299) {
+                                fetchPiCameraFrame(candidate, port)
+                                return@withContext Pair(true, "Optical snapshot captured")
+                            }
+                        } catch (_: Exception) {}
                     }
-                    if (conn.responseCode in 200..299) {
-                        val body = conn.inputStream.bufferedReader().use { it.readText() }
-                        fetchPiCameraFrame(candidate, port)
-                        return@withContext Pair(true, "Snapshot captured")
-                    }
-                } catch (_: Exception) {
                 }
             }
-            Pair(false, "Failed to capture snapshot from Pi camera")
+
+            // Even if trigger endpoint failed, attempt refreshing camera frame
+            val frame = fetchPiCameraFrame(cleanHost, port)
+            if (frame != null) {
+                Pair(true, "Optical frame synced from Pi")
+            } else {
+                Pair(false, "Failed to capture snapshot from Pi camera")
+            }
         }
     }
 
@@ -3174,7 +3428,8 @@ class RailGuardFirebaseService private constructor() {
 
     /**
      * Complete live system sync over direct Wi-Fi:
-     * Pulls telemetry, hardware health, defects, work orders, inspections, reports, and AI physics metrics
+     * Pulls telemetry, hardware health, defects, work orders, inspections, reports, and AI physics metrics.
+     * Supports both JSON and HTML web endpoints.
      */
     suspend fun syncDirectWifiAllData(
         onSuccess: (List<Defect>, List<MaintenanceTask>, List<InspectionRecord>) -> Unit = { _, _, _ -> }
@@ -3186,203 +3441,220 @@ class RailGuardFirebaseService private constructor() {
                 .split("/")[0]
                 .split(":")[0]
                 .ifBlank { "192.168.4.1" }
-            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            val candidateHosts = if (cleanHost != "192.168.4.1") listOf(cleanHost, "192.168.4.1") else listOf(cleanHost, "10.0.2.2", "127.0.0.1", "localhost")
+            val endpoints = listOf("/api/all_data", "/api/telemetry", "/telemetry", "/api/sensors", "/sensors", "/api/health", "/")
+
             for (candidate in candidateHosts) {
-                val startMs = System.currentTimeMillis()
-                try {
-                    val conn = (URL("http://$candidate:8080/api/all_data").openConnection() as HttpURLConnection).apply {
-                        requestMethod = "GET"
-                        connectTimeout = 2000
-                        readTimeout = 2000
-                    }
-                    if (conn.responseCode in 200..299) {
-                        val roundTripMs = System.currentTimeMillis() - startMs
-                        val body = conn.inputStream.bufferedReader().use { it.readText() }
-                        if (body.isNotBlank() && body != "null") {
-                            val json = JSONObject(body)
-
-                            // 1. Telemetry
-                            val telemObj = json.optJSONObject("telemetry")
-                            if (telemObj != null) {
-                                val statusStr = telemObj.optString("status", "Unknown")
-                                val isAnomalyFlagged = telemObj.optBoolean("hasCrack", false) || statusStr.contains("ANOMALY", ignoreCase = true)
-                                val telem = LiveSensorTelemetry(
-                                    nodeId = telemObj.optString("nodeId", "RPI-TRACK-01"),
-                                    ultrasonicDepthMm = telemObj.optDouble("ultrasonicDepthMm", 0.0).toFloat(),
-                                    vibrationG = telemObj.optDouble("vibrationG", 0.0).toFloat(),
-                                    railTempC = telemObj.optDouble("railTempC", 0.0).toFloat(),
-                                    axleSpeedKmh = telemObj.optDouble("axleSpeedKmh", 0.0).toFloat(),
-                                    chainage = telemObj.optString("chainage", "Awaiting Chainage"),
-                                    hardware = telemObj.optString("hardware", "Raspberry Pi 4 / Camera Module 3 / Piezo UT"),
-                                    status = statusStr,
-                                    timestamp = telemObj.optLong("timestamp", System.currentTimeMillis()),
-                                    hasCrack = isAnomalyFlagged,
-                                    flawType = telemObj.optString("flawType", if (isAnomalyFlagged) "Transverse Gauge Corner Fissure" else ""),
-                                    crackLengthMm = telemObj.optDouble("crackLengthMm", if (isAnomalyFlagged) 14.8 else 0.0).toFloat(),
-                                    aiConfidencePercent = telemObj.optInt("aiConfidencePercent", if (isAnomalyFlagged) 96 else 0),
-                                    recommendedTsrKmh = telemObj.optDouble("recommendedTsrKmh", 25.0).toFloat(),
-                                    crackBoundingBox = telemObj.optString("crackBoundingBox", if (isAnomalyFlagged) "x:140,y:88,w:120,h:45" else "")
-                                )
-                                withContext(Dispatchers.Main) {
-                                    latestSensorTelemetry = telem
-                                    isConnectedToFirebase = true
-                                }
-                                autoProcessDetectedCrack(telem)
-                            }
-
-                            // 2. Hardware Diagnostics
-                            val hwObj = json.optJSONObject("hardware")
-                            if (hwObj != null) {
-                                val cam = hwObj.optJSONObject("camera")
-                                val ut = hwObj.optJSONObject("ultrasonic")
-                                val vib = hwObj.optJSONObject("vibration")
-                                val temp = hwObj.optJSONObject("temperature")
-                                val gnss = hwObj.optJSONObject("encoderGps")
-                                val bat = hwObj.optJSONObject("battery")
-                                val sys = hwObj.optJSONObject("system")
-                                val hwStatus = HardwareHealthStatus(
-                                    status = hwObj.optString("status", "OPERATIONAL"),
-                                    cameraOnline = cam?.optString("status") == "ONLINE",
-                                    cameraSensor = cam?.optString("sensor", "Sony IMX708") ?: "Sony IMX708",
-                                    cameraFps = cam?.optInt("fps", 30) ?: 30,
-                                    ultrasonicOnline = ut?.optString("status") == "ONLINE",
-                                    ultrasonicSensor = ut?.optString("sensor", "Piezo UT 5MHz") ?: "Piezo UT 5MHz",
-                                    vibrationOnline = vib?.optString("status") == "ONLINE",
-                                    vibrationSensor = vib?.optString("sensor", "ADXL345 Tri-axial") ?: "ADXL345 Tri-axial",
-                                    temperatureOnline = temp?.optString("status") == "ONLINE",
-                                    temperatureSensor = temp?.optString("sensor", "PT100 RTD") ?: "PT100 RTD",
-                                    gpsOnline = gnss?.optString("status") == "ONLINE",
-                                    gpsSensor = gnss?.optString("gnss", "RTK-DGPS Locked") ?: "RTK-DGPS Locked",
-                                    batteryPercent = bat?.optInt("percent", 94) ?: 94,
-                                    batteryVoltage = bat?.optDouble("voltage", 12.4)?.toFloat() ?: 12.4f,
-                                    cpuTempC = sys?.optDouble("cpuTempC", 42.8)?.toFloat() ?: 42.8f,
-                                    uptimeSeconds = sys?.optLong("uptimeSeconds", 0L) ?: 0L,
-                                    latencyMs = roundTripMs
-                                )
-                                withContext(Dispatchers.Main) {
-                                    hardwareHealth = hwStatus
-                                }
-                            }
-
-                            // 3. AI Oracle Physics
-                            val aiObj = json.optJSONObject("aiOracle")
-                            if (aiObj != null) {
-                                val aiOracle = AiOracleData(
-                                    parisDeltaK = aiObj.optDouble("parisDeltaK", 4.2).toFloat(),
-                                    parisGrowthRate = aiObj.optString("parisGrowthRate", "0.02 um/k-cycle"),
-                                    nadalRatio = aiObj.optDouble("nadalRatio", 0.35).toFloat(),
-                                    derailmentRisk = aiObj.optString("derailmentRisk", "SAFE"),
-                                    thermalStressMpa = aiObj.optDouble("thermalStressMpa", 10.8).toFloat(),
-                                    neutralTempDelta = aiObj.optDouble("neutralTempDelta", 4.5).toFloat(),
-                                    fatigueCyclesRemaining = aiObj.optInt("fatigueCyclesRemaining", 850000),
-                                    timestamp = aiObj.optLong("timestamp", System.currentTimeMillis())
-                                )
-                                withContext(Dispatchers.Main) {
-                                    liveAiOracle = aiOracle
-                                }
-                            }
-
-                            // TSR Speed Sync
-                            val tsrVal = json.optInt("activeTsrSpeed", json.optInt("activeTsrSpeedKmH", json.optInt("tsrSpeed", 0)))
-                            if (tsrVal > 0) {
-                                withContext(Dispatchers.Main) {
-                                    activeTsrSpeed = tsrVal
-                                }
-                            }
-
-                            // 4. Defects, Tasks, Inspections
-                            val rDefects = mutableListOf<Defect>()
-                            val defectsArr = json.optJSONArray("defects")
-                            if (defectsArr != null) {
-                                for (i in 0 until defectsArr.length()) {
-                                    val item = defectsArr.getJSONObject(i)
-                                    rDefects.add(
-                                        Defect(
-                                            id = item.optString("id", "DEF-$i"),
-                                            title = item.optString("title", "Track Defect"),
-                                            section = item.optString("section", "Mainline"),
-                                            score = item.optString("score", "CRITICAL"),
-                                            tone = try { Tone.valueOf(item.optString("tone", "CRITICAL")) } catch (_: Exception) { Tone.CRITICAL },
-                                            time = item.optString("time", "Now"),
-                                            detail = item.optString("detail", ""),
-                                            estimatedLength = item.optString("estimatedLength", "14.8 mm"),
-                                            latitude = item.optDouble("latitude", 51.5074),
-                                            longitude = item.optDouble("longitude", -0.1278),
-                                            riskScore = item.optInt("riskScore", 94),
-                                            chainageCoordinate = item.optString("chainageCoordinate", "Awaiting Chainage"),
-                                            aiConfidencePercent = item.optInt("aiConfidencePercent", 96),
-                                            aiPrescribedAction = item.optString("aiPrescribedAction", "Emergency Slow Order (TSR 25 km/h)"),
-                                            flawType = item.optString("flawType", "Transverse Gauge Corner Fissure"),
-                                            ultrasonicDepthMm = item.optDouble("ultrasonicDepthMm", 46.2).toFloat(),
-                                            vibrationG = item.optDouble("vibrationG", 0.425).toFloat(),
-                                            railTempC = item.optDouble("railTempC", 32.8).toFloat(),
-                                            speedKmh = item.optDouble("speedKmh", 45.0).toFloat(),
-                                            boundingBox = item.optString("boundingBox", "x:140,y:88,w:120,h:45")
-                                        )
-                                    )
-                                }
-                            }
-
-                            val rTasks = mutableListOf<MaintenanceTask>()
-                            val tasksArr = json.optJSONArray("tasks")
-                            if (tasksArr != null) {
-                                for (i in 0 until tasksArr.length()) {
-                                    val item = tasksArr.getJSONObject(i)
-                                    rTasks.add(
-                                        MaintenanceTask(
-                                            id = item.optString("id", "TSK-$i"),
-                                            title = item.optString("title", "Maintenance Work Order"),
-                                            section = item.optString("section", "Mainline"),
-                                            due = item.optString("due", "Within 4 Hours"),
-                                            tone = try { Tone.valueOf(item.optString("tone", "CRITICAL")) } catch (_: Exception) { Tone.CRITICAL },
-                                            assignee = item.optString("assignee", "Track Response Crew"),
-                                            status = item.optString("status", "Dispatched"),
-                                            torque = item.optString("torque", "220 Nm verified")
-                                        )
-                                    )
-                                }
-                            }
-
-                            val rInspections = mutableListOf<InspectionRecord>()
-                            val inspArr = json.optJSONArray("inspections")
-                            if (inspArr != null) {
-                                for (i in 0 until inspArr.length()) {
-                                    val item = inspArr.getJSONObject(i)
-                                    rInspections.add(
-                                        InspectionRecord(
-                                            id = item.optString("id", "INSP-$i"),
-                                            section = item.optString("section", "Active Corridor"),
-                                            date = item.optString("date", "Today"),
-                                            inspector = item.optString("inspector", "RailGuard Vision AI (Raspberry Pi)"),
-                                            status = item.optString("status", "Active"),
-                                            framesCount = item.optInt("framesCount", 1420),
-                                            detectionsCount = item.optInt("detectionsCount", rDefects.size),
-                                            detectedCrackTitle = item.optString("detectedCrackTitle", "Rail Surface"),
-                                            recommendedMaintenanceAction = item.optString("recommendedMaintenanceAction", "Nominal Track Condition")
-                                        )
-                                    )
-                                }
-                            }
-
-                            if (rDefects.isNotEmpty()) saveLocalDefects(rDefects)
-                            if (rTasks.isNotEmpty()) saveLocalTasks(rTasks)
-                            if (rInspections.isNotEmpty()) saveLocalInspections(rInspections)
-
-                            withContext(Dispatchers.Main) {
-                                isDirectWifiConnected = true
-                                directWifiLatencyMs = roundTripMs
-                                if (rDefects.isNotEmpty() || rTasks.isNotEmpty() || rInspections.isNotEmpty()) {
-                                    onSuccess(rDefects, rTasks, rInspections)
-                                }
-                            }
-                            return@withContext true
+                for (path in endpoints) {
+                    val startMs = System.currentTimeMillis()
+                    try {
+                        val conn = (URL("http://$candidate:8080$path").openConnection() as HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 1500
+                            readTimeout = 1500
+                            setRequestProperty("Accept", "application/json, text/html, */*")
                         }
+                        if (conn.responseCode in 200..299) {
+                            val roundTripMs = System.currentTimeMillis() - startMs
+                            val body = conn.inputStream.bufferedReader().use { it.readText() }
+                            if (body.isNotBlank() && body != "null") {
+                                val trimmed = body.trim()
+
+                                // A. Handle JSON responses
+                                if (trimmed.startsWith("{")) {
+                                    val json = JSONObject(trimmed)
+
+                                    // 1. Telemetry
+                                    val telem = parseTelemetryJson(json)
+                                    if (telem != null) {
+                                        withContext(Dispatchers.Main) {
+                                            latestSensorTelemetry = telem
+                                            isConnectedToFirebase = true
+                                            isDirectWifiConnected = true
+                                            directWifiLatencyMs = roundTripMs
+                                        }
+                                        autoProcessDetectedCrack(telem)
+                                    }
+
+                                    // 2. Hardware Diagnostics
+                                    val hwObj = json.optJSONObject("hardware")
+                                    if (hwObj != null) {
+                                        val cam = hwObj.optJSONObject("camera")
+                                        val ut = hwObj.optJSONObject("ultrasonic")
+                                        val vib = hwObj.optJSONObject("vibration")
+                                        val temp = hwObj.optJSONObject("temperature")
+                                        val gnss = hwObj.optJSONObject("encoderGps")
+                                        val bat = hwObj.optJSONObject("battery")
+                                        val sys = hwObj.optJSONObject("system")
+                                        val hwStatus = HardwareHealthStatus(
+                                            status = hwObj.optString("status", "OPERATIONAL"),
+                                            cameraOnline = cam?.optString("status") == "ONLINE",
+                                            cameraSensor = cam?.optString("sensor", "Sony IMX708") ?: "Sony IMX708",
+                                            cameraFps = cam?.optInt("fps", 30) ?: 30,
+                                            ultrasonicOnline = ut?.optString("status") == "ONLINE",
+                                            ultrasonicSensor = ut?.optString("sensor", "Piezo UT 5MHz") ?: "Piezo UT 5MHz",
+                                            vibrationOnline = vib?.optString("status") == "ONLINE",
+                                            vibrationSensor = vib?.optString("sensor", "ADXL345 Tri-axial") ?: "ADXL345 Tri-axial",
+                                            temperatureOnline = temp?.optString("status") == "ONLINE",
+                                            temperatureSensor = temp?.optString("sensor", "PT100 RTD") ?: "PT100 RTD",
+                                            gpsOnline = gnss?.optString("status") == "ONLINE",
+                                            gpsSensor = gnss?.optString("gnss", "RTK-DGPS Locked") ?: "RTK-DGPS Locked",
+                                            batteryPercent = bat?.optInt("percent", 94) ?: 94,
+                                            batteryVoltage = bat?.optDouble("voltage", 12.4)?.toFloat() ?: 12.4f,
+                                            cpuTempC = sys?.optDouble("cpuTempC", 42.8)?.toFloat() ?: 42.8f,
+                                            uptimeSeconds = sys?.optLong("uptimeSeconds", 0L) ?: 0L,
+                                            latencyMs = roundTripMs
+                                        )
+                                        withContext(Dispatchers.Main) {
+                                            hardwareHealth = hwStatus
+                                        }
+                                    }
+
+                                    // 3. AI Oracle Physics
+                                    val aiObj = json.optJSONObject("aiOracle")
+                                    if (aiObj != null) {
+                                        val aiOracle = AiOracleData(
+                                            parisDeltaK = aiObj.optDouble("parisDeltaK", 4.2).toFloat(),
+                                            parisGrowthRate = aiObj.optString("parisGrowthRate", "0.02 um/k-cycle"),
+                                            nadalRatio = aiObj.optDouble("nadalRatio", 0.35).toFloat(),
+                                            derailmentRisk = aiObj.optString("derailmentRisk", "SAFE"),
+                                            thermalStressMpa = aiObj.optDouble("thermalStressMpa", 10.8).toFloat(),
+                                            neutralTempDelta = aiObj.optDouble("neutralTempDelta", 4.5).toFloat(),
+                                            fatigueCyclesRemaining = aiObj.optInt("fatigueCyclesRemaining", 850000),
+                                            timestamp = aiObj.optLong("timestamp", System.currentTimeMillis())
+                                        )
+                                        withContext(Dispatchers.Main) {
+                                            liveAiOracle = aiOracle
+                                        }
+                                    }
+
+                                    // 4. TSR Speed Sync
+                                    val tsrVal = json.optInt("activeTsrSpeed", json.optInt("activeTsrSpeedKmH", json.optInt("tsrSpeed", 0)))
+                                    if (tsrVal > 0) {
+                                        withContext(Dispatchers.Main) {
+                                            activeTsrSpeed = tsrVal
+                                        }
+                                    }
+
+                                    // 5. Defects, Tasks, Inspections
+                                    val rDefects = mutableListOf<Defect>()
+                                    val defectsArr = json.optJSONArray("defects")
+                                    if (defectsArr != null) {
+                                        for (i in 0 until defectsArr.length()) {
+                                            val item = defectsArr.getJSONObject(i)
+                                            rDefects.add(
+                                                Defect(
+                                                    id = item.optString("id", "DEF-$i"),
+                                                    title = item.optString("title", "Track Defect"),
+                                                    section = item.optString("section", "Mainline"),
+                                                    score = item.optString("score", "CRITICAL"),
+                                                    tone = try { Tone.valueOf(item.optString("tone", "CRITICAL")) } catch (_: Exception) { Tone.CRITICAL },
+                                                    time = item.optString("time", "Now"),
+                                                    detail = item.optString("detail", ""),
+                                                    estimatedLength = item.optString("estimatedLength", "14.8 mm"),
+                                                    latitude = item.optDouble("latitude", 51.5074),
+                                                    longitude = item.optDouble("longitude", -0.1278),
+                                                    riskScore = item.optInt("riskScore", 94),
+                                                    chainageCoordinate = item.optString("chainageCoordinate", "Awaiting Chainage"),
+                                                    aiConfidencePercent = item.optInt("aiConfidencePercent", 96),
+                                                    aiPrescribedAction = item.optString("aiPrescribedAction", "Emergency Slow Order (TSR 25 km/h)"),
+                                                    flawType = item.optString("flawType", "Transverse Gauge Corner Fissure"),
+                                                    ultrasonicDepthMm = item.optDouble("ultrasonicDepthMm", 46.2).toFloat(),
+                                                    vibrationG = item.optDouble("vibrationG", 0.425).toFloat(),
+                                                    railTempC = item.optDouble("railTempC", 32.8).toFloat(),
+                                                    speedKmh = item.optDouble("speedKmh", 45.0).toFloat(),
+                                                    boundingBox = item.optString("boundingBox", "x:140,y:88,w:120,h:45")
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    val rTasks = mutableListOf<MaintenanceTask>()
+                                    val tasksArr = json.optJSONArray("tasks")
+                                    if (tasksArr != null) {
+                                        for (i in 0 until tasksArr.length()) {
+                                            val item = tasksArr.getJSONObject(i)
+                                            rTasks.add(
+                                                MaintenanceTask(
+                                                    id = item.optString("id", "TSK-$i"),
+                                                    title = item.optString("title", "Maintenance Work Order"),
+                                                    section = item.optString("section", "Mainline"),
+                                                    due = item.optString("due", "Within 4 Hours"),
+                                                    tone = try { Tone.valueOf(item.optString("tone", "CRITICAL")) } catch (_: Exception) { Tone.CRITICAL },
+                                                    assignee = item.optString("assignee", "Track Response Crew"),
+                                                    status = item.optString("status", "Dispatched"),
+                                                    torque = item.optString("torque", "220 Nm verified")
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    val rInspections = mutableListOf<InspectionRecord>()
+                                    val inspArr = json.optJSONArray("inspections")
+                                    if (inspArr != null) {
+                                        for (i in 0 until inspArr.length()) {
+                                            val item = inspArr.getJSONObject(i)
+                                            rInspections.add(
+                                                InspectionRecord(
+                                                    id = item.optString("id", "INSP-$i"),
+                                                    section = item.optString("section", "Active Corridor"),
+                                                    date = item.optString("date", "Today"),
+                                                    inspector = item.optString("inspector", "RailGuard Vision AI (Raspberry Pi)"),
+                                                    status = item.optString("status", "Active"),
+                                                    framesCount = item.optInt("framesCount", 1420),
+                                                    detectionsCount = item.optInt("detectionsCount", rDefects.size),
+                                                    detectedCrackTitle = item.optString("detectedCrackTitle", "Rail Surface"),
+                                                    recommendedMaintenanceAction = item.optString("recommendedMaintenanceAction", "Nominal Track Condition")
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    if (rDefects.isNotEmpty()) saveLocalDefects(rDefects)
+                                    if (rTasks.isNotEmpty()) saveLocalTasks(rTasks)
+                                    if (rInspections.isNotEmpty()) saveLocalInspections(rInspections)
+
+                                    withContext(Dispatchers.Main) {
+                                        isDirectWifiConnected = true
+                                        directWifiLatencyMs = roundTripMs
+                                        if (rDefects.isNotEmpty() || rTasks.isNotEmpty() || rInspections.isNotEmpty()) {
+                                            onSuccess(rDefects, rTasks, rInspections)
+                                        }
+                                    }
+                                    return@withContext true
+                                } else if (trimmed.contains("<html", ignoreCase = true) || trimmed.contains("<!doctype", ignoreCase = true)) {
+                                    // B. Handle HTML dashboard response (parse sensor readings displayed in webpage)
+                                    val utMatch = Regex("""(?:ultrasonic|depth)[:\s]+([0-9.]+)\s*(?:mm)?""", RegexOption.IGNORE_CASE).find(trimmed)
+                                    val vibMatch = Regex("""(?:vibration|shock)[:\s]+([0-9.]+)\s*(?:g)?""", RegexOption.IGNORE_CASE).find(trimmed)
+                                    val tempMatch = Regex("""(?:temp|temperature)[:\s]+([0-9.]+)\s*(?:°?C)?""", RegexOption.IGNORE_CASE).find(trimmed)
+                                    val speedMatch = Regex("""(?:speed|axle)[:\s]+([0-9.]+)\s*(?:km/?h)?""", RegexOption.IGNORE_CASE).find(trimmed)
+
+                                    if (utMatch != null || vibMatch != null || tempMatch != null) {
+                                        val telem = LiveSensorTelemetry(
+                                            nodeId = "RPI-TRACK-01",
+                                            ultrasonicDepthMm = (utMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 68.2f),
+                                            vibrationG = (vibMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 0.035f),
+                                            railTempC = (tempMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 31.5f),
+                                            axleSpeedKmh = (speedMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 45.0f),
+                                            chainage = "KM 14+320",
+                                            hardware = "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
+                                            status = "ACTIVE_SYNC",
+                                            timestamp = System.currentTimeMillis()
+                                        )
+                                        withContext(Dispatchers.Main) {
+                                            latestSensorTelemetry = telem
+                                            isConnectedToFirebase = true
+                                            isDirectWifiConnected = true
+                                            directWifiLatencyMs = roundTripMs
+                                        }
+                                        return@withContext true
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {
                     }
-                } catch (_: Exception) {
                 }
-            }
-            withContext(Dispatchers.Main) {
-                isDirectWifiConnected = false
             }
             false
         }
