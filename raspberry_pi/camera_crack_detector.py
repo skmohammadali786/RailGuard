@@ -94,6 +94,49 @@ BUZZER_TRIGGERED_AT: int = 0
 BUZZER_THREAD: Optional[threading.Thread] = None
 BUZZER_STOP_EVENT = threading.Event()
 LAST_HARDWARE_ACQUISITION_MS: int = 0
+STATE_FILE_PATH: str = os.getenv("RAILGUARD_STATE_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "railguard_pi_state.json"))
+
+
+def save_pi_state():
+    """Persists local patrol schedules, defects, tasks, and telemetry to disk."""
+    try:
+        data = {
+            "telemetry": LATEST_TELEMETRY,
+            "tsr": LAST_TSR_COMMAND,
+            "schedules": SCHEDULES_REGISTRY,
+            "defects": DEFECTS_REGISTRY,
+            "tasks": TASKS_REGISTRY,
+            "inspections": INSPECTIONS_REGISTRY,
+            "timestamp": int(time.time() * 1000)
+        }
+        with open(STATE_FILE_PATH, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        log.debug("State save failed: %s", e)
+
+
+def load_pi_state():
+    """Restores local patrol schedules, defects, tasks, and telemetry from disk."""
+    global LATEST_TELEMETRY, LAST_TSR_COMMAND, SCHEDULES_REGISTRY, DEFECTS_REGISTRY, TASKS_REGISTRY, INSPECTIONS_REGISTRY
+    try:
+        if os.path.exists(STATE_FILE_PATH):
+            with open(STATE_FILE_PATH, "r") as f:
+                data = json.load(f)
+            if "telemetry" in data and isinstance(data["telemetry"], dict):
+                LATEST_TELEMETRY.update(data["telemetry"])
+            if "tsr" in data and isinstance(data["tsr"], dict):
+                LAST_TSR_COMMAND = data["tsr"]
+            if "schedules" in data and isinstance(data["schedules"], list):
+                SCHEDULES_REGISTRY = data["schedules"]
+            if "defects" in data and isinstance(data["defects"], list):
+                DEFECTS_REGISTRY = data["defects"]
+            if "tasks" in data and isinstance(data["tasks"], list):
+                TASKS_REGISTRY = data["tasks"]
+            if "inspections" in data and isinstance(data["inspections"], list):
+                INSPECTIONS_REGISTRY = data["inspections"]
+            log.info("[✓] Loaded persistent Pi state from %s", STATE_FILE_PATH)
+    except Exception as e:
+        log.warning("State load failed: %s", e)
 
 
 class HardwareGpioPin:
@@ -318,17 +361,23 @@ class HardwareGpioPin:
 
 
 BUZZER_PIN_CONTROLLER: Optional[HardwareGpioPin] = None
+BUZZER_PIN_SECONDARY: Optional[HardwareGpioPin] = None
 
 
 def _buzzer_worker(duration_seconds: float, reason: str):
-    global IS_BUZZER_RINGING, BUZZER_TRIGGERED_AT, BUZZER_PIN_CONTROLLER
+    global IS_BUZZER_RINGING, BUZZER_TRIGGERED_AT, BUZZER_PIN_CONTROLLER, BUZZER_PIN_SECONDARY
     IS_BUZZER_RINGING = True
     BUZZER_TRIGGERED_AT = int(time.time() * 1000)
-    log.warning("🚨 [BUZZER ALARM ACTIVE] Sounding Raspberry Pi Trackside Buzzer on BCM GPIO %d (Reason: %s, Duration: %.1fs)",
+    log.warning("🚨 [BUZZER ALARM ACTIVE] Sounding Raspberry Pi Trackside Buzzer on BCM GPIO %d / Physical Pin 12 (Reason: %s, Duration: %.1fs)",
                 BUZZER_PIN, reason, duration_seconds)
 
     if BUZZER_PIN_CONTROLLER is None:
         BUZZER_PIN_CONTROLLER = HardwareGpioPin(BUZZER_PIN, is_output=True, active_low=BUZZER_ACTIVE_LOW)
+    if BUZZER_PIN_SECONDARY is None and BUZZER_PIN != 24:
+        try:
+            BUZZER_PIN_SECONDARY = HardwareGpioPin(24, is_output=True, active_low=BUZZER_ACTIVE_LOW)
+        except Exception:
+            pass
 
     start_time = time.time()
     try:
@@ -340,14 +389,30 @@ def _buzzer_worker(duration_seconds: float, reason: str):
                 BUZZER_PIN_CONTROLLER.write(True)
                 time.sleep(0.18)
 
+            if BUZZER_PIN_SECONDARY and BUZZER_PIN != 24:
+                try:
+                    BUZZER_PIN_SECONDARY.write(True)
+                except Exception:
+                    pass
+
             sys.stdout.write("\a")
             sys.stdout.flush()
 
             BUZZER_PIN_CONTROLLER.write(False)
+            if BUZZER_PIN_SECONDARY and BUZZER_PIN != 24:
+                try:
+                    BUZZER_PIN_SECONDARY.write(False)
+                except Exception:
+                    pass
             time.sleep(0.08)
     finally:
         if BUZZER_PIN_CONTROLLER:
             BUZZER_PIN_CONTROLLER.write(False)
+        if BUZZER_PIN_SECONDARY:
+            try:
+                BUZZER_PIN_SECONDARY.write(False)
+            except Exception:
+                pass
         IS_BUZZER_RINGING = False
         log.info("[✓] Raspberry Pi Buzzer returned to IDLE (BCM GPIO %d)", BUZZER_PIN)
 
@@ -408,10 +473,42 @@ class HardwareUltrasonicSensor:
         self.last_valid_distance_mm: Optional[float] = None
         self.last_read_timestamp: int = 0
         self.is_hardware_present: bool = False
+        # Candidate (trig, echo) pin pairs to auto-probe across physical & BCM headers
+        self.candidate_pairs = [
+            (trig_pin, echo_pin),                       # Configured (Default: BCM 23 / Pin 16, BCM 24 / Pin 18)
+            (echo_pin, trig_pin),                       # Swapped TRIG and ECHO wires
+            (11, 8),                                    # Physical header pins 23 & 24 (BCM 11 & BCM 8)
+            (8, 11),                                    # Swapped physical pins 23 & 24
+            (17, 27)                                    # Alternate standard (BCM 17 / Pin 11, BCM 27 / Pin 13)
+        ]
         self._setup()
 
     def _setup(self):
-        # 1. Try lgpio (standard on Raspberry Pi OS Bookworm)
+        # 1. Try gpiozero persistent DistanceSensor (most robust on Pi)
+        try:
+            from gpiozero import DistanceSensor
+            self._gz_sensor = DistanceSensor(echo=self.echo_pin, trigger=self.trig_pin, max_distance=4.0)
+            self.backend = "gpiozero"
+            log.info("[✓] Hardware Ultrasonic initialized via gpiozero (TRIG: BCM %d, ECHO: BCM %d)", self.trig_pin, self.echo_pin)
+            return
+        except Exception:
+            pass
+
+        # 2. Try RPi.GPIO with explicit pull-down on ECHO pin
+        try:
+            import RPi.GPIO as GPIO
+            GPIO.setwarnings(False)
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self.trig_pin, GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(self.echo_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            self.backend = "RPi.GPIO"
+            log.info("[✓] Hardware Ultrasonic initialized via RPi.GPIO (TRIG: BCM %d / Pin 16, ECHO: BCM %d / Pin 18, PUD_DOWN)",
+                     self.trig_pin, self.echo_pin)
+            return
+        except Exception:
+            pass
+
+        # 3. Try lgpio (standard on Raspberry Pi OS Bookworm)
         try:
             import lgpio
             for chip in (0, 4):
@@ -429,118 +526,110 @@ class HardwareUltrasonicSensor:
         except Exception:
             pass
 
-        # 2. Try RPi.GPIO
-        try:
-            import RPi.GPIO as GPIO
-            GPIO.setwarnings(False)
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self.trig_pin, GPIO.OUT, initial=GPIO.LOW)
-            GPIO.setup(self.echo_pin, GPIO.IN)
-            self.backend = "RPi.GPIO"
-            log.info("[✓] Hardware Ultrasonic initialized via RPi.GPIO (TRIG: BCM %d / Pin 16, ECHO: BCM %d / Pin 18)",
-                     self.trig_pin, self.echo_pin)
-            return
-        except Exception:
-            pass
-
-        # 3. Try gpiozero persistent DistanceSensor
-        try:
-            from gpiozero import DistanceSensor
-            self._gz_sensor = DistanceSensor(echo=self.echo_pin, trigger=self.trig_pin, max_distance=4.0)
-            self.backend = "gpiozero"
-            log.info("[✓] Hardware Ultrasonic initialized via gpiozero (TRIG: BCM %d, ECHO: BCM %d)", self.trig_pin, self.echo_pin)
-            return
-        except Exception:
-            pass
-
         self.backend = "dynamic"
         log.info("[i] Hardware Ultrasonic operating with dynamic corridor track telemetry")
 
-    def measure_distance_mm(self) -> Optional[float]:
-        # Method 1: lgpio high-speed microsecond capture
-        if self.backend == "lgpio" and self._lgpio_handle is not None:
-            import lgpio
-            for attempt in range(2):
-                try:
-                    lgpio.gpio_write(self._lgpio_handle, self.trig_pin, 0)
-                    time.sleep(0.0002)
-                    # 15 microsecond trigger pulse
-                    lgpio.gpio_write(self._lgpio_handle, self.trig_pin, 1)
-                    t0 = time.perf_counter()
-                    while time.perf_counter() - t0 < 0.000015:
-                        pass
-                    lgpio.gpio_write(self._lgpio_handle, self.trig_pin, 0)
-
-                    # Wait for echo high
-                    t_timeout = time.perf_counter() + 0.035
-                    while lgpio.gpio_read(self._lgpio_handle, self.echo_pin) == 0:
-                        if time.perf_counter() > t_timeout:
-                            break
-                    else:
-                        t_start = time.perf_counter()
-                        t_end_timeout = t_start + 0.035
-                        while lgpio.gpio_read(self._lgpio_handle, self.echo_pin) == 1:
-                            if time.perf_counter() > t_end_timeout:
-                                break
-                        else:
-                            t_end = time.perf_counter()
-                            dist_cm = ((t_end - t_start) * 34300.0) / 2.0
-                            dist_mm = round(dist_cm * 10.0, 1)
-                            if 15.0 <= dist_mm <= 4000.0:
-                                self.last_valid_distance_mm = dist_mm
-                                self.last_read_timestamp = int(time.time() * 1000)
-                                self.is_hardware_present = True
-                                return dist_mm
-                except Exception:
-                    pass
-
-        # Method 2: RPi.GPIO microsecond capture
-        elif self.backend == "RPi.GPIO":
+    def _read_pair(self, trig: int, echo: int) -> Optional[float]:
+        """Low-level single pulse measurement across specified GPIO pins."""
+        if self.backend == "RPi.GPIO":
             import RPi.GPIO as GPIO
-            for attempt in range(2):
-                try:
-                    GPIO.output(self.trig_pin, GPIO.LOW)
-                    time.sleep(0.0002)
-                    GPIO.output(self.trig_pin, GPIO.HIGH)
-                    t0 = time.perf_counter()
-                    while time.perf_counter() - t0 < 0.000015:
-                        pass
-                    GPIO.output(self.trig_pin, GPIO.LOW)
+            try:
+                GPIO.setup(trig, GPIO.OUT, initial=GPIO.LOW)
+                GPIO.setup(echo, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+                time.sleep(0.002)
 
-                    t_timeout = time.perf_counter() + 0.035
-                    while GPIO.input(self.echo_pin) == 0:
-                        if time.perf_counter() > t_timeout:
-                            break
-                    else:
-                        t_start = time.perf_counter()
-                        t_end_timeout = t_start + 0.035
-                        while GPIO.input(self.echo_pin) == 1:
-                            if time.perf_counter() > t_end_timeout:
-                                break
-                        else:
-                            t_end = time.perf_counter()
-                            dist_cm = ((t_end - t_start) * 34300.0) / 2.0
-                            dist_mm = round(dist_cm * 10.0, 1)
-                            if 15.0 <= dist_mm <= 4000.0:
-                                self.last_valid_distance_mm = dist_mm
-                                self.last_read_timestamp = int(time.time() * 1000)
-                                self.is_hardware_present = True
-                                return dist_mm
-                except Exception:
+                # Send 15us pulse
+                GPIO.output(trig, GPIO.HIGH)
+                t_pulse = time.perf_counter()
+                while time.perf_counter() - t_pulse < 0.000015:
                     pass
+                GPIO.output(trig, GPIO.LOW)
 
-        # Method 3: gpiozero DistanceSensor
+                # Wait for echo rising edge
+                timeout_rise = time.perf_counter() + 0.04
+                while GPIO.input(echo) == 0:
+                    if time.perf_counter() > timeout_rise:
+                        return None
+
+                t_start = time.perf_counter()
+                timeout_fall = t_start + 0.04
+                while GPIO.input(echo) == 1:
+                    if time.perf_counter() > timeout_fall:
+                        return None
+
+                t_end = time.perf_counter()
+                dist_cm = ((t_end - t_start) * 34300.0) / 2.0
+                dist_mm = round(dist_cm * 10.0, 1)
+                if 15.0 <= dist_mm <= 4000.0:
+                    return dist_mm
+            except Exception:
+                pass
+
+        elif self.backend == "lgpio" and self._lgpio_handle is not None:
+            import lgpio
+            try:
+                lgpio.gpio_write(self._lgpio_handle, trig, 0)
+                time.sleep(0.002)
+
+                lgpio.gpio_write(self._lgpio_handle, trig, 1)
+                t_pulse = time.perf_counter()
+                while time.perf_counter() - t_pulse < 0.000015:
+                    pass
+                lgpio.gpio_write(self._lgpio_handle, trig, 0)
+
+                timeout_rise = time.perf_counter() + 0.04
+                while lgpio.gpio_read(self._lgpio_handle, echo) == 0:
+                    if time.perf_counter() > timeout_rise:
+                        return None
+
+                t_start = time.perf_counter()
+                timeout_fall = t_start + 0.04
+                while lgpio.gpio_read(self._lgpio_handle, echo) == 1:
+                    if time.perf_counter() > timeout_fall:
+                        return None
+
+                t_end = time.perf_counter()
+                dist_cm = ((t_end - t_start) * 34300.0) / 2.0
+                dist_mm = round(dist_cm * 10.0, 1)
+                if 15.0 <= dist_mm <= 4000.0:
+                    return dist_mm
+            except Exception:
+                pass
+
         elif self.backend == "gpiozero" and self._gz_sensor:
             try:
                 dist_m = self._gz_sensor.distance
                 dist_mm = round(dist_m * 1000.0, 1)
                 if 15.0 <= dist_mm <= 4000.0:
-                    self.last_valid_distance_mm = dist_mm
-                    self.last_read_timestamp = int(time.time() * 1000)
-                    self.is_hardware_present = True
                     return dist_mm
             except Exception:
                 pass
+
+        return None
+
+    def measure_distance_mm(self) -> Optional[float]:
+        # Try active pin pair first
+        d = self._read_pair(self.trig_pin, self.echo_pin)
+        if d is not None:
+            self.last_valid_distance_mm = d
+            self.last_read_timestamp = int(time.time() * 1000)
+            self.is_hardware_present = True
+            return d
+
+        # Probe alternative pin candidate pairs (handles swapped wires or physical vs BCM confusion)
+        for trig, echo in self.candidate_pairs:
+            if trig == self.trig_pin and echo == self.echo_pin:
+                continue
+            d_alt = self._read_pair(trig, echo)
+            if d_alt is not None:
+                log.info("🚨 [ULTRASONIC AUTO-DETECTED] Relocked sensor to TRIG: BCM %d, ECHO: BCM %d -> %.1f mm",
+                         trig, echo, d_alt)
+                self.trig_pin = trig
+                self.echo_pin = echo
+                self.last_valid_distance_mm = d_alt
+                self.last_read_timestamp = int(time.time() * 1000)
+                self.is_hardware_present = True
+                return d_alt
 
         return None
 
@@ -1115,6 +1204,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 LATEST_TELEMETRY["activeTsrSpeedKmH"] = int(speed)
                 LATEST_TELEMETRY["recommendedTsrKmh"] = speed
                 LATEST_TELEMETRY["timestamp"] = now_ms
+                save_pi_state()
                 log.warning("🚨 [TSR SPEED ORDER EXECUTED] Hardware & corridor speed clamped to %s km/h", speed)
                 self._send_json(200, {
                     "status": "EXECUTED",
@@ -1145,6 +1235,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             try:
                 req_data = json.loads(body) if body.strip() else {}
                 SCHEDULES_REGISTRY.append(req_data)
+                save_pi_state()
                 log.info("[+] Patrol schedule saved on Pi: %s (Time: %s)", req_data.get("section"), req_data.get("time"))
                 self._send_json(200, {"status": "SCHEDULE_SAVED", "count": len(SCHEDULES_REGISTRY)})
             except Exception as e:
@@ -1182,6 +1273,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
 def start_local_wifi_server(host: str = "0.0.0.0", port: int = 8080) -> Optional[http.server.HTTPServer]:
     """Launches local Wi-Fi direct API server in a background thread."""
     try:
+        load_pi_state()
         ensure_sensor_acquisition_started()
         class ReusableServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
             allow_reuse_address = True
