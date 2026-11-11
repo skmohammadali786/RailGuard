@@ -254,7 +254,7 @@ fun DefectsListScreen(
 
                 Button(
                     onClick = onViewObservations,
-                    modifier = Modifier.weight(1.2f).testTag("observations_btn"),
+                    modifier = Modifier.weight(1.35f).testTag("observations_btn"),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0),
@@ -262,11 +262,12 @@ fun DefectsListScreen(
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
                     Text(
                         text = settings.translate("observations"),
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         softWrap = false,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis

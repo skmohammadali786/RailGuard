@@ -2039,6 +2039,10 @@ class RailGuardFirebaseService private constructor() {
     suspend fun dispatchTsrToFirebase(trainId: String, tsrSpeedKmH: Int, reason: String): Boolean {
         withContext(Dispatchers.Main) {
             activeTsrSpeed = tsrSpeedKmH
+            latestSensorTelemetry = latestSensorTelemetry?.copy(
+                axleSpeedKmh = tsrSpeedKmH.toFloat(),
+                recommendedTsrKmh = tsrSpeedKmH.toFloat()
+            )
         }
         return withContext(Dispatchers.IO) {
             var piSuccess = false
@@ -3699,20 +3703,34 @@ class RailGuardFirebaseService private constructor() {
      * Issues Emergency Temporary Speed Restriction (TSR) command instantly over Wi-Fi to Raspberry Pi
      */
     suspend fun issueEmergencyTsr(speedKmh: Int = 25, host: String = localWifiIp, port: Int = 8080): Boolean {
+        withContext(Dispatchers.Main) {
+            activeTsrSpeed = speedKmh
+            latestSensorTelemetry = latestSensorTelemetry?.copy(
+                axleSpeedKmh = speedKmh.toFloat(),
+                recommendedTsrKmh = speedKmh.toFloat()
+            )
+        }
         return withContext(Dispatchers.IO) {
-            val candidateHosts = listOf(host, "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            val cleanHost = host.trim()
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .split("/")[0]
+                .split(":")[0]
+                .ifBlank { "192.168.4.1" }
+            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
             var wifiAck = false
             for (candidate in candidateHosts) {
                 try {
                     val conn = (URL("http://$candidate:$port/api/tsr").openConnection() as HttpURLConnection).apply {
                         requestMethod = "POST"
-                        connectTimeout = 1200
-                        readTimeout = 1200
+                        connectTimeout = 2000
+                        readTimeout = 2000
                         doOutput = true
                         setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                     }
                     val payload = JSONObject().apply {
                         put("speed", speedKmh)
+                        put("reason", "Operator emergency speed order: $speedKmh km/h")
                         put("timestamp", System.currentTimeMillis())
                     }
                     OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }

@@ -74,12 +74,13 @@ fun MapScreen(
     telemetry: RailGuardFirebaseService.LiveSensorTelemetry? = null
 ) {
     val isDark = LocalIsDark.current
-    val currentChainage = telemetry?.chainage?.takeIf { it != "Unknown" && it.isNotBlank() }
+    val effectiveTelemetry = RailGuardFirebaseService.instance.latestSensorTelemetry ?: telemetry
+    val currentChainage = effectiveTelemetry?.chainage?.takeIf { it != "Unknown" && it.isNotBlank() }
         ?: if (defects.isNotEmpty()) defects.first().chainageCoordinate else "--"
-    val axleSpeed = telemetry?.axleSpeedKmh
-    val railTemp = telemetry?.railTempC
-    val ultrasonicDepth = telemetry?.ultrasonicDepthMm
-    val statusText = telemetry?.status ?: "STANDBY"
+    val axleSpeed = effectiveTelemetry?.axleSpeedKmh
+    val railTemp = effectiveTelemetry?.railTempC
+    val ultrasonicDepth = effectiveTelemetry?.ultrasonicDepthMm
+    val statusText = effectiveTelemetry?.status ?: "STANDBY"
     val isAnomaly = statusText.contains("ANOMALY", ignoreCase = true) || (ultrasonicDepth != null && ultrasonicDepth < 55.0f)
 
     LazyColumn(
@@ -142,11 +143,11 @@ fun MapScreen(
                                 modifier = Modifier
                                     .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(if (isAnomaly) Color(0xFFEF4444) else if (telemetry != null) Color(0xFF16A34A) else Color(0xFF64748B))
+                                    .background(if (isAnomaly) Color(0xFFEF4444) else if (effectiveTelemetry != null) Color(0xFF16A34A) else Color(0xFF64748B))
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "CORRIDOR GIS · ${telemetry?.nodeId ?: "STANDBY"}",
+                                text = "CORRIDOR GIS · ${effectiveTelemetry?.nodeId ?: "STANDBY"}",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
@@ -158,17 +159,17 @@ fun MapScreen(
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(
                                     if (isAnomaly) Color(0xFFEF4444).copy(alpha = 0.15f)
-                                    else if (telemetry != null) Color(0xFF16A34A).copy(alpha = 0.15f)
+                                    else if (effectiveTelemetry != null) Color(0xFF16A34A).copy(alpha = 0.15f)
                                     else Color(0xFF64748B).copy(alpha = 0.15f)
                                 )
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = if (isAnomaly) "ANOMALY FLAGGED"
-                                else if (telemetry != null) "PATROL LOCK · NOMINAL"
+                                else if (effectiveTelemetry != null) "PATROL LOCK · NOMINAL"
                                 else "AWAITING TELEMETRY",
                                 fontSize = 10.sp,
-                                color = if (isAnomaly) Color(0xFFDC2626) else if (telemetry != null) Color(0xFF16A34A) else Color(0xFF64748B),
+                                color = if (isAnomaly) Color(0xFFDC2626) else if (effectiveTelemetry != null) Color(0xFF16A34A) else Color(0xFF64748B),
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -261,7 +262,7 @@ fun MapScreen(
                             }
 
                             // Train / Patrol Cart position (rendered only when active Pi telemetry exists)
-                            if (telemetry != null) {
+                            if (effectiveTelemetry != null) {
                                 val trainX = w * 0.5f
                                 val trainY = (upperRailY + lowerRailY) / 2f
 
@@ -309,15 +310,15 @@ fun MapScreen(
                         // Overlay labels
                         Column(modifier = Modifier.align(Alignment.TopStart)) {
                             Text(
-                                text = if (telemetry != null) "Corridor: ${telemetry.chainage}" else "Track Corridor GIS",
+                                text = if (effectiveTelemetry != null) "Corridor: ${effectiveTelemetry.chainage}" else "Track Corridor GIS",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF334155)
                             )
                             Text(
-                                text = if (telemetry != null) "Pi Gateway active · ${telemetry.nodeId}" else "Awaiting Raspberry Pi Wi-Fi Telemetry",
+                                text = if (effectiveTelemetry != null) "Pi Gateway active · ${effectiveTelemetry.nodeId}" else "Awaiting Raspberry Pi Wi-Fi Telemetry",
                                 fontSize = 10.sp,
-                                color = if (telemetry != null) Color(0xFF0284C7) else Color(0xFF64748B),
+                                color = if (effectiveTelemetry != null) Color(0xFF0284C7) else Color(0xFF64748B),
                                 fontWeight = FontWeight.SemiBold
                             )
                         }

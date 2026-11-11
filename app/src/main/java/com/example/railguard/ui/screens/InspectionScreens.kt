@@ -319,7 +319,8 @@ fun LiveInspectionScreen(
     onBack: () -> Unit
 ) {
     val firebaseService = remember { RailGuardFirebaseService.instance }
-    val activeTelemetry = telemetry ?: firebaseService.latestSensorTelemetry
+    val scope = rememberCoroutineScope()
+    val activeTelemetry = firebaseService.latestSensorTelemetry ?: telemetry
     var piBitmap by remember { mutableStateOf(firebaseService.latestPiCameraBitmap) }
 
     LaunchedEffect(Unit) {
@@ -574,7 +575,7 @@ fun LiveInspectionScreen(
             // Bottom controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
                     onClick = onOpenCamera,
@@ -585,20 +586,39 @@ fun LiveInspectionScreen(
                         contentColor = Color(0xFF0F172A)
                     )
                 ) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF0284C7))
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFF0284C7))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text("Trigger Snap", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
 
                 Button(
+                    onClick = {
+                        scope.launch {
+                            firebaseService.triggerPiBuzzer(!firebaseService.isPiBuzzerActive, durationSeconds = 6)
+                        }
+                    },
+                    modifier = Modifier.weight(0.95f),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (firebaseService.isPiBuzzerActive) Color(0xFFDC2626) else Color(0xFFFEF2F2),
+                        contentColor = if (firebaseService.isPiBuzzerActive) Color.White else Color(0xFFDC2626)
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDC2626))
+                ) {
+                    Icon(Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (firebaseService.isPiBuzzerActive) "Silence" else "Buzzer", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
                     onClick = onEndInspection,
-                    modifier = Modifier.weight(1.5f),
+                    modifier = Modifier.weight(1.35f),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
                 ) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Complete Patrol & Export", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Export", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -713,6 +733,7 @@ fun InspectionCalendarScreen(
                     isLoading = false
                 },
                 onError = {
+                    schedules = firebaseService.getCachedSchedules()
                     isLoading = false
                 }
             )
@@ -1004,7 +1025,10 @@ fun InspectionCalendarScreen(
                         schedules = listOf(schedule) + schedules.filter { it.id != schedule.id }
                         firebaseService.addCachedSchedule(schedule)
                         scope.launch {
-                            firebaseService.saveSchedule(schedule)
+                            val ok = firebaseService.saveSchedule(schedule)
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                android.widget.Toast.makeText(context, "Patrol scheduled & saved ✓", android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         }
                         showDialog = false
                     },
@@ -1033,7 +1057,7 @@ fun CameraScreen(
     var isCapturing by remember { mutableStateOf(false) }
     var actionMsg by remember { mutableStateOf<String?>(null) }
     val piBitmap = firebaseService.latestPiCameraBitmap
-    val activeTelemetry = telemetry ?: firebaseService.latestSensorTelemetry
+    val activeTelemetry = firebaseService.latestSensorTelemetry ?: telemetry
     val isWifiOnline = firebaseService.isDirectWifiConnected
 
     // Periodically fetch camera frame & sync telemetry from Raspberry Pi over Wi-Fi

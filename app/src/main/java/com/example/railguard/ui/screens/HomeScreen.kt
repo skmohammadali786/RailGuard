@@ -50,8 +50,9 @@ fun HomeScreen(
     val settings = com.example.railguard.model.LocalAppSettings.current
     val scope = rememberCoroutineScope()
     val fbService = com.example.railguard.data.RailGuardFirebaseService.instance
-    val gatewayOnline = telemetry != null &&
-        (telemetry.timestamp == 0L || System.currentTimeMillis() - telemetry.timestamp < 30_000L)
+    val effectiveTelemetry = fbService.latestSensorTelemetry ?: telemetry
+    val gatewayOnline = effectiveTelemetry != null &&
+        (effectiveTelemetry.timestamp == 0L || System.currentTimeMillis() - effectiveTelemetry.timestamp < 30_000L)
     var showWifiDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -89,7 +90,7 @@ fun HomeScreen(
             val topDefect = defects.firstOrNull()
             val criticalDefect = defects.firstOrNull { it.tone == Tone.CRITICAL }
             val isDataStreaming = gatewayOnline || fbService.isDirectWifiConnected ||
-                (telemetry != null && telemetry.chainage != "Unknown" && telemetry.chainage != "Awaiting Chainage")
+                (effectiveTelemetry != null && effectiveTelemetry.chainage != "Unknown" && effectiveTelemetry.chainage != "Awaiting Chainage")
 
             RailCard(
                 modifier = Modifier.padding(vertical = 4.dp),
@@ -122,7 +123,7 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = topDefect?.section ?: telemetry?.chainage?.takeIf { it != "Unknown" }
+                    text = topDefect?.section ?: effectiveTelemetry?.chainage?.takeIf { it != "Unknown" }
                         ?: "Awaiting corridor telemetry",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
@@ -131,7 +132,7 @@ fun HomeScreen(
                 Text(
                     text = when {
                         topDefect != null -> "Chainage ${topDefect.chainageCoordinate} · Track defect record"
-                        telemetry != null -> "Chainage ${telemetry.chainage} · Gateway packet received"
+                        effectiveTelemetry != null -> "Chainage ${effectiveTelemetry.chainage} · Gateway packet received"
                         else -> "No Raspberry Pi packet received"
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -141,7 +142,7 @@ fun HomeScreen(
                     text = if (topDefect != null && (topDefect.latitude != 0.0 || topDefect.longitude != 0.0)) {
                         "Track Coordinates: ${topDefect.latitude}°N ${topDefect.longitude}°E"
                     } else {
-                        "Track Coordinates: ${telemetry?.chainage ?: "Unknown"}"
+                        "Track Coordinates: ${effectiveTelemetry?.chainage ?: "Unknown"}"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
@@ -149,7 +150,7 @@ fun HomeScreen(
                 )
                 Text(
                     text = if (gatewayOnline) {
-                        "Gateway: ${telemetry?.nodeId} · ${telemetry?.status}"
+                        "Gateway: ${effectiveTelemetry?.nodeId} · ${effectiveTelemetry?.status}"
                     } else {
                         "Gateway: awaiting telemetry stream"
                     },
@@ -268,7 +269,7 @@ fun HomeScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = if (gatewayOnline) {
-                                    "Gateway connected: ${telemetry?.status}"
+                                    "Gateway connected: ${effectiveTelemetry?.status}"
                                 } else {
                                     "No current gateway telemetry"
                                 },
@@ -297,8 +298,8 @@ fun HomeScreen(
         item {
             val scope = rememberCoroutineScope()
             var tsrFeedback by remember { mutableStateOf<String?>(null) }
-            val isStale = telemetry != null && telemetry.timestamp > 0L && (System.currentTimeMillis() - telemetry.timestamp > 30_000L)
-            val isAnySensorActive = fbService.isDirectWifiConnected || gatewayOnline || telemetry != null ||
+            val isStale = effectiveTelemetry != null && effectiveTelemetry.timestamp > 0L && (System.currentTimeMillis() - effectiveTelemetry.timestamp > 30_000L)
+            val isAnySensorActive = fbService.isDirectWifiConnected || gatewayOnline || effectiveTelemetry != null ||
                 (fbService.hardwareHealth?.let { it.cameraOnline || it.ultrasonicOnline || it.vibrationOnline || it.temperatureOnline || it.gpsOnline } == true)
 
             RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -337,15 +338,15 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         MetricTile(
-                            value = telemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "Awaiting sensor",
+                            value = effectiveTelemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "Awaiting sensor",
                             label = settings.translate("ultrasonic_depth"),
-                            tone = if (telemetry != null && (telemetry.hasCrack || telemetry.ultrasonicDepthMm in 10.0..55.0)) Tone.CRITICAL else Tone.HEALTHY,
+                            tone = if (effectiveTelemetry != null && (effectiveTelemetry.hasCrack || effectiveTelemetry.ultrasonicDepthMm in 10.0..55.0)) Tone.CRITICAL else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
-                            value = telemetry?.let { "${it.vibrationG} g" } ?: "Awaiting sensor",
+                            value = effectiveTelemetry?.let { "${it.vibrationG} g" } ?: "Awaiting sensor",
                             label = settings.translate("vibration_shock"),
-                            tone = if (telemetry != null && (telemetry.vibrationG > 0.35 || telemetry.hasCrack)) Tone.CRITICAL else if (telemetry != null && telemetry.vibrationG > 0.15) Tone.WARNING else Tone.HEALTHY,
+                            tone = if (effectiveTelemetry != null && (effectiveTelemetry.vibrationG > 0.35 || effectiveTelemetry.hasCrack)) Tone.CRITICAL else if (effectiveTelemetry != null && effectiveTelemetry.vibrationG > 0.15) Tone.WARNING else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -357,15 +358,15 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         MetricTile(
-                            value = telemetry?.let { "${it.railTempC} °C" } ?: "Awaiting sensor",
+                            value = effectiveTelemetry?.let { "${it.railTempC} °C" } ?: "Awaiting sensor",
                             label = settings.translate("rail_temp"),
-                            tone = if (telemetry != null && telemetry.railTempC > 45.0) Tone.WARNING else Tone.HEALTHY,
+                            tone = if (effectiveTelemetry != null && effectiveTelemetry.railTempC > 45.0) Tone.WARNING else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
-                            value = telemetry?.let { "${it.axleSpeedKmh} km/h" } ?: "Awaiting sensor",
+                            value = effectiveTelemetry?.let { "${it.axleSpeedKmh} km/h" } ?: "Awaiting sensor",
                             label = settings.translate("axle_speed"),
-                            tone = if (telemetry != null && telemetry.axleSpeedKmh > 80.0) Tone.WARNING else Tone.HEALTHY,
+                            tone = if (effectiveTelemetry != null && effectiveTelemetry.axleSpeedKmh > 80.0) Tone.WARNING else Tone.HEALTHY,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -395,11 +396,13 @@ fun HomeScreen(
                                     Button(
                                         onClick = {
                                             scope.launch {
-                                                com.example.railguard.data.RailGuardFirebaseService.instance.dispatchTsrToFirebase(
-                                                    trainId = telemetry?.nodeId ?: "RPI-TRACK-01",
+                                                val fb = com.example.railguard.data.RailGuardFirebaseService.instance
+                                                fb.dispatchTsrToFirebase(
+                                                    trainId = effectiveTelemetry?.nodeId ?: "RPI-TRACK-01",
                                                     tsrSpeedKmH = speed,
                                                     reason = "Operator speed order: $speed km/h"
                                                 )
+                                                fb.issueEmergencyTsr(speedKmh = speed)
                                                 tsrFeedback = "TSR $speed km/h active (Pi Hardware + Cloud Interlock) ✓"
                                             }
                                         },
@@ -416,11 +419,13 @@ fun HomeScreen(
                                     OutlinedButton(
                                         onClick = {
                                             scope.launch {
-                                                com.example.railguard.data.RailGuardFirebaseService.instance.dispatchTsrToFirebase(
-                                                    trainId = telemetry?.nodeId ?: "RPI-TRACK-01",
+                                                val fb = com.example.railguard.data.RailGuardFirebaseService.instance
+                                                fb.dispatchTsrToFirebase(
+                                                    trainId = effectiveTelemetry?.nodeId ?: "RPI-TRACK-01",
                                                     tsrSpeedKmH = speed,
                                                     reason = "Operator speed order: $speed km/h"
                                                 )
+                                                fb.issueEmergencyTsr(speedKmh = speed)
                                                 tsrFeedback = "TSR $speed km/h sent to hardware ✓"
                                             }
                                         },
@@ -538,8 +543,8 @@ fun HomeScreen(
         // Network Pulse
         item {
             val isDirectWifiConnected = com.example.railguard.data.RailGuardFirebaseService.instance.isDirectWifiConnected
-            val liveTrackHealth: Pair<String, Tone> = remember(defects, telemetry, isDirectWifiConnected) {
-                if (!isDirectWifiConnected && defects.isEmpty() && (telemetry == null || (telemetry.vibrationG == 0.0f && telemetry.ultrasonicDepthMm == 0.0f))) {
+            val liveTrackHealth: Pair<String, Tone> = remember(defects, effectiveTelemetry, isDirectWifiConnected) {
+                if (!isDirectWifiConnected && defects.isEmpty() && (effectiveTelemetry == null || (effectiveTelemetry.vibrationG == 0.0f && effectiveTelemetry.ultrasonicDepthMm == 0.0f))) {
                     Pair("Awaiting Scan", Tone.NEUTRAL)
                 } else {
                     var score = 98.4
@@ -550,15 +555,15 @@ fun HomeScreen(
                             else -> score -= 4.0
                         }
                     }
-                    val vib = telemetry?.vibrationG?.toDouble() ?: 0.0
+                    val vib = effectiveTelemetry?.vibrationG?.toDouble() ?: 0.0
                     if (vib > 1.2) {
                         score -= minOf(15.0, (vib - 1.2) * 8.0)
                     }
-                    val ut = telemetry?.ultrasonicDepthMm?.toDouble() ?: 0.0
+                    val ut = effectiveTelemetry?.ultrasonicDepthMm?.toDouble() ?: 0.0
                     if (ut in 1.0..58.0) {
                         score -= minOf(20.0, (58.0 - ut) * 2.0)
                     }
-                    val temp = telemetry?.railTempC?.toDouble() ?: 24.0
+                    val temp = effectiveTelemetry?.railTempC?.toDouble() ?: 24.0
                     if (temp > 45.0 || temp < -5.0) {
                         score -= 5.0
                     }

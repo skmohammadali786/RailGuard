@@ -329,7 +329,7 @@ fun PdfPreviewScreen(
     val colorScheme = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val fbService = remember { RailGuardFirebaseService.instance }
-    val activeTelemetry = telemetry ?: fbService.latestSensorTelemetry
+    val activeTelemetry = fbService.latestSensorTelemetry ?: telemetry
     val activeOracle = fbService.liveAiOracle
     val cachedInspections = remember { fbService.getCachedInspections() }
 

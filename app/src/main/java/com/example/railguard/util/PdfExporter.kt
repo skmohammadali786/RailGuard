@@ -39,8 +39,8 @@ object PdfExporter {
         val pdfDocument = PdfDocument()
 
         val fbService = RailGuardFirebaseService.instance
-        val liveTelem = telemetry ?: fbService.latestSensorTelemetry
-        val liveOracle = aiOracle ?: fbService.liveAiOracle
+        val liveTelem = fbService.latestSensorTelemetry ?: telemetry
+        val liveOracle = fbService.liveAiOracle ?: aiOracle
 
         val liveUtDepth = liveTelem?.ultrasonicDepthMm ?: 68.2f
         val liveVib = liveTelem?.vibrationG ?: 0.035f

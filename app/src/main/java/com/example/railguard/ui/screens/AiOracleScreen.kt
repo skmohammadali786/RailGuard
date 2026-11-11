@@ -72,7 +72,7 @@ fun AiOracleScreen(
     val liveAiOracle = fbService.liveAiOracle
     val isDirectWifiConnected = fbService.isDirectWifiConnected
     val directWifiLatencyMs = fbService.directWifiLatencyMs
-    val activeTelemetry = telemetry ?: fbService.latestSensorTelemetry
+    val activeTelemetry = fbService.latestSensorTelemetry ?: telemetry
     val settings = com.example.railguard.model.LocalAppSettings.current
 
     // Active Neural Model
