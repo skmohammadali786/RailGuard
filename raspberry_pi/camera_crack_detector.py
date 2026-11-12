@@ -61,6 +61,7 @@ LATEST_TELEMETRY: Dict[str, Any] = {
     "longitude": 77.2090,
     "gpsLocked": True
 }
+CURRENT_DEVICE_ID: str = os.getenv("RAILGUARD_DEVICE_ID", "RPI-TRACK-01")
 LATEST_CRACK: Optional[Dict[str, Any]] = None
 LAST_TSR_COMMAND: Optional[Dict[str, Any]] = None
 DEFECTS_REGISTRY: List[Dict[str, Any]] = []
@@ -729,14 +730,20 @@ def sensor_acquisition_worker():
                 flaw_type = "Transverse Ultrasonic Flaw Echo"
                 crack_len = round(abs(68.2 - ut_depth) * 0.8, 1)
 
+            # Anomaly expiration: Keep flagged anomaly active for 15s so operator can review, then return to nominal
             if LATEST_CRACK and LATEST_CRACK.get("hasCrack"):
-                is_anomaly = True
-                flaw_type = (LATEST_CRACK.get("defect") or {}).get("title", "Transverse Railhead Fissure")
-                crack_len = 14.8
+                crack_ts = LATEST_CRACK.get("timestamp", 0)
+                if now_ms - crack_ts < 15000:
+                    is_anomaly = True
+                    flaw_type = (LATEST_CRACK.get("defect") or {}).get("title", "Transverse Railhead Fissure")
+                    crack_len = 14.8
+                    ut_depth = 46.2  # Keep depth consistent with anomaly telemetry during active alert
+                else:
+                    LATEST_CRACK["hasCrack"] = False
 
             # Update global LATEST_TELEMETRY with guaranteed dynamic updates
             LATEST_TELEMETRY = {
-                "nodeId": "RPI-TRACK-01",
+                "nodeId": CURRENT_DEVICE_ID,
                 "ultrasonicDepthMm": ut_depth,
                 "vibrationG": vib_g,
                 "railTempC": rail_temp,
@@ -860,17 +867,49 @@ def trigger_camera_snapshot() -> Dict[str, Any]:
 
 
 def get_hardware_diagnostics() -> Dict[str, Any]:
+    # Dynamic detection of physical hardware
+    is_ut_hw = HARDWARE_ULTRASONIC_SENSOR.is_hardware_present if HARDWARE_ULTRASONIC_SENSOR else False
+    is_temp_hw = (os.path.exists("/sys/bus/w1/devices") and any(d.startswith("28-") for d in os.listdir("/sys/bus/w1/devices"))) if os.path.exists("/sys/bus/w1/devices") else False
+    is_cam_hw = os.path.exists("/dev/video0") or os.path.exists("/dev/video1")
+    
+    cpu_temp = 42.8
+    try:
+        if os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
+            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                cpu_temp = round(float(f.read().strip()) / 1000.0, 1)
+    except Exception:
+        pass
+
     return {
         "status": "OPERATIONAL",
-        "camera": {"status": "ONLINE", "sensor": "Sony IMX708 (Camera Module 3)", "fps": 30, "resolution": "1920x1080"},
-        "ultrasonic": {"status": "ONLINE", "sensor": "Piezo UT Dual 5MHz Transducer", "nominalDepthMm": 68.2},
-        "vibration": {"status": "ONLINE", "sensor": "ADXL345 Tri-axial Accelerometer", "range": "+/-16g"},
-        "temperature": {"status": "ONLINE", "sensor": "PT100 RTD High-Precision Probe"},
+        "camera": {
+            "status": "ONLINE",
+            "sensor": "Sony IMX708 (Camera Module 3)" if is_cam_hw else "Optical Rail Camera (Emulated Feed)",
+            "fps": 30,
+            "resolution": "1920x1080",
+            "physicalHardware": is_cam_hw
+        },
+        "ultrasonic": {
+            "status": "ONLINE",
+            "sensor": "HC-SR04 / Piezo Transducer" if is_ut_hw else "Piezo UT Dual 5MHz Transducer",
+            "nominalDepthMm": 68.2,
+            "physicalHardware": is_ut_hw
+        },
+        "vibration": {
+            "status": "ONLINE",
+            "sensor": "ADXL345 Tri-axial Accelerometer",
+            "range": "+/-16g"
+        },
+        "temperature": {
+            "status": "ONLINE",
+            "sensor": "DS18B20 1-Wire Thermal Probe" if is_temp_hw else "PT100 RTD High-Precision Probe",
+            "physicalHardware": is_temp_hw
+        },
         "encoderGps": {"status": "ONLINE", "gnss": "NEO-M9N RTK-DGPS Locked (1cm precision)"},
         "battery": {"percent": 94, "voltage": 12.4, "chemistry": "LiPo 3S 5200mAh"},
         "system": {
-            "nodeId": "RPI-TRACK-01",
-            "cpuTempC": 42.8,
+            "nodeId": CURRENT_DEVICE_ID,
+            "cpuTempC": cpu_temp,
             "uptimeSeconds": int(time.time() - (START_TIME_MS / 1000)),
             "wifiPort": 8080,
             "latencyEstimateMs": 14
@@ -977,6 +1016,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        global LAST_TSR_COMMAND, LATEST_TELEMETRY, ACTIVE_PATROL_STATUS, SCHEDULES_REGISTRY
         clean_path = self.path.split("?")[0].rstrip("/")
         accept_hdr = self.headers.get("Accept", "")
 
@@ -1084,6 +1124,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                             LATEST_TELEMETRY["axleSpeedKmh"] = s
                             LATEST_TELEMETRY["activeTsrSpeedKmH"] = int(s)
                             LAST_TSR_COMMAND = {"speed": int(s), "timestamp": int(time.time() * 1000)}
+                            save_pi_state()
                         except Exception:
                             pass
             speed_val = (LAST_TSR_COMMAND or {}).get("speed", LATEST_TELEMETRY.get("activeTsrSpeedKmH", 25))
@@ -1554,6 +1595,58 @@ def trigger_crack_detection_pipeline(
     }
 
 
+def firebase_cloud_command_poller(db_url: str, uid: str, device_id: str, id_token: Optional[str] = None):
+    """Background polling thread for Firebase RTDB commands (dual-channel cloud fallback)."""
+    clean_db = db_url.rstrip("/")
+    auth_query = f"?auth={id_token}" if id_token else ""
+    last_buzzer_ts = int(time.time() * 1000)
+    last_tsr_ts = int(time.time() * 1000)
+
+    log.info("[✓] Background Firebase Cloud Command Listener active for user %s (node: %s)", uid, device_id)
+    while True:
+        try:
+            # 1. Check buzzer command from Firebase RTDB
+            bz_url = f"{clean_db}/railguard/users/{uid}/commands/buzzer.json{auth_query}"
+            req = urllib.request.Request(bz_url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                if resp.status == 200:
+                    body = resp.read().decode("utf-8")
+                    if body and body != "null":
+                        cmd = json.loads(body)
+                        ts = int(cmd.get("timestamp", 0))
+                        if ts > last_buzzer_ts:
+                            last_buzzer_ts = ts
+                            state = str(cmd.get("state", "RING")).upper()
+                            dur = float(cmd.get("duration", 8.0))
+                            if state in ("OFF", "SILENCE", "STOP"):
+                                silence_buzzer()
+                            else:
+                                activate_buzzer(duration_seconds=dur, reason="CLOUD_FIREBASE_INSTRUCTION")
+
+            # 2. Check TSR speed restriction command from Firebase RTDB
+            tsr_url = f"{clean_db}/railguard/users/{uid}/trains/{device_id}/tsr.json{auth_query}"
+            req2 = urllib.request.Request(tsr_url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req2, timeout=3.0) as resp2:
+                if resp2.status == 200:
+                    body2 = resp2.read().decode("utf-8")
+                    if body2 and body2 != "null":
+                        cmd2 = json.loads(body2)
+                        ts2 = int(cmd2.get("issuedAt", cmd2.get("timestamp", 0)))
+                        if ts2 > last_tsr_ts:
+                            last_tsr_ts = ts2
+                            speed = float(cmd2.get("activeTsrSpeedKmH", cmd2.get("speed", 25)))
+                            global LAST_TSR_COMMAND
+                            LAST_TSR_COMMAND = {"speed": int(speed), "timestamp": ts2}
+                            LATEST_TELEMETRY["axleSpeedKmh"] = speed
+                            LATEST_TELEMETRY["activeTsrSpeedKmH"] = int(speed)
+                            save_pi_state()
+                            log.warning("🚨 [CLOUD TSR APPLIED] Speed clamped to %s km/h via Firebase RTDB", speed)
+        except Exception:
+            pass
+
+        time.sleep(2.5)
+
+
 def run_continuous_camera_scan(
     db_url: str,
     uid: str,
@@ -1567,11 +1660,20 @@ def run_continuous_camera_scan(
     Simulates continuous camera frame acquisition from track patrol.
     Starts direct local Wi-Fi API server and streams telemetry over Wi-Fi.
     """
+    global CURRENT_DEVICE_ID
+    CURRENT_DEVICE_ID = device_id
     log.info("Starting RailGuard Camera Crack Detector on %s...", device_id)
     log.info("Target Firebase: %s/railguard/users/%s", db_url, uid)
 
     # Start local Wi-Fi server for sub-50ms local direct access
     start_local_wifi_server(host="0.0.0.0", port=wifi_port)
+
+    # Start cloud command listener thread
+    threading.Thread(
+        target=firebase_cloud_command_poller,
+        args=(db_url, uid, device_id, id_token),
+        daemon=True
+    ).start()
 
     step = 0
     global LATEST_TELEMETRY
@@ -1649,6 +1751,10 @@ def main():
     parser.add_argument("--simulate-anomaly-interval", type=int, help="Interval in steps to simulate anomaly (0=disabled)", default=0)
 
     args = parser.parse_args()
+
+    global CURRENT_DEVICE_ID
+    if args.device:
+        CURRENT_DEVICE_ID = args.device
 
     if args.buzzer_pin is not None:
         global BUZZER_PIN

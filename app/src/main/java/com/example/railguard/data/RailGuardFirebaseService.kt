@@ -2916,7 +2916,8 @@ class RailGuardFirebaseService private constructor() {
     fun parseTelemetryJson(json: JSONObject): LiveSensorTelemetry? {
         val telemObj = json.optJSONObject("telemetry") ?: if (
             json.has("ultrasonicDepthMm") || json.has("ut_depth_mm") || json.has("vibrationG") ||
-            json.has("railTempC") || json.has("status") || json.has("chainage") || json.has("axleSpeedKmh")
+            json.has("railTempC") || json.has("chainage") || json.has("axleSpeedKmh") ||
+            json.has("distanceMm") || json.has("flawType")
         ) json else null ?: return null
 
         val statusStr = telemObj.optString("status", "ACTIVE_SYNC")
@@ -2989,11 +2990,21 @@ class RailGuardFirebaseService private constructor() {
                 .split("/")[0]
                 .split(":")[0]
                 .ifBlank { "192.168.4.1" }
-            val candidateHosts = if (cleanHost != "192.168.4.1") listOf(cleanHost, "192.168.4.1") else listOf(cleanHost, "10.0.2.2", "127.0.0.1", "localhost")
+            val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
+                android.os.Build.HARDWARE.contains("goldfish") ||
+                android.os.Build.HARDWARE.contains("ranchu")
+            val candidateHosts = if (cleanHost != "192.168.4.1") {
+                listOf(cleanHost, "192.168.4.1")
+            } else {
+                if (isEmulator) listOf(cleanHost, "10.0.2.2", "127.0.0.1")
+                else listOf(cleanHost, "127.0.0.1")
+            }.distinct()
             val telemEndpoints = listOf("/api/telemetry", "/api/all_data", "/telemetry", "/api/sensors", "/sensors", "/")
 
             for (candidate in candidateHosts) {
+                var hostReachable = true
                 for (path in telemEndpoints) {
+                    if (!hostReachable) break
                     try {
                         val conn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
                             requestMethod = "GET"
@@ -3022,7 +3033,10 @@ class RailGuardFirebaseService private constructor() {
                                 }
                             }
                         }
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        if (e is java.net.SocketTimeoutException || e is java.net.ConnectException || e is java.net.NoRouteToHostException) {
+                            hostReachable = false
+                        }
                     }
                 }
             }
@@ -3244,10 +3258,15 @@ class RailGuardFirebaseService private constructor() {
                 .split(":")[0]
                 .ifBlank { "192.168.4.1" }
 
+            val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
+                android.os.Build.HARDWARE.contains("goldfish") ||
+                android.os.Build.HARDWARE.contains("ranchu")
+
             val candidateHosts = if (cleanHost != "192.168.4.1") {
                 listOf(cleanHost, "192.168.4.1")
             } else {
-                listOf(cleanHost, "10.0.2.2", "127.0.0.1", "localhost")
+                if (isEmulator) listOf(cleanHost, "10.0.2.2", "127.0.0.1")
+                else listOf(cleanHost, "127.0.0.1")
             }.distinct()
 
             val cameraEndpoints = listOf(
@@ -3268,12 +3287,14 @@ class RailGuardFirebaseService private constructor() {
             )
 
             for (candidate in candidateHosts) {
+                var candidateReachable = true
                 for (path in cameraEndpoints) {
+                    if (!candidateReachable) break
                     try {
                         val conn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
                             requestMethod = "GET"
-                            connectTimeout = 1800
-                            readTimeout = 2200
+                            connectTimeout = 1200
+                            readTimeout = 1800
                             setRequestProperty("Connection", "close")
                             setRequestProperty("Accept", "image/jpeg, image/png, image/*, text/html, application/json")
                         }
@@ -3340,7 +3361,10 @@ class RailGuardFirebaseService private constructor() {
                                 }
                             }
                         }
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        if (e is java.net.SocketTimeoutException || e is java.net.ConnectException || e is java.net.NoRouteToHostException) {
+                            candidateReachable = false
+                        }
                     }
                 }
             }
@@ -3567,16 +3591,26 @@ class RailGuardFirebaseService private constructor() {
                 .split("/")[0]
                 .split(":")[0]
                 .ifBlank { "192.168.4.1" }
-            val candidateHosts = if (cleanHost != "192.168.4.1") listOf(cleanHost, "192.168.4.1") else listOf(cleanHost, "10.0.2.2", "127.0.0.1", "localhost")
+            val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
+                android.os.Build.HARDWARE.contains("goldfish") ||
+                android.os.Build.HARDWARE.contains("ranchu")
+            val candidateHosts = if (cleanHost != "192.168.4.1") {
+                listOf(cleanHost, "192.168.4.1")
+            } else {
+                if (isEmulator) listOf(cleanHost, "10.0.2.2", "127.0.0.1")
+                else listOf(cleanHost, "127.0.0.1")
+            }.distinct()
             val endpoints = listOf("/api/all_data", "/api/telemetry", "/telemetry", "/api/sensors", "/sensors", "/api/health", "/")
 
             for (candidate in candidateHosts) {
+                var candidateReachable = true
                 for (path in endpoints) {
+                    if (!candidateReachable) break
                     val startMs = System.currentTimeMillis()
                     try {
                         val conn = (URL("http://$candidate:8080$path").openConnection() as HttpURLConnection).apply {
                             requestMethod = "GET"
-                            connectTimeout = 1500
+                            connectTimeout = 1200
                             readTimeout = 1500
                             setRequestProperty("Connection", "close")
                             setRequestProperty("Accept", "application/json, text/html, */*")
@@ -3801,9 +3835,15 @@ class RailGuardFirebaseService private constructor() {
                                 }
                             }
                         }
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        if (e is java.net.SocketTimeoutException || e is java.net.ConnectException || e is java.net.NoRouteToHostException) {
+                            candidateReachable = false
+                        }
                     }
                 }
+            }
+            withContext(Dispatchers.Main) {
+                isDirectWifiConnected = false
             }
             false
         }

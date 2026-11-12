@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -169,11 +170,14 @@ def apply_calibration(command: Dict[str, Any]) -> None:
 
 
 def apply_buzzer(command: Dict[str, Any]) -> None:
-    """Ring physical buzzer on Raspberry Pi hardware GPIO pin."""
+    """Ring physical buzzer on Raspberry Pi hardware GPIO pin across Bookworm, Bullseye, or any Linux."""
     pin = int(os.getenv("RAILGUARD_BUZZER_PIN", "18"))
     state = str(command.get("state", "RING")).upper()
     duration = float(command.get("duration", 6.0))
     log.warning("🚨 [ALARM] Raspberry Pi Buzzer commanded (%s) on GPIO %d for %.1fs", state, pin, duration)
+    acted = False
+
+    # 1. Try RPi.GPIO
     try:
         import RPi.GPIO as GPIO
         GPIO.setwarnings(False)
@@ -185,9 +189,53 @@ def apply_buzzer(command: Dict[str, Any]) -> None:
             GPIO.output(pin, GPIO.LOW)
         else:
             GPIO.output(pin, GPIO.LOW)
+        acted = True
     except Exception:
+        pass
+
+    # 2. Try lgpio (standard on modern Raspberry Pi OS Bookworm)
+    if not acted:
+        try:
+            import lgpio
+            for chip in (0, 4):
+                try:
+                    h = lgpio.gpiochip_open(chip)
+                    lgpio.gpio_claim_output(h, pin, 0)
+                    if state in ("RING", "ON"):
+                        lgpio.gpio_write(h, pin, 1)
+                        time.sleep(min(3.0, duration))
+                        lgpio.gpio_write(h, pin, 0)
+                    else:
+                        lgpio.gpio_write(h, pin, 0)
+                    lgpio.gpiochip_close(h)
+                    acted = True
+                    break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # 3. Try gpiozero
+    if not acted:
+        try:
+            from gpiozero import OutputDevice
+            bz = OutputDevice(pin)
+            if state in ("RING", "ON"):
+                bz.on()
+                time.sleep(min(3.0, duration))
+                bz.off()
+            else:
+                bz.off()
+            acted = True
+        except Exception:
+            pass
+
+    # 4. Terminal acoustic bell fallback
+    try:
         sys.stdout.write("\a\a\a")
         sys.stdout.flush()
+    except Exception:
+        pass
 
 
 @dataclass
