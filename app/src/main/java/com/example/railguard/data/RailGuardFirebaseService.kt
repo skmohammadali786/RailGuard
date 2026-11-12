@@ -2999,6 +2999,8 @@ class RailGuardFirebaseService private constructor() {
                             requestMethod = "GET"
                             connectTimeout = 1200
                             readTimeout = 1200
+                            setRequestProperty("Connection", "close")
+                            setRequestProperty("Accept", "application/json, */*")
                         }
                         if (conn.responseCode in 200..299) {
                             val body = conn.inputStream.bufferedReader().use { it.readText() }
@@ -3007,8 +3009,10 @@ class RailGuardFirebaseService private constructor() {
                                     val json = JSONObject(body)
                                     val telemetry = parseTelemetryJson(json)
                                     if (telemetry != null) {
+                                        saveLocalTelemetry(telemetry)
                                         withContext(Dispatchers.Main) {
                                             latestSensorTelemetry = telemetry
+                                            localWifiIp = candidate
                                             isConnectedToFirebase = true
                                             isDirectWifiConnected = true
                                         }
@@ -3052,6 +3056,7 @@ class RailGuardFirebaseService private constructor() {
                     requestMethod = "GET"
                     connectTimeout = 2500
                     readTimeout = 2500
+                    setRequestProperty("Connection", "close")
                 }
                 val code = conn.responseCode
                 val latency = System.currentTimeMillis() - startMs
@@ -3269,9 +3274,58 @@ class RailGuardFirebaseService private constructor() {
                             requestMethod = "GET"
                             connectTimeout = 1800
                             readTimeout = 2200
+                            setRequestProperty("Connection", "close")
                             setRequestProperty("Accept", "image/jpeg, image/png, image/*, text/html, application/json")
                         }
                         if (conn.responseCode in 200..299) {
+                            // Extract synchronized live telemetry headers from camera response
+                            val telemHdr = conn.getHeaderField("X-RailGuard-Telemetry")
+                            val utHdr = conn.getHeaderField("X-RailGuard-UT-Depth")
+                            val vibHdr = conn.getHeaderField("X-RailGuard-Vibration")
+                            val tempHdr = conn.getHeaderField("X-RailGuard-Temp")
+                            val speedHdr = conn.getHeaderField("X-RailGuard-Speed")
+                            val chHdr = conn.getHeaderField("X-RailGuard-Chainage")
+                            val buzzerHdr = conn.getHeaderField("X-RailGuard-Buzzer")
+
+                            var syncdTelem: LiveSensorTelemetry? = null
+                            if (!telemHdr.isNullOrBlank()) {
+                                try {
+                                    val decoded = java.net.URLDecoder.decode(telemHdr, "UTF-8")
+                                    val jsonObj = JSONObject(decoded)
+                                    syncdTelem = parseTelemetryJson(jsonObj)
+                                } catch (_: Exception) {}
+                            }
+                            if (syncdTelem == null && (utHdr != null || tempHdr != null)) {
+                                try {
+                                    val ch = if (chHdr != null) java.net.URLDecoder.decode(chHdr, "UTF-8") else "KM 14+320"
+                                    syncdTelem = LiveSensorTelemetry(
+                                        nodeId = "RPI-TRACK-01",
+                                        ultrasonicDepthMm = utHdr?.toFloatOrNull() ?: 68.2f,
+                                        vibrationG = vibHdr?.toFloatOrNull() ?: 0.035f,
+                                        railTempC = tempHdr?.toFloatOrNull() ?: 31.5f,
+                                        axleSpeedKmh = speedHdr?.toFloatOrNull() ?: 45.0f,
+                                        chainage = ch,
+                                        hardware = "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
+                                        status = "ALL_SENSORS_ONLINE",
+                                        timestamp = System.currentTimeMillis()
+                                    )
+                                } catch (_: Exception) {}
+                            }
+
+                            if (syncdTelem != null) {
+                                saveLocalTelemetry(syncdTelem)
+                                withContext(Dispatchers.Main) {
+                                    latestSensorTelemetry = syncdTelem
+                                    localWifiIp = candidate
+                                    isDirectWifiConnected = true
+                                    isConnectedToFirebase = true
+                                    if (buzzerHdr != null) {
+                                        isPiBuzzerActive = buzzerHdr.equals("RINGING", ignoreCase = true)
+                                    }
+                                }
+                                autoProcessDetectedCrack(syncdTelem)
+                            }
+
                             val bytes = conn.inputStream.use { it.readBytes() }
                             if (bytes.isNotEmpty()) {
                                 val bitmap = decodeBitmapFromPayload(bytes, candidate, port)
@@ -3280,6 +3334,7 @@ class RailGuardFirebaseService private constructor() {
                                         latestPiCameraBitmap = bitmap
                                         latestPiCameraTimestamp = System.currentTimeMillis()
                                         isDirectWifiConnected = true
+                                        localWifiIp = candidate
                                     }
                                     return@withContext bitmap
                                 }
@@ -3329,6 +3384,7 @@ class RailGuardFirebaseService private constructor() {
                             connectTimeout = 2500
                             readTimeout = 2500
                             doOutput = true
+                            setRequestProperty("Connection", "close")
                         }
                         conn.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }
                         if (conn.responseCode in 200..299) {
@@ -3342,6 +3398,7 @@ class RailGuardFirebaseService private constructor() {
                                 requestMethod = "GET"
                                 connectTimeout = 2000
                                 readTimeout = 2000
+                                setRequestProperty("Connection", "close")
                             }
                             if (getConn.responseCode in 200..299) {
                                 fetchPiCameraFrame(candidate, port)
@@ -3440,6 +3497,7 @@ class RailGuardFirebaseService private constructor() {
                         connectTimeout = 2500
                         readTimeout = 2500
                         doOutput = true
+                        setRequestProperty("Connection", "close")
                         setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                     }
                     conn.outputStream.use { os ->
@@ -3459,6 +3517,7 @@ class RailGuardFirebaseService private constructor() {
                         requestMethod = "GET"
                         connectTimeout = 2000
                         readTimeout = 2000
+                        setRequestProperty("Connection", "close")
                     }
                     if (getConn.responseCode in 200..299) {
                         wifiAck = true
@@ -3519,6 +3578,7 @@ class RailGuardFirebaseService private constructor() {
                             requestMethod = "GET"
                             connectTimeout = 1500
                             readTimeout = 1500
+                            setRequestProperty("Connection", "close")
                             setRequestProperty("Accept", "application/json, text/html, */*")
                         }
                         if (conn.responseCode in 200..299) {
@@ -3537,6 +3597,7 @@ class RailGuardFirebaseService private constructor() {
                                         saveLocalTelemetry(telem)
                                         withContext(Dispatchers.Main) {
                                             latestSensorTelemetry = telem
+                                            localWifiIp = candidate
                                             isConnectedToFirebase = true
                                             isDirectWifiConnected = true
                                             directWifiLatencyMs = roundTripMs
@@ -3797,6 +3858,7 @@ class RailGuardFirebaseService private constructor() {
                         connectTimeout = 2000
                         readTimeout = 2000
                         doOutput = true
+                        setRequestProperty("Connection", "close")
                         setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                     }
                     val payload = JSONObject().apply {
