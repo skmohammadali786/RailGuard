@@ -1,0 +1,15 @@
+# RailGuard real computer-vision dependencies (Raspberry Pi).
+#
+# Install with:
+#   pip3 install -r requirements-ai.txt
+#
+# On Raspberry Pi OS Bookworm use a virtual environment:
+#   python3 -m venv ~/railguard-venv
+#   ~/railguard-venv/bin/pip install -r requirements-ai.txt
+#
+# Without this file the service still runs, but /api/capabilities reports
+# "vision.available = false" and no crack detection is attempted. It never
+# pretends to detect a crack when OpenCV is missing.
+
+opencv-python-headless>=4.8,<5
+numpy>=1.24,<3

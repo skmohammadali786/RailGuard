@@ -856,15 +856,14 @@ fun GrowthAnalysisScreen(
     // Compute live Paris law parameters from live telemetry or active defect
     val crackLenMm: Double = when {
         telemetry != null && telemetry.hasCrack && telemetry.crackLengthMm > 0f -> telemetry.crackLengthMm.toDouble()
-        defect != null -> defect.estimatedLength.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 12.0
-        telemetry != null && telemetry.hasCrack -> 14.8
+        defect != null -> defect.estimatedLength.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 0.0
         else -> 0.0
     }
 
     val deltaK: Double = when {
         liveOracle != null && liveOracle.parisDeltaK > 0f -> liveOracle.parisDeltaK.toDouble()
         crackLenMm > 0.0 -> Math.round(180.0 * Math.sqrt(Math.PI * (crackLenMm / 2000.0)) * 1.12 * 10.0) / 10.0
-        else -> 4.2
+        else -> 0.0
     }
 
     val parisGrowthRate: String = when {

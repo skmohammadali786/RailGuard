@@ -9,6 +9,8 @@ import os
 import sys
 import time
 import unittest
+import urllib.error
+import urllib.request
 from unittest.mock import MagicMock
 
 # Mock firebase_admin and serial if not installed in the local test runner
@@ -102,8 +104,12 @@ class TestCameraCrackDetector(unittest.TestCase):
 
         telem = ccd.build_anomaly_telemetry("KM 14+320")
         self.assertEqual(telem["status"], "ANOMALY_FLAGGED")
-        self.assertAlmostEqual(telem["ultrasonicDepthMm"], 46.2)
+        # The old test asserted a fake 46.2 mm "crack depth". Real telemetry is
+        # preserved now; ultrasonic distance is not a crack measurement.
+        self.assertIn("ultrasonicDepthMm", telem)
+        self.assertTrue(telem["hasCrack"])
         self.assertIn("x:", telem["crackBoundingBox"])
+        self.assertIn("crackExpiresAt", telem)
 
     def test_local_wifi_server_endpoints(self):
         import camera_crack_detector as ccd
@@ -139,9 +145,12 @@ class TestCameraCrackDetector(unittest.TestCase):
         with urllib.request.urlopen("http://127.0.0.1:18080/api/hardware", timeout=2) as res:
             self.assertEqual(res.status, 200)
             data = json.loads(res.read().decode())
-            self.assertEqual(data["status"], "OPERATIONAL")
-            self.assertEqual(data["camera"]["status"], "ONLINE")
-            self.assertEqual(data["ultrasonic"]["status"], "ONLINE")
+            self.assertIn(data["status"], ("OPERATIONAL", "LIMITED_SIMULATION"))
+            # Diagnostics must reflect reality, not hardcoded ONLINE values.
+            self.assertIn(data["camera"]["status"], ("ONLINE", "NOT_INSTALLED"))
+            self.assertIn(data["ultrasonic"]["status"], ("ONLINE", "NOT_INSTALLED"))
+            self.assertIn("vision", data)
+            self.assertFalse(data["battery"]["present"])
 
         # 5. TSR emergency slow order POST
         req = urllib.request.Request(
@@ -154,6 +163,36 @@ class TestCameraCrackDetector(unittest.TestCase):
             data = json.loads(res.read().decode())
             self.assertEqual(data["status"], "EXECUTED")
             self.assertEqual(data["activeTsrSpeedKmH"], 25)
+
+        # 5b. Regression: plain GET /api/tsr used to raise UnboundLocalError.
+        with urllib.request.urlopen("http://127.0.0.1:18080/api/tsr", timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["activeTsrSpeedKmH"], 25)
+            self.assertTrue(data["speedRestrictionActive"])
+
+        # 5c. Invalid speed must be rejected, not crash.
+        bad = urllib.request.Request(
+            "http://127.0.0.1:18080/api/tsr?speed=999",
+            headers={"Accept": "application/json"},
+        )
+        try:
+            urllib.request.urlopen(bad, timeout=2)
+            self.fail("invalid TSR speed should return HTTP 400")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+
+        # 5d. Operator can acknowledge/clear a crack latch.
+        clear_req = urllib.request.Request(
+            "http://127.0.0.1:18080/api/crack/clear",
+            data=json.dumps({"reason": "TEST_ACK"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(clear_req, timeout=2) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode())
+            self.assertEqual(data["status"], "CLEARED")
+            self.assertFalse(data["hasCrack"])
 
         # 6. Buzzer Ring POST & Status GET
         req_buzzer = urllib.request.Request(
@@ -210,6 +249,85 @@ class TestCameraCrackDetector(unittest.TestCase):
 
         if server:
             server.shutdown()
+
+    def test_local_api_key_enforcement(self):
+        import camera_crack_detector as ccd
+        server = ccd.start_local_wifi_server(host="127.0.0.1", port=18083)
+        time.sleep(0.1)
+        old_key = ccd.LOCAL_API_KEY
+        ccd.LOCAL_API_KEY = "unit-test-secret"
+        try:
+            try:
+                urllib.request.urlopen("http://127.0.0.1:18083/api/telemetry", timeout=2)
+                self.fail("request without API key should be rejected")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            req = urllib.request.Request(
+                "http://127.0.0.1:18083/api/telemetry",
+                headers={"X-API-Key": "unit-test-secret"},
+            )
+            with urllib.request.urlopen(req, timeout=2) as res:
+                self.assertEqual(res.status, 200)
+
+            # Health stays open for monitoring.
+            with urllib.request.urlopen("http://127.0.0.1:18083/api/health", timeout=2) as res:
+                self.assertEqual(res.status, 200)
+        finally:
+            ccd.LOCAL_API_KEY = old_key
+            if server:
+                server.shutdown()
+
+    def test_ultrasonic_distance_is_not_a_crack(self):
+        import camera_crack_detector as ccd
+        # A "weird" distance must never set hasCrack by itself.
+        ccd.LATEST_CRACK = None
+        ccd._UT_HISTORY[:] = [68.2] * 10
+        ccd._UT_DEVIATION_COUNT = 0
+        self.assertFalse(ccd._crack_is_active())
+        # A crack latch expires automatically.
+        ccd.LATEST_CRACK = {"hasCrack": True, "timestamp": ccd.now_ms() - (ccd.CRACK_ACTIVE_SECONDS + 1) * 1000}
+        self.assertFalse(ccd._crack_is_active())
+        ccd.LATEST_CRACK = None
+
+    def test_crack_pipeline_runs_without_shadowing_error(self):
+        """Regression: a local variable named now_ms shadowed the now_ms() helper
+        and made the crack pipeline / sensor worker raise UnboundLocalError."""
+        import camera_crack_detector as ccd
+
+        old_crack = ccd.LATEST_CRACK
+        old_telem = ccd.LATEST_TELEMETRY
+        old_pipeline_ms = ccd.LAST_CRACK_PIPELINE_MS
+        try:
+            ccd.LATEST_CRACK = None
+            ccd.LAST_CRACK_PIPELINE_MS = 0
+            ccd.trigger_crack_detection_pipeline(
+                db_url="https://example.invalid",
+                uid="test-user",
+                chainage="KM 14+320",
+                device_id="TEST-PI-01",
+                confidence=88,
+                length_mm=12.5,
+                force=True,
+            )
+            self.assertTrue(ccd._crack_is_active())
+            self.assertEqual(ccd.LATEST_TELEMETRY.get("flawType"), "Surface Fissure (optical)")
+            # The cooldown must suppress a second automatic pipeline.
+            result = ccd.trigger_crack_detection_pipeline(
+                db_url="https://example.invalid",
+                uid="test-user",
+                chainage="KM 14+321",
+                device_id="TEST-PI-01",
+                confidence=88,
+                length_mm=12.5,
+                force=False,
+            )
+            self.assertFalse(result.get("success", False))
+            self.assertEqual(result.get("reason"), "cooldown")
+        finally:
+            ccd.LATEST_CRACK = old_crack
+            ccd.LATEST_TELEMETRY = old_telem
+            ccd.LAST_CRACK_PIPELINE_MS = old_pipeline_ms
 
 
 if __name__ == "__main__":

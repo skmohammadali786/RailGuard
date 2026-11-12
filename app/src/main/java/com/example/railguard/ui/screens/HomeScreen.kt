@@ -298,6 +298,7 @@ fun HomeScreen(
         item {
             val scope = rememberCoroutineScope()
             var tsrFeedback by remember { mutableStateOf<String?>(null) }
+            var tsrFeedbackOk by remember { mutableStateOf(true) }
             val isStale = effectiveTelemetry != null && effectiveTelemetry.timestamp > 0L && (System.currentTimeMillis() - effectiveTelemetry.timestamp > 30_000L)
             val isAnySensorActive = fbService.isDirectWifiConnected || gatewayOnline || effectiveTelemetry != null ||
                 (fbService.hardwareHealth?.let { it.cameraOnline || it.ultrasonicOnline || it.vibrationOnline || it.temperatureOnline || it.gpsOnline } == true)
@@ -383,10 +384,14 @@ fun HomeScreen(
                         Column {
                             Text(settings.translate("tsr_speed_order"), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurfaceVariant)
                             Text(
-                                text = "${settings.translate("active_limit")}: ${activeTsr ?: 25} km/h",
+                                text = "${settings.translate("active_limit")}: ${activeTsr?.let { "$it km/h" } ?: "Not set"}",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if ((activeTsr ?: 25) <= 25) Color(0xFFDC2626) else Color(0xFF0284C7)
+                                color = when {
+                                    activeTsr == null -> Color(0xFF64748B)
+                                    activeTsr <= 25 -> Color(0xFFDC2626)
+                                    else -> Color(0xFF0284C7)
+                                }
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -397,13 +402,13 @@ fun HomeScreen(
                                         onClick = {
                                             scope.launch {
                                                 val fb = com.example.railguard.data.RailGuardFirebaseService.instance
-                                                fb.dispatchTsrToFirebase(
+                                                val ok = fb.dispatchTsrToFirebase(
                                                     trainId = effectiveTelemetry?.nodeId ?: "RPI-TRACK-01",
                                                     tsrSpeedKmH = speed,
                                                     reason = "Operator speed order: $speed km/h"
                                                 )
-                                                fb.issueEmergencyTsr(speedKmh = speed)
-                                                tsrFeedback = "TSR $speed km/h active (Pi Hardware + Cloud Interlock) ✓"
+                                                tsrFeedbackOk = ok
+                                                tsrFeedback = fb.lastTsrMessage ?: if (ok) "TSR $speed km/h applied" else "TSR failed"
                                             }
                                         },
                                         shape = RoundedCornerShape(6.dp),
@@ -420,13 +425,13 @@ fun HomeScreen(
                                         onClick = {
                                             scope.launch {
                                                 val fb = com.example.railguard.data.RailGuardFirebaseService.instance
-                                                fb.dispatchTsrToFirebase(
+                                                val ok = fb.dispatchTsrToFirebase(
                                                     trainId = effectiveTelemetry?.nodeId ?: "RPI-TRACK-01",
                                                     tsrSpeedKmH = speed,
                                                     reason = "Operator speed order: $speed km/h"
                                                 )
-                                                fb.issueEmergencyTsr(speedKmh = speed)
-                                                tsrFeedback = "TSR $speed km/h sent to hardware ✓"
+                                                tsrFeedbackOk = ok
+                                                tsrFeedback = fb.lastTsrMessage ?: if (ok) "TSR $speed km/h applied" else "TSR failed"
                                             }
                                         },
                                         shape = RoundedCornerShape(6.dp),
@@ -445,7 +450,12 @@ fun HomeScreen(
 
                     if (tsrFeedback != null) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text(tsrFeedback ?: "", fontSize = 11.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                        Text(
+                            tsrFeedback ?: "",
+                            fontSize = 11.sp,
+                            color = if (tsrFeedbackOk) Color(0xFF16A34A) else Color(0xFFDC2626),
+                            fontWeight = FontWeight.Bold
+                        )
                     }
 
                     val fbService = com.example.railguard.data.RailGuardFirebaseService.instance
@@ -459,19 +469,35 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Camera: ${hw.cameraFps} FPS · UT: 5MHz · Battery: ${hw.batteryPercent}%",
+                                text = buildString {
+                                    append("Camera: ")
+                                    append(if (hw.cameraOnline) "${hw.cameraFps} FPS" else "not installed")
+                                    append(" · UT: ")
+                                    append(if (hw.ultrasonicOnline) "online" else "not installed")
+                                    append(" · Battery: ")
+                                    append(hw.batteryPercent?.let { "$it%" } ?: "not monitored")
+                                },
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF0284C7)
                             )
                             Text(
-                                text = "Pi Node: RPI-TRACK-01",
+                                text = "CPU: ${hw.cpuTempC?.let { "%.1f°C".format(it) } ?: "n/a"}",
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
                                 color = Color(0xFF64748B)
                             )
                         }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Status: ${hw.status} · " +
+                                "Temp probe: ${if (hw.temperatureOnline) "online" else "not installed"} · " +
+                                "GNSS: ${if (hw.gpsOnline) "locked" else "unavailable"}",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFF64748B)
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))

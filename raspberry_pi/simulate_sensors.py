@@ -16,11 +16,23 @@ Usage:
 import argparse
 import json
 import math
+import os
 import random
 import sys
 import time
 import urllib.request
 import urllib.error
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from firebase_auth import FirebaseTokenManager  # noqa: E402
+
+_TOKEN_MANAGER = None
+
+
+def _token():
+    if _TOKEN_MANAGER is not None:
+        return _TOKEN_MANAGER.get_token()
+    return None
 
 
 def generate_packet(step: int, device_id: str = "RPI-TRACK-01") -> dict:
@@ -56,7 +68,8 @@ def generate_packet(step: int, device_id: str = "RPI-TRACK-01") -> dict:
 
 def publish_rest(db_url: str, uid: str, packet: dict, id_token: str = None) -> bool:
     clean_db = db_url.rstrip("/")
-    auth_query = f"?auth={id_token}" if id_token else ""
+    token = _token() or id_token
+    auth_query = f"?auth={token}" if token else ""
     endpoint = f"{clean_db}/railguard/users/{uid}/live_sensors/telemetry.json{auth_query}"
     data = json.dumps(packet).encode("utf-8")
 
@@ -78,7 +91,9 @@ def main():
     parser = argparse.ArgumentParser(description="RailGuard Sensor Telemetry Simulator")
     parser.add_argument("--uid", help="Firebase User UID", default="test-user")
     parser.add_argument("--db", help="Firebase Database URL", default="https://railguard-72a70-default-rtdb.asia-southeast1.firebasedatabase.app")
-    parser.add_argument("--auth", help="Firebase Auth ID Token (optional)", default=None)
+    parser.add_argument("--auth", help="Firebase Auth ID Token (quick test, expires ~1h)", default=None)
+    parser.add_argument("--refresh-token", help="Firebase refresh token (auto-renew)", default=None)
+    parser.add_argument("--firebase-api-key", help="Firebase Web API key (with refresh token)", default=None)
     parser.add_argument("--device", help="Device Node ID", default="RPI-TRACK-01")
     parser.add_argument("--interval", type=float, help="Seconds between packets", default=2.0)
     parser.add_argument("--count", type=int, help="Number of packets (0 for infinite)", default=5)
@@ -86,9 +101,27 @@ def main():
 
     args = parser.parse_args()
 
+    global _TOKEN_MANAGER
+    refresh = args.refresh_token or os.getenv("RAILGUARD_REFRESH_TOKEN")
+    api_key = args.firebase_api_key or os.getenv("RAILGUARD_FIREBASE_API_KEY")
+    id_token = args.auth or os.getenv("RAILGUARD_ID_TOKEN")
+    if refresh or api_key or id_token:
+        _TOKEN_MANAGER = FirebaseTokenManager(id_token=id_token, refresh_token=refresh, api_key=api_key)
+        if _TOKEN_MANAGER.can_refresh():
+            _TOKEN_MANAGER.start_refresh_loop()
+            _TOKEN_MANAGER.refresh()
+
+    if not args.print_only and not (_TOKEN_MANAGER and _TOKEN_MANAGER.has_token()):
+        print("[!] No Firebase credentials supplied.")
+        print("    Cloud writes require authentication (otherwise the RTDB returns HTTP 401).")
+        print("    Use --refresh-token + --firebase-api-key, --auth <ID_TOKEN>,")
+        print("    or --print-only for a local test.")
+        raise SystemExit(2)
+
     print(f"[*] Starting RailGuard Sensor Simulator (Device: {args.device})")
     if not args.print_only:
         print(f"[*] Target Endpoint: {args.db}/railguard/users/{args.uid}/live_sensors/telemetry")
+        print(f"[*] Cloud auth: {'auto-refresh' if _TOKEN_MANAGER and _TOKEN_MANAGER.can_refresh() else 'ID token only'}")
 
     step = 0
     try:
@@ -110,7 +143,8 @@ def main():
                     now_str = time.strftime("%H:%M · %d %b")
                     defect_id = f"DEF-SIM-{now_ms % 100000}"
                     clean_db = args.db.rstrip("/")
-                    auth_q = f"?auth={args.auth}" if args.auth else ""
+                    token = _token()
+                    auth_q = f"?auth={token}" if token else ""
 
                     defect_body = {
                         "id": defect_id,

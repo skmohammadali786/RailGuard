@@ -535,7 +535,8 @@ fun LiveInspectionScreen(
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    text = "SIZE: ${activeTelemetry?.crackLengthMm ?: 14.8f}mm · DEPTH: ${activeTelemetry?.ultrasonicDepthMm ?: 46.2f}mm",
+                                    text = "SIZE: " + (activeTelemetry?.crackLengthMm?.takeIf { it > 0f }?.let { "${it}mm" } ?: "not calibrated") +
+                                        " · CLEARANCE: " + (activeTelemetry?.ultrasonicDepthMm?.takeIf { it > 0f }?.let { "${it}mm" } ?: "not reported"),
                                     color = Color(0xFF991B1B),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 9.sp,

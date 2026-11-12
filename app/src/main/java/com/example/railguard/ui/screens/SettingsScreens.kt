@@ -274,6 +274,8 @@ fun AppSettingsScreen(
 
     val firebaseService = RailGuardFirebaseService.instance
     var rpiIp by remember { mutableStateOf(firebaseService.localWifiIp) }
+    var rpiApiKey by remember { mutableStateOf(firebaseService.localWifiApiKey) }
+    var showApiKey by remember { mutableStateOf(false) }
     var pingResultMsg by remember { mutableStateOf<String?>(null) }
     var isPinging by remember { mutableStateOf(false) }
 
@@ -316,6 +318,33 @@ fun AppSettingsScreen(
                     placeholder = { Text("192.168.4.1") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = rpiApiKey,
+                    onValueChange = {
+                        rpiApiKey = it
+                        firebaseService.updateLocalWifiApiKey(it)
+                    },
+                    label = { Text("Pi API Key (optional)") },
+                    placeholder = { Text("Leave empty if the Pi has no --local-api-key") },
+                    singleLine = true,
+                    visualTransformation = if (showApiKey) androidx.compose.ui.text.input.VisualTransformation.None
+                        else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    trailingIcon = {
+                        TextButton(onClick = { showApiKey = !showApiKey }) {
+                            Text(if (showApiKey) "Hide" else "Show", fontSize = 10.sp)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Must match RAILGUARD_API_KEY / --local-api-key on the Pi. Sent as X-API-Key.",
+                    fontSize = 9.sp,
+                    color = Color(0xFF64748B)
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -382,11 +411,22 @@ fun AppSettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Camera: ${hw.cameraSensor} (${hw.cameraFps} FPS)", fontSize = 11.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.SemiBold)
-                        Text("Battery: ${hw.batteryPercent}% (${hw.batteryVoltage}V)", fontSize = 11.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.Bold)
+                        Text(
+                            "Camera: " + (if (hw.cameraOnline) "${hw.cameraSensor} (${hw.cameraFps} FPS)" else "not installed"),
+                            fontSize = 11.sp, color = if (hw.cameraOnline) Color(0xFF16A34A) else Color(0xFFDC2626), fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Battery: " + (hw.batteryPercent?.let { "$it% (${hw.batteryVoltage ?: 0f}V)" } ?: "not monitored"),
+                            fontSize = 11.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.Bold
+                        )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Sensors: ${hw.ultrasonicSensor} | ${hw.vibrationSensor} | ${hw.temperatureSensor}", fontSize = 10.sp, color = Color(0xFF475569))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "CPU: ${hw.cpuTempC?.let { "%.1f°C".format(it) } ?: "not reported"} · GNSS: ${if (hw.gpsOnline) "locked" else "unavailable"} · ${hw.status}",
+                        fontSize = 10.sp, color = Color(0xFF475569)
+                    )
                 }
             }
         }

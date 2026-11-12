@@ -42,23 +42,30 @@ object PdfExporter {
         val liveTelem = fbService.latestSensorTelemetry ?: telemetry
         val liveOracle = fbService.liveAiOracle ?: aiOracle
 
-        val liveUtDepth = liveTelem?.ultrasonicDepthMm ?: 68.2f
-        val liveVib = liveTelem?.vibrationG ?: 0.035f
-        val liveTemp = liveTelem?.railTempC ?: 31.5f
-        val liveSpeed = liveTelem?.axleSpeedKmh ?: 45.0f
-        val liveChainage = liveTelem?.chainage?.ifBlank { "KM 14+250" } ?: "KM 14+250"
-        val liveLat = liveTelem?.latitude ?: 51.5074
-        val liveLon = liveTelem?.longitude ?: -0.1278
+        // Values are only printed when the app actually received them.
+        val liveUtDepth = liveTelem?.ultrasonicDepthMm ?: 0f
+        val liveVib = liveTelem?.vibrationG ?: 0f
+        val liveTemp = liveTelem?.railTempC ?: 0f
+        val liveSpeed = liveTelem?.axleSpeedKmh ?: 0f
+        val liveChainage = liveTelem?.chainage?.ifBlank { "Unknown" } ?: "Unknown"
+        val liveLat = liveTelem?.latitude ?: 0.0
+        val liveLon = liveTelem?.longitude ?: 0.0
+        val hasGps = liveTelem != null && (liveLat != 0.0 || liveLon != 0.0)
+        val hwStatus = fbService.hardwareHealth
+        val hasUtSensor = hwStatus?.ultrasonicOnline == true
+        val hasVibSensor = hwStatus?.vibrationOnline == true
+        val hasTempSensor = hwStatus?.temperatureOnline == true
+        val utText = if (liveUtDepth > 0f) "%.1f mm".format(liveUtDepth) else "not reported"
         val hasFlaw = liveTelem?.hasCrack == true || defects.any { it.tone == Tone.CRITICAL }
         val liveFlawType = liveTelem?.flawType?.ifBlank { "Transverse Fissure" } ?: "Transverse Fissure"
-        val liveDeltaK = liveOracle?.parisDeltaK ?: 4.2f
-        val liveGrowthRate = liveOracle?.parisGrowthRate ?: "0.02 um/k-cycle"
-        val liveNadal = liveOracle?.nadalRatio ?: 0.35f
-        val liveDerailRisk = liveOracle?.derailmentRisk ?: "SAFE"
-        val liveThermalStress = liveOracle?.thermalStressMpa ?: 10.8f
-        val liveCycles = liveOracle?.fatigueCyclesRemaining ?: 850000
+        val liveDeltaK = liveOracle?.parisDeltaK
+        val liveGrowthRate = liveOracle?.parisGrowthRate ?: "not available"
+        val liveNadal = liveOracle?.nadalRatio
+        val liveDerailRisk = liveOracle?.derailmentRisk ?: "not available"
+        val liveThermalStress = liveOracle?.thermalStressMpa
+        val liveCycles = liveOracle?.fatigueCyclesRemaining
         val isDirectWifi = fbService.isDirectWifiConnected
-        val wifiLatency = if (isDirectWifi) fbService.directWifiLatencyMs else 38
+        val wifiLatency = if (isDirectWifi) fbService.directWifiLatencyMs else -1L
         val activeSection = inspections.firstOrNull()?.section ?: "Mainline Railway Corridor"
 
         val bannerPaint = Paint().apply {
@@ -182,7 +189,8 @@ object PdfExporter {
         c.drawText("Document ID: $docId", 45f, y + 16f, boldTextPaint)
         c.drawText("Certified Lead Inspector: $inspectorName", 45f, y + 32f, textPaint)
         c.drawText("Audit Timestamp: $dateStr", 340f, y + 16f, textPaint)
-        val speedStr = String.format(Locale.US, "Operational Speed Limit: %.0f km/h (%s)", if (liveSpeed <= 30) liveSpeed else 120f, if (liveSpeed <= 30 || hasFlaw) "TSR Restriction" else "Nominal")
+        val speedStr = if (liveSpeed <= 0f) "Operational Speed Limit: unknown"
+            else String.format(Locale.US, "Operational Speed Limit: %.0f km/h (%s)", liveSpeed, if (liveSpeed <= 30f || hasFlaw) "TSR Restriction" else "Reported speed")
         c.drawText(speedStr, 340f, y + 32f, textPaint)
         y += 62f
 
@@ -202,9 +210,9 @@ object PdfExporter {
         val healthFormatted = String.format(Locale.US, "%.1f%%", clampedHealth)
 
         val summaryText = if (defects.isEmpty()) {
-            "Automated sweep nominal. Health: $healthFormatted. Live Ultrasonic Depth: %.1f mm. Chainage: %s.".format(liveUtDepth, liveChainage)
+            "Automated sweep nominal. Health: $healthFormatted. Ultrasonic clearance: $utText. Chainage: $liveChainage."
         } else {
-            "Corridor patrol completed. Health: $healthFormatted. %d active anomalies flagged. Live Ultrasonic Depth: %.1f mm.".format(defects.size, liveUtDepth)
+            "Corridor patrol completed. Health: $healthFormatted. %d active anomalies flagged. Ultrasonic clearance: $utText.".format(defects.size)
         }
         c.drawText(summaryText, 35f, y, textPaint)
         y += 24f
@@ -217,7 +225,7 @@ object PdfExporter {
 
         val kpiTiles = listOf(
             Triple("Track Health", healthFormatted, if (clampedHealth >= 80) healthyTextPaint else criticalTextPaint),
-            Triple("Live UT Depth", "%.1f mm".format(liveUtDepth), if (liveUtDepth in 55.0f..75.0f) healthyTextPaint else criticalTextPaint),
+            Triple("UT Clearance", utText, if (!hasUtSensor) textPaint else if (liveUtDepth in 55.0f..75.0f) healthyTextPaint else criticalTextPaint),
             Triple("Active Flaws", "${defects.size} Logged", if (defects.isEmpty()) healthyTextPaint else criticalTextPaint),
             Triple("Work Orders", "${tasks.size} Assigned", boldTextPaint)
         )
@@ -232,16 +240,16 @@ object PdfExporter {
         y += 68f
 
         // RTK GPS Geodesic Trackway Overview
-        c.drawText("2. RTK GNSS GEODESIC TRACKWAY & GEOFENCE LOCK", 35f, y, headerPaint)
+        c.drawText("2. GNSS POSITION & TRACKWAY", 35f, y, headerPaint)
         y += 14f
         c.drawRoundRect(RectF(35f, y, 560f, y + 95f), 4f, 4f, boxPaint)
         c.drawRoundRect(RectF(35f, y, 560f, y + 95f), 4f, 4f, boxBorderPaint)
 
         c.drawText("• Primary Survey Sector: $activeSection (Chainage: $liveChainage)", 45f, y + 18f, boldTextPaint)
-        c.drawText("• RTK DGPS Receiver Lock: %.4f° N, %.4f° W · Accuracy ±0.015m".format(liveLat, liveLon), 45f, y + 34f, textPaint)
-        c.drawText("• Dynamic Axle Speed & Impact Shock: %.1f km/h · Vibration: %.3f g".format(liveSpeed, liveVib), 45f, y + 50f, textPaint)
-        c.drawText("• Railhead Steel Temperature: %.1f °C · Ambient Neutral Delta: %+.1f °C".format(liveTemp, liveTemp - 27.0f), 45f, y + 66f, textPaint)
-        c.drawText("• Corridor Status: %s · Gateway: %s (%d ms)".format(if (hasFlaw) "ANOMALY FLAGGED" else "STRICT CORRIDOR ENCLOSED", if (isDirectWifi) "Pi Direct Wi-Fi" else "Cloud Sync", wifiLatency), 45f, y + 82f, if (hasFlaw) criticalTextPaint else healthyTextPaint)
+        c.drawText(if (hasGps) "• GNSS fix: %.5f, %.5f".format(liveLat, liveLon) else "• GNSS fix: unavailable (no receiver reported)", 45f, y + 34f, textPaint)
+        c.drawText("• Reported speed: " + (if (liveSpeed > 0f) "%.1f km/h".format(liveSpeed) else "not reported") + " · Vibration: " + (if (liveVib > 0f) "%.3f g".format(liveVib) else "not reported"), 45f, y + 50f, textPaint)
+        c.drawText("• Rail temperature: " + (if (liveTemp > 0f) "%.1f °C".format(liveTemp) else "not reported"), 45f, y + 66f, textPaint)
+        c.drawText("• Corridor Status: %s · Gateway: %s (%s)".format(if (hasFlaw) "ANOMALY FLAGGED" else "NOMINAL", if (isDirectWifi) "Pi Direct Wi-Fi" else "Cloud Sync", if (wifiLatency >= 0) "$wifiLatency ms" else "latency n/a"), 45f, y + 82f, if (hasFlaw) criticalTextPaint else healthyTextPaint)
         y += 115f
 
         // Corridor Trackway Parameters
@@ -280,7 +288,7 @@ object PdfExporter {
 
         if (defects.isEmpty()) {
             c.drawRoundRect(RectF(35f, y, 560f, y + 30f), 2f, 2f, boxPaint)
-            c.drawText("Zero active defects flagged. Live Ultrasonic Scan: %.1f mm (Nominal UIC 60 / 68.2 mm standard).".format(liveUtDepth), 45f, y + 18f, healthyTextPaint)
+            c.drawText("Zero active defects flagged. Ultrasonic clearance: $utText.", 45f, y + 18f, healthyTextPaint)
             y += 40f
         } else {
             defects.take(12).forEach { d ->
@@ -310,9 +318,9 @@ object PdfExporter {
         val warningCount = defects.count { it.tone == Tone.WARNING }
         val healthyCount = defects.count { it.tone == Tone.HEALTHY }
         c.drawText("• Critical Structural Flaws: $criticalCount · Warning Anomalies: $warningCount · Repaired: $healthyCount", 45f, y + 18f, if (criticalCount > 0) criticalTextPaint else textPaint)
-        c.drawText("• Live Ultrasonic Integrity Depth: %.1f mm (Flaw: %s)".format(liveUtDepth, if (hasFlaw) liveFlawType else "Zero Subsurface Voids"), 45f, y + 34f, if (hasFlaw) criticalTextPaint else healthyTextPaint)
+        c.drawText("• Ultrasonic clearance: $utText (Flaw: ${if (hasFlaw) liveFlawType else "none reported"})", 45f, y + 34f, if (hasFlaw) criticalTextPaint else healthyTextPaint)
         c.drawText("• Remedial Priority: ${if (criticalCount > 0 || hasFlaw) "LEVEL 1 EMERGENCY DISPATCH (TSR MANDATORY)" else "ROUTINE PATROL OBSERVATION"}", 45f, y + 50f, boldTextPaint)
-        c.drawText("• Sensor Telemetry Gateway: %s · Latency: %d ms".format(if (isDirectWifi) "Pi Direct Wi-Fi" else "Cloud Realtime Uplink", wifiLatency), 45f, y + 66f, textPaint)
+        c.drawText("• Sensor Telemetry Gateway: %s · Latency: %s".format(if (isDirectWifi) "Pi Direct Wi-Fi" else "Cloud Realtime Uplink", if (wifiLatency >= 0) "$wifiLatency ms" else "n/a"), 45f, y + 66f, textPaint)
 
         pdfDocument.finishPage(page2)
 
@@ -331,11 +339,11 @@ object PdfExporter {
         c.drawRoundRect(RectF(35f, y, 560f, y + 120f), 4f, 4f, boxBorderPaint)
 
         c.drawText("Paris Law Crack Growth Kinetics: da/dN = C · (ΔK)^m", 45f, y + 18f, boldTextPaint)
-        c.drawText("• Paris Exponent (m): 3.14 (Validated for 60E1 Carbon-Manganese Rail)", 45f, y + 36f, textPaint)
-        c.drawText("• Material Paris Constant (C): 2.48 × 10^-11 m/cycle · (MPa√m)^-m", 45f, y + 52f, textPaint)
-        c.drawText("• Cyclic Stress Intensity Range (ΔK): %.1f MPa√m (Live Paris evaluation)".format(liveDeltaK), 45f, y + 68f, boldTextPaint)
-        c.drawText("• Paris Crack Growth Rate: %s · Nadal Derailment Ratio: %.2f (%s)".format(liveGrowthRate, liveNadal, liveDerailRisk), 45f, y + 84f, if (liveNadal > 0.8) criticalTextPaint else textPaint)
-        c.drawText("• Estimated Critical Cycles: %,d Cycles before service threshold".format(liveCycles), 45f, y + 102f, if (liveCycles < 2000) warningTextPaint else textPaint)
+        c.drawText("• No fatigue sensor is installed on this node; the fields below are", 45f, y + 36f, textPaint)
+        c.drawText("  only populated when the cloud AI service returns measured values.", 45f, y + 52f, textPaint)
+        c.drawText("• Cyclic Stress Intensity Range (ΔK): " + (liveDeltaK?.let { "%.1f MPa√m".format(it) } ?: "not measured"), 45f, y + 68f, boldTextPaint)
+        c.drawText("• Paris crack growth rate: $liveGrowthRate · Nadal ratio: " + (liveNadal?.let { "%.2f".format(it) } ?: "not measured") + " ($liveDerailRisk)", 45f, y + 84f, if ((liveNadal ?: 0f) > 0.8f) criticalTextPaint else textPaint)
+        c.drawText("• Estimated remaining cycles: " + (liveCycles?.let { "%,d".format(it) } ?: "not available"), 45f, y + 102f, if ((liveCycles ?: Int.MAX_VALUE) < 2000) warningTextPaint else textPaint)
         y += 140f
 
         // Ultrasonic A-Scan Echo Profile
@@ -344,12 +352,12 @@ object PdfExporter {
         c.drawRoundRect(RectF(35f, y, 560f, y + 110f), 4f, 4f, boxPaint)
         c.drawRoundRect(RectF(35f, y, 560f, y + 110f), 4f, 4f, boxBorderPaint)
 
-        c.drawText("• Ultrasonic Transducer: Dual-element 5.0 MHz Piezo / HC-SR04 Probe", 45f, y + 18f, textPaint)
-        c.drawText("• Live Ultrasonic Reflection Depth: %.1f mm (Nominal 68.2 mm UIC 60 Flange)".format(liveUtDepth), 45f, y + 34f, boldTextPaint)
-        c.drawText("• Flaw Echo Depression: %.1f mm gap from nominal baseline".format(maxOf(0f, 68.2f - liveUtDepth)), 45f, y + 50f, if (hasFlaw) criticalTextPaint else textPaint)
-        c.drawText("• CWR Rail Thermal Stress: %+.1f MPa (Railhead Temp: %.1f°C / Neutral: 27°C)".format(liveThermalStress, liveTemp), 45f, y + 66f, textPaint)
-        c.drawText("• Acoustic Velocity in Rail Steel: 5,900 m/s Longitudinal Wave", 45f, y + 82f, textPaint)
-        c.drawText("• UT Gate Evaluation: %s".format(if (hasFlaw) "ANOMALY FLAGGED [${liveFlawType}] ⚠" else "GATE 1 LOCKED ✓ [NOMINAL ECHO]"), 45f, y + 98f, if (hasFlaw) criticalTextPaint else healthyTextPaint)
+        c.drawText("• Ultrasonic sensor: " + (if (hasUtSensor) "connected (clearance sensor)" else "not installed"), 45f, y + 18f, textPaint)
+        c.drawText("• Measured clearance to railhead: $utText", 45f, y + 34f, boldTextPaint)
+        c.drawText("• Note: clearance is NOT rail thickness or internal flaw depth", 45f, y + 50f, textPaint)
+        c.drawText("• Rail temperature: " + (if (liveTemp > 0f) "%.1f °C".format(liveTemp) else "not reported"), 45f, y + 66f, textPaint)
+        c.drawText("• Thermal stress: " + (liveThermalStress?.let { "%+.1f MPa (from cloud model)".format(it) } ?: "not measured"), 45f, y + 82f, textPaint)
+        c.drawText("• Flaw status: ${if (hasFlaw) "ANOMALY FLAGGED [$liveFlawType]" else "no anomaly reported"}", 45f, y + 98f, if (hasFlaw) criticalTextPaint else healthyTextPaint)
         y += 130f
 
         // Neural Vision Defect Segmentation Metadata
@@ -446,40 +454,40 @@ object PdfExporter {
         c.drawRoundRect(RectF(35f, y, 560f, y + 115f), 4f, 4f, boxBorderPaint)
 
         c.drawText("• Optical Camera Sensor: Sony IMX708 HDR (1080p@30FPS Locked) · ONLINE ✓", 45f, y + 18f, textPaint)
-        c.drawText("• Ultrasonic Transducer: Live Echo: %.1f mm (Piezo UT / HC-SR04) · ONLINE ✓".format(liveUtDepth), 45f, y + 34f, textPaint)
-        c.drawText("• Inertial Vibration: ADXL345 3-Axis: %.3f g Live Impact Shock · ONLINE ✓".format(liveVib), 45f, y + 50f, textPaint)
-        c.drawText("• Rail Temperature Probe: PT100 / DS18B20: %.1f °C Live Rail Steel · ONLINE ✓".format(liveTemp), 45f, y + 66f, textPaint)
-        c.drawText("• Geodesic Positioning: Sub-meter RTK GNSS Lock (%.4f° N, %.4f° W) · ONLINE ✓".format(liveLat, liveLon), 45f, y + 82f, textPaint)
-        c.drawText("• Raspberry Pi Sensor Gateway: %s (%d ms Latency) · ONLINE ✓".format(if (isDirectWifi) "Direct Wi-Fi LAN Active" else "Cloud Telemetry Uplink", wifiLatency), 45f, y + 98f, healthyTextPaint)
+        c.drawText("• Ultrasonic clearance: $utText (" + (if (hasUtSensor) "sensor present" else "not installed") + ")", 45f, y + 34f, textPaint)
+        c.drawText("• Vibration: " + (if (hasVibSensor && liveVib > 0f) "%.3f g".format(liveVib) else "not reported"), 45f, y + 50f, textPaint)
+        c.drawText("• Rail temperature: " + (if (hasTempSensor && liveTemp > 0f) "%.1f °C".format(liveTemp) else "not reported"), 45f, y + 66f, textPaint)
+        c.drawText("• GNSS: " + (if (hasGps) "%.5f, %.5f".format(liveLat, liveLon) else "unavailable"), 45f, y + 82f, textPaint)
+        c.drawText("• Raspberry Pi gateway: " + (if (isDirectWifi) "direct Wi-Fi active" else "cloud uplink") + " (" + (if (wifiLatency >= 0) "$wifiLatency ms" else "latency n/a") + ")", 45f, y + 98f, healthyTextPaint)
         y += 135f
 
-        // Network Reliability Analytics
-        c.drawText("10. NETWORK TELEMETRY RELIABILITY ANALYTICS", 35f, y, headerPaint)
+        // Connectivity summary (no invented reliability figures)
+        c.drawText("10. CONNECTIVITY SUMMARY", 35f, y, headerPaint)
         y += 14f
         c.drawRoundRect(RectF(35f, y, 560f, y + 70f), 4f, 4f, boxPaint)
         c.drawRoundRect(RectF(35f, y, 560f, y + 70f), 4f, 4f, boxBorderPaint)
-        c.drawText("• Telemetry Packet Delivery Rate: 99.8% (Sub-50ms local Wi-Fi / Firebase sync)", 45f, y + 18f, textPaint)
-        c.drawText("• Mean Time Between Failures (MTBF): 18,400 Operating Hours", 45f, y + 34f, textPaint)
-        c.drawText("• Mean Time to Repair (MTTR): 2.4 Hours across active work orders", 45f, y + 50f, textPaint)
-        c.drawText("• Cloud Service Level Agreement (SLA): 99.95% High Availability", 45f, y + 64f, textPaint)
+        c.drawText("• Transport: local Wi-Fi HTTP (Raspberry Pi) and/or Firebase RTDB", 45f, y + 18f, textPaint)
+        c.drawText("• Packet delivery rate, MTBF and SLA are NOT measured by this build", 45f, y + 34f, textPaint)
+        c.drawText("• Sensor values shown above are the last values received by the app", 45f, y + 50f, textPaint)
+        c.drawText("• Missing sensors are reported as not installed, never estimated", 45f, y + 64f, textPaint)
         y += 90f
 
-        // Official Lead Engineer Certification Seal Box
-        c.drawText("11. OFFICIAL PERMANENT WAY SAFETY CERTIFICATION & SIGN-OFF", 35f, y, headerPaint)
+        // Inspector sign-off block (honest: no invented licence number)
+        c.drawText("11. INSPECTOR SIGN-OFF", 35f, y, headerPaint)
         y += 14f
 
         c.drawRoundRect(RectF(35f, y, 560f, y + 95f), 4f, 4f, sealBoxPaint)
         c.drawRoundRect(RectF(35f, y, 560f, y + 95f), 4f, 4f, sealBorderPaint)
 
-        c.drawText("OFFICIAL CERTIFICATION SEAL:", 45f, y + 20f, boldTextPaint)
-        c.drawText("Certified & Signed By: $inspectorName, BEng (Hons) CEng FIRSE", 45f, y + 38f, boldTextPaint)
-        c.drawText("Lead Permanent Way Safety Engineer · License IRSE-UK #849201 Level 3", 45f, y + 54f, textPaint)
-        c.drawText("Compliance Standards: European Standard EN 13848-1 & AREMA Chapter 4 Safety Code", 45f, y + 70f, textPaint)
-        c.drawText("Audit Dossier Certified & Sealed: $dateStr", 45f, y + 84f, smallTextPaint)
+        c.drawText("FIELD INSPECTION RECORD:", 45f, y + 20f, boldTextPaint)
+        c.drawText("Recorded By: $inspectorName", 45f, y + 38f, boldTextPaint)
+        c.drawText("Generated by RailGuard from the data listed in this document.", 45f, y + 54f, textPaint)
+        c.drawText("Not a regulatory certificate; regulatory sign-off requires an authorised engineer.", 45f, y + 70f, textPaint)
+        c.drawText("Generated: $dateStr", 45f, y + 84f, smallTextPaint)
 
-        c.drawText("OFFICIALLY SIGNED & SEALED ✓", 360f, y + 36f, healthyTextPaint)
-        c.drawText("IRSE #849201 VERIFIED", 360f, y + 54f, boldTextPaint)
-        c.drawText("Permanent Record Preserved", 360f, y + 70f, smallTextPaint)
+        c.drawText("GENERATED RECORD", 420f, y + 36f, healthyTextPaint)
+        c.drawText("Field Data Dossier", 420f, y + 54f, boldTextPaint)
+        c.drawText("Locally stored", 420f, y + 70f, smallTextPaint)
 
         pdfDocument.finishPage(page5)
 

@@ -387,23 +387,23 @@ fun AiOracleScreen(
                                         currentScanPhase = "Evaluating fracture kinetics & wheel-climb dynamics..."
                                         scanProgress = 0.65f
                                         val telem = activeTelemetry ?: fbService.latestSensorTelemetry
-                                        val hasCrack = telem?.hasCrack == true || (telem?.ultrasonicDepthMm ?: 68.2f) in 10.0f..55.0f || defects.isNotEmpty()
+                                        // Ultrasonic distance is NOT a crack indicator.
+                                        val hasCrack = telem?.hasCrack == true || defects.any { it.tone == com.example.railguard.model.Tone.CRITICAL }
                                         val crackLen = when {
                                             telem != null && telem.hasCrack && telem.crackLengthMm > 0f -> telem.crackLengthMm.toDouble()
-                                            defects.isNotEmpty() -> defects.first().estimatedLength.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 14.8
-                                            hasCrack -> 14.8
+                                            defects.isNotEmpty() -> defects.first().estimatedLength.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 0.0
                                             else -> 0.0
                                         }
-                                        val deltaK = if (crackLen > 0.0) (180.0 * Math.sqrt(Math.PI * (crackLen / 2000.0)) * 1.12) else 4.2
-                                        val growthRate = if (crackLen > 0.0) "${String.format(java.util.Locale.US, "%.2f", deltaK * 0.12)} μm/k-cycle" else "< 0.02 μm/k-cycle"
-                                        val vibG = telem?.vibrationG ?: 0.035f
-                                        val speedKmh = telem?.axleSpeedKmh ?: 45.0f
+                                        val deltaK = if (crackLen > 0.0) (180.0 * Math.sqrt(Math.PI * (crackLen / 2000.0)) * 1.12) else 0.0
+                                        val growthRate = if (crackLen > 0.0) "${String.format(java.util.Locale.US, "%.2f", deltaK * 0.12)} μm/k-cycle (model estimate)" else "not measured"
+                                        val vibG = telem?.vibrationG ?: 0f
+                                        val speedKmh = telem?.axleSpeedKmh ?: 0f
                                         val nadal = Math.min(1.4, (vibG * 1.5) + ((speedKmh / 120.0) * 0.3))
                                         val derailRisk = if (nadal > 0.8) "CRITICAL RISK (TSR MANDATORY)" else if (nadal > 0.5) "MODERATE" else "SAFE"
-                                        val railT = telem?.railTempC ?: 31.5f
+                                        val railT = telem?.railTempC ?: 0f
                                         val tempDiff = railT - 27.0f
                                         val thermalMpa = Math.round(2.415 * tempDiff * 10.0) / 10.0
-                                        val remainingCycles = if (crackLen > 0.0) Math.max(600, (150000.0 / Math.max(1.0, deltaK)).toInt()) else 850000
+                                        val remainingCycles = if (crackLen > 0.0) Math.max(600, (150000.0 / Math.max(1.0, deltaK)).toInt()) else 0
 
                                         val computedOracle = AiOracleData(
                                             parisDeltaK = String.format(java.util.Locale.US, "%.2f", deltaK).toFloat(),
@@ -425,7 +425,7 @@ fun AiOracleScreen(
                                         lastTensorScanResult = if (hasCrack) {
                                             "⚠️ INFERENCE FLAGGED: Flaw at ${telem?.chainage ?: "corridor"}. Crack: ${String.format(java.util.Locale.US, "%.1f", crackLen)}mm. ΔK=${String.format(java.util.Locale.US, "%.1f", deltaK)} MPa√m ($growthRate). Nadal: ${String.format(java.util.Locale.US, "%.2f", nadal)}. $derailRisk. Action: TSR 25 km/h recommended."
                                         } else {
-                                            "✓ INFERENCE VERIFIED: All streams nominal (UT: ${String.format(java.util.Locale.US, "%.1f", telem?.ultrasonicDepthMm ?: 68.2f)}mm, Vib: ${String.format(java.util.Locale.US, "%.3f", vibG)}g, Temp: ${String.format(java.util.Locale.US, "%.1f", railT)}°C). ΔK=${String.format(java.util.Locale.US, "%.1f", deltaK)} MPa√m. Nadal: ${String.format(java.util.Locale.US, "%.2f", nadal)} ($derailRisk). Zero critical flaws."
+                                            "✓ NO CRACK FLAGGED. Clearance: ${String.format(java.util.Locale.US, "%.1f", telem?.ultrasonicDepthMm ?: 0f)}mm, Vib: ${String.format(java.util.Locale.US, "%.3f", vibG)}g, Temp: ${String.format(java.util.Locale.US, "%.1f", railT)}°C. Values are model estimates, not a certified inspection."
                                         }
 
                                         fbService.recordAiAnalysis(

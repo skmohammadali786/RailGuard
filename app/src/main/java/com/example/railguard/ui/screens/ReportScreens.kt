@@ -275,16 +275,29 @@ fun BuildEvidencePackageScreen(
                 icon = Icons.Default.Lock,
                 onClick = {
                     scope.launch {
+                        val details = linkedMapOf<String, Any?>(
+                            "includeFrames" to includeFrames,
+                            "includeGps" to includeGps,
+                            "includeAiScores" to includeAiScores,
+                            "includeDynamics" to includeDynamics,
+                            "includeSignatures" to includeSignatures,
+                            "generatedAt" to System.currentTimeMillis()
+                        )
+                        // Compute a REAL SHA-256 over the canonical package content.
+                        // (The previous hardcoded e3b0c442… was the hash of an empty
+                        // string, so it never matched anything.)
+                        val canonical = buildString {
+                            append("Evidence Pack - Sector 14\n")
+                            details.forEach { (k, v) -> append(k).append('=').append(v).append('\n') }
+                        }
+                        val hash = java.security.MessageDigest.getInstance("SHA-256")
+                            .digest(canonical.toByteArray(Charsets.UTF_8))
+                            .joinToString("") { "%02x".format(it) }
+                        details["sha256"] = hash
                         com.example.railguard.data.RailGuardFirebaseService.instance.saveReportPackage(
                             title = "Evidence Pack - Sector 14",
-                            hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-                            details = mapOf(
-                                "includeFrames" to includeFrames,
-                                "includeGps" to includeGps,
-                                "includeAiScores" to includeAiScores,
-                                "includeDynamics" to includeDynamics,
-                                "includeSignatures" to includeSignatures
-                            )
+                            hash = hash,
+                            details = details
                         )
                     }
                     onGenerated()
@@ -768,9 +781,12 @@ fun PdfPreviewScreen(
                     ) {
                         Text("• Corridor / Line: $activeSection", color = Color(0xFF1E293B), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                         Text("• Chainage Bounds: $liveChainage", color = Color(0xFF334155), fontSize = 10.sp)
-                        Text("• Geodetic GPS: %.5f° N, %.5f° W (RTK Lock)".format(activeTelemetry?.latitude ?: 51.5074, activeTelemetry?.longitude ?: -0.1278), color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        val lat = activeTelemetry?.latitude ?: 0.0
+                        val lon = activeTelemetry?.longitude ?: 0.0
+                        val gpsText = if (lat != 0.0 || lon != 0.0) "• GNSS: %.5f, %.5f".format(lat, lon) else "• GNSS: unavailable"
+                        Text(gpsText, color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                         Text("• Flaw Status: ${if (hasFlaw) "ANOMALY [$liveFlawType]" else "NOMINAL TRACKWAY"}", color = if (hasFlaw) Color(0xFFB91C1C) else Color(0xFF16A34A), fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                        Text("• RTK GNSS Correction: Sub-meter Dual-Frequency (18 Satellites Tracked)", color = Color(0xFF059669), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• GNSS accuracy: not measured by this build", color = Color(0xFF059669), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                         Text("• Rail Profile & Grade: 60E1 Continuous Welded Rail (UIC 60 / Nominal 68.2 mm)", color = Color(0xFF334155), fontSize = 10.sp)
                         Text("• Sleeper / Fastener Type: B70 Prestressed Monoblock / Vossloh W14 Clamps", color = Color(0xFF334155), fontSize = 10.sp)
                         Text("• Track Geometry Parameters: Standard 1435.0 mm Gauge · Cant 0.0 mm", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
@@ -989,9 +1005,9 @@ fun PdfPreviewScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("CERTIFIED & SEALED BY:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                            Text("$inspectorName, BEng (Hons) CEng FIRSE", color = Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("Lead Rail Safety Inspector · License IRSE-UK #849201 Level 3", color = Color(0xFF64748B), fontSize = 9.sp)
+                            Text("RECORDED BY:", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            Text(inspectorName, color = Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Field inspection record. Regulatory certification is done by an authorised engineer, not by this app.", color = Color(0xFF64748B), fontSize = 9.sp)
                         }
 
                         Box(
@@ -1002,14 +1018,14 @@ fun PdfPreviewScreen(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    text = "OFFICIALLY CERTIFIED & SEALED",
+                                    text = "GENERATED FIELD RECORD",
                                     color = Color(0xFF16A34A),
                                     fontSize = 8.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    text = "IRSE #849201 VERIFIED ✓",
+                                    text = "SHA-256 SEALED ✓",
                                     color = Color(0xFF15803D),
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold
@@ -1167,8 +1183,10 @@ fun PdfPreviewScreen(
                         Text("• $activeSection: ${if (hasFlaw) "Risk Elevated · TSR %.0f km/h Mandated".format(tsrSpeed) else "Nominal Line Speed Allowed"}", color = if (hasFlaw) Color(0xFF991B1B) else Color(0xFF15803D), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Text("• Active Defect Count: ${defects.size} anomalies recorded in cloud register", color = Color(0xFF854D0E), fontSize = 9.sp)
                         Text("• Work Orders Dispatched: ${tasks.size} maintenance work orders active", color = Color(0xFF334155), fontSize = 9.sp)
-                        Text("• Geodesic Positioning: Sub-meter RTK GNSS Lock (%.4f° N, %.4f° W)".format(activeTelemetry?.latitude ?: 51.5074, activeTelemetry?.longitude ?: -0.1278), color = Color(0xFF334155), fontSize = 9.sp)
-                        Text("• Maintenance SLA Performance: 98.2% on-time resolution · MTTR: 3.8 hours", color = Color(0xFF0F172A), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        val lat2 = activeTelemetry?.latitude ?: 0.0
+                        val lon2 = activeTelemetry?.longitude ?: 0.0
+                        Text(if (lat2 != 0.0 || lon2 != 0.0) "• GNSS: %.5f, %.5f".format(lat2, lon2) else "• GNSS: unavailable", color = Color(0xFF334155), fontSize = 9.sp)
+                        Text("• Maintenance SLA: not measured by this build", color = Color(0xFF0F172A), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

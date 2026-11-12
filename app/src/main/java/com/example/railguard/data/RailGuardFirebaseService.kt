@@ -105,6 +105,7 @@ class RailGuardFirebaseService private constructor() {
         private const val KEY_HIGH_PRECISION_AI = "app_high_precision_ai"
         private const val KEY_TSR_INTERLOCK = "app_tsr_interlock"
         private const val KEY_RPI_WIFI_IP = "rpi_wifi_ip"
+        private const val KEY_RPI_API_KEY = "rpi_api_key"
         private const val KEY_LOCAL_OBSERVATIONS = "local_cached_observations"
         private const val KEY_LOCAL_SCHEDULES = "local_cached_schedules"
         private const val KEY_LOCAL_DEFECTS = "local_cached_defects"
@@ -149,7 +150,21 @@ class RailGuardFirebaseService private constructor() {
     var directWifiLatencyMs by mutableStateOf(0L)
     var latestPiCameraBitmap by mutableStateOf<Bitmap?>(null)
     var latestPiCameraTimestamp by mutableStateOf(0L)
-    var activeTsrSpeed by mutableStateOf<Int?>(25)
+    // null = no TSR has been acknowledged yet. Never invent 25 km/h.
+    var activeTsrSpeed by mutableStateOf<Int?>(null)
+    // Human-readable result of the last command, shown in the UI.
+    var lastTsrMessage by mutableStateOf<String?>(null)
+    var lastCameraSimulated by mutableStateOf<Boolean?>(null)
+    var localWifiApiKey by mutableStateOf("")
+
+    /** Read a persisted user preference at call time (not only at startup). */
+    private fun prefBool(key: String, default: Boolean): Boolean =
+        sharedPreferences?.getBoolean(key, default) ?: default
+
+    val autoSyncRtdbEnabled: Boolean get() = prefBool(KEY_AUTO_SYNC_RTDB, true)
+    val esp32LinkActiveEnabled: Boolean get() = prefBool(KEY_ESP32_LINK, true)
+    val highPrecisionAiEnabled: Boolean get() = prefBool(KEY_HIGH_PRECISION_AI, true)
+    val tsrInterlockEnabled: Boolean get() = prefBool(KEY_TSR_INTERLOCK, true)
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var appContext: Context? = null
@@ -185,6 +200,7 @@ class RailGuardFirebaseService private constructor() {
             }
 
             localWifiIp = prefs.getString(KEY_RPI_WIFI_IP, "192.168.4.1") ?: "192.168.4.1"
+            localWifiApiKey = prefs.getString(KEY_RPI_API_KEY, "") ?: ""
             latestSensorTelemetry = loadLocalTelemetry()
 
             // Restore user session if saved
@@ -1818,12 +1834,12 @@ class RailGuardFirebaseService private constructor() {
                                      chainageCoordinate = item.optString("chainageCoordinate", "Unknown"),
                                      aiConfidencePercent = item.optInt("aiConfidencePercent", 0),
                                      aiPrescribedAction = item.optString("aiPrescribedAction", "No cloud recommendation available"),
-                                     flawType = item.optString("flawType", "Transverse Gauge Corner Fissure"),
-                                     ultrasonicDepthMm = item.optDouble("ultrasonicDepthMm", 46.2).toFloat(),
-                                     vibrationG = item.optDouble("vibrationG", 0.425).toFloat(),
-                                     railTempC = item.optDouble("railTempC", 32.8).toFloat(),
-                                     speedKmh = item.optDouble("speedKmh", 45.0).toFloat(),
-                                     boundingBox = item.optString("boundingBox", "x:140,y:88,w:120,h:45")
+                                     flawType = item.optString("flawType", "Unknown"),
+                                     ultrasonicDepthMm = item.optDouble("ultrasonicDepthMm", 0.0).toFloat(),
+                                     vibrationG = item.optDouble("vibrationG", 0.0).toFloat(),
+                                     railTempC = item.optDouble("railTempC", 0.0).toFloat(),
+                                     speedKmh = item.optDouble("speedKmh", 0.0).toFloat(),
+                                     boundingBox = item.optString("boundingBox", "")
                                 )
                             )
                         }
@@ -2073,26 +2089,50 @@ class RailGuardFirebaseService private constructor() {
      * Dispatches temporary speed restriction (TSR) live to Raspberry Pi over Wi-Fi
      * and to Firebase Cloud RTDB for train cab signaling
      */
-    suspend fun dispatchTsrToFirebase(trainId: String, tsrSpeedKmH: Int, reason: String): Boolean {
-        withContext(Dispatchers.Main) {
-            activeTsrSpeed = tsrSpeedKmH
-            latestSensorTelemetry = latestSensorTelemetry?.copy(
-                axleSpeedKmh = tsrSpeedKmH.toFloat(),
-                recommendedTsrKmh = tsrSpeedKmH.toFloat()
-            )
+    /** Candidate Pi addresses. Emulator loopback only exists in an emulator. */
+    private fun piCandidateHosts(host: String = localWifiIp): List<String> {
+        val cleanHost = host.trim()
+            .removePrefix("http://")
+            .removePrefix("https://")
+            .split("/")[0]
+            .split(":")[0]
+            .ifBlank { "192.168.4.1" }
+        val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
+            android.os.Build.HARDWARE.contains("goldfish") ||
+            android.os.Build.HARDWARE.contains("ranchu")
+        return if (isEmulator) {
+            listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1").distinct()
+        } else {
+            listOf(cleanHost, "192.168.4.1").distinct()
         }
+    }
+
+    private fun tsrInterlockBlocked(speedKmh: Int): String? {
+        if (!tsrInterlockEnabled) return null
+        val crackActive = latestCrackAlert != null ||
+            (latestSensorTelemetry?.hasCrack == true) ||
+            (latestSensorTelemetry?.status?.contains("ANOMALY", ignoreCase = true) == true)
+        return if (crackActive && speedKmh > 25) {
+            "Refused: a crack alert is active. Only a restriction of 25 km/h or lower is allowed until it is cleared."
+        } else null
+    }
+
+    suspend fun dispatchTsrToFirebase(trainId: String, tsrSpeedKmH: Int, reason: String): Boolean {
+        // Interlock: never raise speed while the Pi reports an active crack.
+        tsrInterlockBlocked(tsrSpeedKmH)?.let { msg ->
+            withContext(Dispatchers.Main) { lastTsrMessage = msg }
+            return false
+        }
+        if (tsrSpeedKmH < 0 || tsrSpeedKmH > 160) {
+            withContext(Dispatchers.Main) { lastTsrMessage = "Refused: speed must be between 0 and 160 km/h." }
+            return false
+        }
+
         return withContext(Dispatchers.IO) {
             var piSuccess = false
             var cloudSuccess = false
+            var cloudError: String? = null
 
-            // 1. Direct Wi-Fi HTTP POST to Raspberry Pi /api/tsr
-            val cleanHost = localWifiIp.trim()
-                .removePrefix("http://")
-                .removePrefix("https://")
-                .split("/")[0]
-                .split(":")[0]
-                .ifBlank { "192.168.4.1" }
-            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
             val tsrPayload = JSONObject().apply {
                 put("speed", tsrSpeedKmH)
                 put("reason", reason)
@@ -2100,57 +2140,90 @@ class RailGuardFirebaseService private constructor() {
                 put("timestamp", System.currentTimeMillis())
             }.toString()
 
-            for (candidate in candidateHosts) {
+            // 1. Direct Wi-Fi HTTP POST to Raspberry Pi /api/tsr
+            for (candidate in piCandidateHosts()) {
+                if (piSuccess) break
                 try {
                     val conn = (URL("http://$candidate:8080/api/tsr").openConnection() as HttpURLConnection).apply {
                         requestMethod = "POST"
-                        connectTimeout = 2500
-                        readTimeout = 2500
+                        connectTimeout = 1500
+                        readTimeout = 1800
                         doOutput = true
+                        applyPiAuth()
                         setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                     }
                     conn.outputStream.use { it.write(tsrPayload.toByteArray(Charsets.UTF_8)) }
                     if (conn.responseCode in 200..299) {
                         piSuccess = true
-                        break
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
 
-            // 2. Dual-channel write to Firebase RTDB
-            try {
-                val authParam = authenticatedQueryParam()
-                val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/trains/$trainId/tsr.json$authParam"
-                val json = JSONObject().apply {
-                    put("trainId", trainId)
-                    put("activeTsrSpeedKmH", tsrSpeedKmH)
-                    put("reason", reason)
-                    put("issuedAt", System.currentTimeMillis())
-                    put("issuedBy", currentUser?.email ?: "unknown")
-                }
+            // 2. Dual-channel write to Firebase RTDB (only when cloud sync is enabled)
+            if (autoSyncRtdbEnabled && currentUser != null) {
+                try {
+                    val authParam = authenticatedQueryParam()
+                    val endpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/trains/$trainId/tsr.json$authParam"
+                    val json = JSONObject().apply {
+                        put("trainId", trainId)
+                        put("activeTsrSpeedKmH", tsrSpeedKmH)
+                        put("reason", reason)
+                        put("issuedAt", System.currentTimeMillis())
+                        put("issuedBy", currentUser?.email ?: "unknown")
+                    }
 
-                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "PUT"
-                    connectTimeout = 5000
-                    readTimeout = 5000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                }
+                    val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "PUT"
+                        connectTimeout = 4000
+                        readTimeout = 4000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    }
 
-                OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
-                cloudSuccess = conn.responseCode in 200..299
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w("RailGuardFirebase", "TSR cloud dispatch error: ${e.message}")
+                    OutputStreamWriter(conn.outputStream).use { it.write(json.toString()) }
+                    val code = conn.responseCode
+                    cloudSuccess = code in 200..299
+                    if (!cloudSuccess) cloudError = "cloud HTTP $code"
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    cloudError = e.message
+                    Log.w("RailGuardFirebase", "TSR cloud dispatch error: ${e.message}")
+                }
             }
 
             val isSuccess = piSuccess || cloudSuccess
-            postNotification(
-                title = "TSR Speed Order Issued ($tsrSpeedKmH km/h)",
-                message = "Train/Node $trainId: $reason",
-                tone = if (tsrSpeedKmH <= 25) Tone.CRITICAL else Tone.WARNING
-            )
+            withContext(Dispatchers.Main) {
+                if (isSuccess) {
+                    // Only now is the order real: reflect it in the UI/state.
+                    activeTsrSpeed = tsrSpeedKmH
+                    val source = when {
+                        piSuccess && cloudSuccess -> "Pi Wi-Fi + cloud"
+                        piSuccess -> "Pi Wi-Fi"
+                        else -> "cloud"
+                    }
+                    lastTsrMessage = "Applied: $tsrSpeedKmH km/h via $source."
+                    latestSensorTelemetry = latestSensorTelemetry?.copy(
+                        recommendedTsrKmh = tsrSpeedKmH.toFloat()
+                    )
+                } else {
+                    lastTsrMessage = "Failed: Pi not reachable" +
+                        (cloudError?.let { " and $it" } ?: " and cloud sync unavailable") +
+                        ". No speed order was applied."
+                    isDirectWifiConnected = false
+                }
+            }
+
+            if (isSuccess) {
+                scope.launch(Dispatchers.IO) {
+                    postNotification(
+                        title = "TSR Speed Order Issued ($tsrSpeedKmH km/h)",
+                        message = "Train/Node $trainId: $reason",
+                        tone = if (tsrSpeedKmH <= 25) Tone.CRITICAL else Tone.WARNING
+                    )
+                }
+            }
             isSuccess
         }
     }
@@ -2738,6 +2811,8 @@ class RailGuardFirebaseService private constructor() {
         chainage: String,
         status: String = "ACTIVE_TRACK_SCAN"
     ): Boolean {
+        // The "ESP32 link" toggle really disables the ESP32 channel.
+        if (!esp32LinkActiveEnabled) return false
         return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
@@ -2791,6 +2866,8 @@ class RailGuardFirebaseService private constructor() {
      * Transmits zero-calibration command to ESP32 node via cloud RTDB
      */
     suspend fun sendEspCalibrationCommand(nodeId: String, command: String): Boolean {
+        // The "ESP32 link" toggle really disables the ESP32 channel.
+        if (!esp32LinkActiveEnabled) return false
         return withContext(Dispatchers.IO) {
             try {
                 val authParam = authenticatedQueryParam()
@@ -2834,9 +2911,10 @@ class RailGuardFirebaseService private constructor() {
         val aiConfidencePercent: Int = 0,
         val recommendedTsrKmh: Float = 25.0f,
         val crackBoundingBox: String = "",
-        val latitude: Double = 51.5074,
-        val longitude: Double = -0.1278,
-        val latencyMs: Int = 28
+        // 0.0 = no GNSS fix; the Pi reports gpsLocked=false.
+        val latitude: Double = 0.0,
+        val longitude: Double = 0.0,
+        val latencyMs: Int = 0
     )
 
     var latestSensorTelemetry by mutableStateOf<LiveSensorTelemetry?>(null)
@@ -2883,15 +2961,18 @@ class RailGuardFirebaseService private constructor() {
                     railTempC = json.optDouble("railTempC", 0.0).toFloat(),
                     axleSpeedKmh = json.optDouble("axleSpeedKmh", 0.0).toFloat(),
                     chainage = json.optString("chainage", "Unknown"),
-                    hardware = json.optString("hardware", "Raspberry Pi 4 / Camera Module 3 / Piezo UT"),
+                    hardware = json.optString("hardware", "Not reported"),
                     status = statusStr,
                     timestamp = json.optLong("timestamp", System.currentTimeMillis()),
                     hasCrack = isAnomalyFlagged,
-                    flawType = json.optString("flawType", if (isAnomalyFlagged) "Transverse Gauge Corner Fissure" else ""),
-                    crackLengthMm = json.optDouble("crackLengthMm", if (isAnomalyFlagged) 14.8 else 0.0).toFloat(),
-                    aiConfidencePercent = json.optInt("aiConfidencePercent", if (isAnomalyFlagged) 96 else 0),
-                    recommendedTsrKmh = json.optDouble("recommendedTsrKmh", 25.0).toFloat(),
-                    crackBoundingBox = json.optString("crackBoundingBox", if (isAnomalyFlagged) "x:140,y:88,w:120,h:45" else "")
+                    flawType = json.optString("flawType", if (isAnomalyFlagged) "Surface Fissure (optical)" else ""),
+                    crackLengthMm = json.optDouble("crackLengthMm", 0.0).toFloat(),
+                    aiConfidencePercent = json.optInt("aiConfidencePercent", 0),
+                    recommendedTsrKmh = json.optDouble("recommendedTsrKmh", 0.0).toFloat(),
+                    crackBoundingBox = json.optString("crackBoundingBox", ""),
+                    latitude = json.optDouble("latitude", 0.0),
+                    longitude = json.optDouble("longitude", 0.0),
+                    latencyMs = json.optInt("latencyMs", 0)
                 )
                 withContext(Dispatchers.Main) {
                     latestSensorTelemetry = telemetry
@@ -2933,52 +3014,52 @@ class RailGuardFirebaseService private constructor() {
                     telemObj.optDouble("ultrasonic",
                         telemObj.optDouble("nominalDepthMm",
                             telemObj.optDouble("depth",
-                                telemObj.optDouble("distanceMm", 68.2)))))))
+                                telemObj.optDouble("distanceMm", 0.0)))))))
 
         val vib = telemObj.optDouble("vibrationG",
             telemObj.optDouble("vib_g",
                 telemObj.optDouble("vibration_g",
                     telemObj.optDouble("vibration",
                         telemObj.optDouble("accel_g",
-                            telemObj.optDouble("g_force", 0.035))))))
+                            telemObj.optDouble("g_force", 0.0))))))
 
         val temp = telemObj.optDouble("railTempC",
             telemObj.optDouble("rail_temp_c",
                 telemObj.optDouble("temp_c",
                     telemObj.optDouble("tempC",
                         telemObj.optDouble("temperature",
-                            telemObj.optDouble("temp", 31.5))))))
+                            telemObj.optDouble("temp", 0.0))))))
 
         val speed = telemObj.optDouble("axleSpeedKmh",
             telemObj.optDouble("speed_kmh",
                 telemObj.optDouble("train_speed_kmh",
                     telemObj.optDouble("speed",
-                        telemObj.optDouble("speedKmh", 45.0)))))
+                        telemObj.optDouble("speedKmh", 0.0)))))
 
         val chainage = telemObj.optString("chainage",
             telemObj.optString("milepost",
                 telemObj.optString("location",
-                    telemObj.optString("chainageCoordinate", "KM 14+320"))))
+                    telemObj.optString("chainageCoordinate", "Unknown"))))
 
         return LiveSensorTelemetry(
-            nodeId = telemObj.optString("nodeId", telemObj.optString("device_id", "RPI-TRACK-01")),
+            nodeId = telemObj.optString("nodeId", telemObj.optString("device_id", "Unknown")),
             ultrasonicDepthMm = ut.toFloat(),
             vibrationG = vib.toFloat(),
             railTempC = temp.toFloat(),
             axleSpeedKmh = speed.toFloat(),
             chainage = chainage,
-            hardware = telemObj.optString("hardware", "Raspberry Pi 4 / Camera Module 3 / Piezo UT"),
+            hardware = telemObj.optString("hardware", "Not reported"),
             status = statusStr,
             timestamp = telemObj.optLong("timestamp", System.currentTimeMillis()),
             hasCrack = isAnomalyFlagged,
-            flawType = telemObj.optString("flawType", if (isAnomalyFlagged) "Transverse Gauge Corner Fissure" else ""),
-            crackLengthMm = telemObj.optDouble("crackLengthMm", if (isAnomalyFlagged) 14.8 else 0.0).toFloat(),
-            aiConfidencePercent = telemObj.optInt("aiConfidencePercent", if (isAnomalyFlagged) 96 else 0),
-            recommendedTsrKmh = telemObj.optDouble("recommendedTsrKmh", 25.0).toFloat(),
-            crackBoundingBox = telemObj.optString("crackBoundingBox", if (isAnomalyFlagged) "x:140,y:88,w:120,h:45" else ""),
-            latitude = telemObj.optDouble("latitude", telemObj.optDouble("lat", 51.5074)),
-            longitude = telemObj.optDouble("longitude", telemObj.optDouble("lon", telemObj.optDouble("lng", -0.1278))),
-            latencyMs = telemObj.optInt("latencyMs", telemObj.optInt("latency", 28))
+            flawType = telemObj.optString("flawType", if (isAnomalyFlagged) "Surface Fissure (optical)" else ""),
+            crackLengthMm = telemObj.optDouble("crackLengthMm", 0.0).toFloat(),
+            aiConfidencePercent = telemObj.optInt("aiConfidencePercent", 0),
+            recommendedTsrKmh = telemObj.optDouble("recommendedTsrKmh", 0.0).toFloat(),
+            crackBoundingBox = telemObj.optString("crackBoundingBox", ""),
+            latitude = telemObj.optDouble("latitude", telemObj.optDouble("lat", 0.0)),
+            longitude = telemObj.optDouble("longitude", telemObj.optDouble("lon", telemObj.optDouble("lng", 0.0))),
+            latencyMs = telemObj.optInt("latencyMs", 0)
         )
     }
 
@@ -2990,21 +3071,11 @@ class RailGuardFirebaseService private constructor() {
                 .split("/")[0]
                 .split(":")[0]
                 .ifBlank { "192.168.4.1" }
-            val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
-                android.os.Build.HARDWARE.contains("goldfish") ||
-                android.os.Build.HARDWARE.contains("ranchu")
-            val candidateHosts = if (cleanHost != "192.168.4.1") {
-                listOf(cleanHost, "192.168.4.1")
-            } else {
-                if (isEmulator) listOf(cleanHost, "10.0.2.2", "127.0.0.1")
-                else listOf(cleanHost, "127.0.0.1")
-            }.distinct()
+            val candidateHosts = if (cleanHost != "192.168.4.1") listOf(cleanHost, "192.168.4.1") else listOf(cleanHost, "10.0.2.2", "127.0.0.1", "localhost")
             val telemEndpoints = listOf("/api/telemetry", "/api/all_data", "/telemetry", "/api/sensors", "/sensors", "/")
 
             for (candidate in candidateHosts) {
-                var hostReachable = true
                 for (path in telemEndpoints) {
-                    if (!hostReachable) break
                     try {
                         val conn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
                             requestMethod = "GET"
@@ -3033,10 +3104,7 @@ class RailGuardFirebaseService private constructor() {
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                        if (e is java.net.SocketTimeoutException || e is java.net.ConnectException || e is java.net.NoRouteToHostException) {
-                            hostReachable = false
-                        }
+                    } catch (_: Exception) {
                     }
                 }
             }
@@ -3056,6 +3124,19 @@ class RailGuardFirebaseService private constructor() {
         }
     }
 
+    fun updateLocalWifiApiKey(newKey: String) {
+        val clean = newKey.trim()
+        localWifiApiKey = clean
+        sharedPreferences?.edit()?.putString(KEY_RPI_API_KEY, clean)?.apply()
+    }
+
+    private fun HttpURLConnection.applyPiAuth() {
+        setRequestProperty("Connection", "close")
+        if (localWifiApiKey.isNotBlank()) {
+            setRequestProperty("X-API-Key", localWifiApiKey)
+        }
+    }
+
     suspend fun testDirectWifiConnection(ip: String = localWifiIp): Pair<Boolean, Long> {
         return withContext(Dispatchers.IO) {
             val cleanHost = ip.trim()
@@ -3068,9 +3149,9 @@ class RailGuardFirebaseService private constructor() {
             try {
                 val conn = (URL("http://$cleanHost:8080/api/health").openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
-                    connectTimeout = 2500
-                    readTimeout = 2500
-                    setRequestProperty("Connection", "close")
+                    connectTimeout = 2000
+                    readTimeout = 2000
+                    applyPiAuth()
                 }
                 val code = conn.responseCode
                 val latency = System.currentTimeMillis() - startMs
@@ -3081,9 +3162,11 @@ class RailGuardFirebaseService private constructor() {
                     }
                     Pair(true, latency)
                 } else {
+                    withContext(Dispatchers.Main) { isDirectWifiConnected = false }
                     Pair(false, 0L)
                 }
             } catch (_: Exception) {
+                withContext(Dispatchers.Main) { isDirectWifiConnected = false }
                 Pair(false, 0L)
             }
         }
@@ -3251,55 +3334,35 @@ class RailGuardFirebaseService private constructor() {
      */
     suspend fun fetchPiCameraFrame(host: String = localWifiIp, port: Int = 8080): Bitmap? {
         return withContext(Dispatchers.IO) {
-            val cleanHost = host.trim()
-                .removePrefix("http://")
-                .removePrefix("https://")
-                .split("/")[0]
-                .split(":")[0]
-                .ifBlank { "192.168.4.1" }
-
-            val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
-                android.os.Build.HARDWARE.contains("goldfish") ||
-                android.os.Build.HARDWARE.contains("ranchu")
-
-            val candidateHosts = if (cleanHost != "192.168.4.1") {
-                listOf(cleanHost, "192.168.4.1")
-            } else {
-                if (isEmulator) listOf(cleanHost, "10.0.2.2", "127.0.0.1")
-                else listOf(cleanHost, "127.0.0.1")
-            }.distinct()
+            val candidateHosts = piCandidateHosts(host)
 
             val cameraEndpoints = listOf(
                 "/api/camera_frame",
                 "/camera_frame.jpg",
                 "/latest_frame.jpg",
                 "/api/camera/frame",
-                "/",
                 "/camera",
                 "/image",
                 "/capture",
                 "/snapshot",
                 "/cam.jpg",
                 "/shot.jpg",
-                "/image.jpg",
-                "/video_feed",
-                "/stream"
+                "/image.jpg"
             )
 
             for (candidate in candidateHosts) {
-                var candidateReachable = true
                 for (path in cameraEndpoints) {
-                    if (!candidateReachable) break
                     try {
                         val conn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
                             requestMethod = "GET"
                             connectTimeout = 1200
                             readTimeout = 1800
-                            setRequestProperty("Connection", "close")
-                            setRequestProperty("Accept", "image/jpeg, image/png, image/*, text/html, application/json")
+                            applyPiAuth()
+                            setRequestProperty("Accept", "image/jpeg, image/png, image/*, application/json")
                         }
                         if (conn.responseCode in 200..299) {
-                            // Extract synchronized live telemetry headers from camera response
+                            val simulatedHdr = conn.getHeaderField("X-RailGuard-Simulated")
+                            val isSimulated = simulatedHdr == "1"
                             val telemHdr = conn.getHeaderField("X-RailGuard-Telemetry")
                             val utHdr = conn.getHeaderField("X-RailGuard-UT-Depth")
                             val vibHdr = conn.getHeaderField("X-RailGuard-Vibration")
@@ -3318,16 +3381,16 @@ class RailGuardFirebaseService private constructor() {
                             }
                             if (syncdTelem == null && (utHdr != null || tempHdr != null)) {
                                 try {
-                                    val ch = if (chHdr != null) java.net.URLDecoder.decode(chHdr, "UTF-8") else "KM 14+320"
+                                    val ch = if (chHdr != null) java.net.URLDecoder.decode(chHdr, "UTF-8") else "Unknown"
                                     syncdTelem = LiveSensorTelemetry(
                                         nodeId = "RPI-TRACK-01",
-                                        ultrasonicDepthMm = utHdr?.toFloatOrNull() ?: 68.2f,
-                                        vibrationG = vibHdr?.toFloatOrNull() ?: 0.035f,
-                                        railTempC = tempHdr?.toFloatOrNull() ?: 31.5f,
-                                        axleSpeedKmh = speedHdr?.toFloatOrNull() ?: 45.0f,
+                                        ultrasonicDepthMm = utHdr?.toFloatOrNull() ?: 0f,
+                                        vibrationG = vibHdr?.toFloatOrNull() ?: 0f,
+                                        railTempC = tempHdr?.toFloatOrNull() ?: 0f,
+                                        axleSpeedKmh = speedHdr?.toFloatOrNull() ?: 0f,
                                         chainage = ch,
-                                        hardware = "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
-                                        status = "ALL_SENSORS_ONLINE",
+                                        hardware = "Raspberry Pi",
+                                        status = if (isSimulated) "SIMULATED_DEMO" else "ACTIVE_SYNC",
                                         timestamp = System.currentTimeMillis()
                                     )
                                 } catch (_: Exception) {}
@@ -3340,6 +3403,7 @@ class RailGuardFirebaseService private constructor() {
                                     localWifiIp = candidate
                                     isDirectWifiConnected = true
                                     isConnectedToFirebase = true
+                                    lastCameraSimulated = isSimulated
                                     if (buzzerHdr != null) {
                                         isPiBuzzerActive = buzzerHdr.equals("RINGING", ignoreCase = true)
                                     }
@@ -3355,18 +3419,20 @@ class RailGuardFirebaseService private constructor() {
                                         latestPiCameraBitmap = bitmap
                                         latestPiCameraTimestamp = System.currentTimeMillis()
                                         isDirectWifiConnected = true
+                                        lastCameraSimulated = isSimulated
                                         localWifiIp = candidate
                                     }
                                     return@withContext bitmap
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                        if (e is java.net.SocketTimeoutException || e is java.net.ConnectException || e is java.net.NoRouteToHostException) {
-                            candidateReachable = false
-                        }
+                    } catch (_: Exception) {
                     }
                 }
+            }
+            withContext(Dispatchers.Main) {
+                isDirectWifiConnected = false
+                lastCameraSimulated = null
             }
             null
         }
@@ -3378,19 +3444,7 @@ class RailGuardFirebaseService private constructor() {
      */
     suspend fun triggerPiCameraCapture(host: String = localWifiIp, port: Int = 8080): Pair<Boolean, String> {
         return withContext(Dispatchers.IO) {
-            val cleanHost = host.trim()
-                .removePrefix("http://")
-                .removePrefix("https://")
-                .split("/")[0]
-                .split(":")[0]
-                .ifBlank { "192.168.4.1" }
-
-            val candidateHosts = if (cleanHost != "192.168.4.1") {
-                listOf(cleanHost, "192.168.4.1")
-            } else {
-                listOf(cleanHost, "10.0.2.2", "127.0.0.1", "localhost")
-            }.distinct()
-
+            val candidateHosts = piCandidateHosts(host)
             val captureEndpoints = listOf(
                 "/api/camera_capture",
                 "/api/camera/capture",
@@ -3399,47 +3453,51 @@ class RailGuardFirebaseService private constructor() {
                 "/api/snapshot",
                 "/api/trigger_snapshot"
             )
+            // The "High-Precision AI" toggle asks the Pi for a full-resolution
+            // frame; otherwise a normal capture is requested.
+            val highRes = highPrecisionAiEnabled
 
             for (candidate in candidateHosts) {
                 for (path in captureEndpoints) {
                     try {
-                        val conn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
+                        val url = "http://$candidate:$port$path" + if (highRes) "?high_res=1" else ""
+                        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                             requestMethod = "POST"
-                            connectTimeout = 2500
+                            connectTimeout = 1500
                             readTimeout = 2500
                             doOutput = true
-                            setRequestProperty("Connection", "close")
+                            applyPiAuth()
+                            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                         }
                         conn.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }
                         if (conn.responseCode in 200..299) {
+                            val body = conn.inputStream.bufferedReader().use { it.readText() }
+                            var simulated = false
+                            var visionMsg = ""
+                            try {
+                                val json = JSONObject(body)
+                                simulated = json.optBoolean("simulated", false)
+                                val vision = json.optJSONObject("vision")
+                                if (vision != null) {
+                                    val has = vision.optBoolean("hasCrack", false)
+                                    val conf = vision.optInt("confidencePercent", 0)
+                                    visionMsg = if (has) "vision: crack ${conf}%" else "vision: no crack"
+                                }
+                            } catch (_: Exception) {}
+                            withContext(Dispatchers.Main) { lastCameraSimulated = simulated }
                             fetchPiCameraFrame(candidate, port)
-                            return@withContext Pair(true, "Optical snapshot captured")
+                            val msg = when {
+                                simulated -> "No Pi camera detected: the returned frame is a labelled simulation."
+                                visionMsg.isNotBlank() -> "Snapshot captured ($visionMsg)"
+                                else -> "Snapshot captured"
+                            }
+                            return@withContext Pair(!simulated, msg)
                         }
                     } catch (_: Exception) {
-                        // Fallback GET
-                        try {
-                            val getConn = (URL("http://$candidate:$port$path").openConnection() as HttpURLConnection).apply {
-                                requestMethod = "GET"
-                                connectTimeout = 2000
-                                readTimeout = 2000
-                                setRequestProperty("Connection", "close")
-                            }
-                            if (getConn.responseCode in 200..299) {
-                                fetchPiCameraFrame(candidate, port)
-                                return@withContext Pair(true, "Optical snapshot captured")
-                            }
-                        } catch (_: Exception) {}
                     }
                 }
             }
-
-            // Even if trigger endpoint failed, attempt refreshing camera frame
-            val frame = fetchPiCameraFrame(cleanHost, port)
-            if (frame != null) {
-                Pair(true, "Optical frame synced from Pi")
-            } else {
-                Pair(false, "Failed to capture snapshot from Pi camera")
-            }
+            Pair(false, "Could not reach the Pi camera API at ${candidateHosts.joinToString()}:$port")
         }
     }
 
@@ -3456,9 +3514,10 @@ class RailGuardFirebaseService private constructor() {
     ): Pair<Boolean, String> {
         return withContext(Dispatchers.IO) {
             withContext(Dispatchers.Main) {
-                isPiBuzzerActive = ring
                 lastBuzzerTimestamp = System.currentTimeMillis()
-                buzzerStatusMessage = if (ring) "Pi Buzzer Ringing (${durationSeconds}s)" else "Pi Buzzer Silenced"
+                // Do not claim the trackside buzzer is ringing yet. The phone
+                // alarm is local and always runs; the Pi state is set on ACK.
+                buzzerStatusMessage = if (ring) "Sending buzzer command…" else "Sending silence command…"
             }
 
             // 1. Android local device acoustic alarm & tactile vibration
@@ -3496,13 +3555,7 @@ class RailGuardFirebaseService private constructor() {
             }
 
             // 2. Direct Wi-Fi HTTP POST to Raspberry Pi /api/buzzer
-            val cleanHost = host.trim()
-                .removePrefix("http://")
-                .removePrefix("https://")
-                .split("/")[0]
-                .split(":")[0]
-                .ifBlank { "192.168.4.1" }
-            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
+            val candidateHosts = piCandidateHosts(host)
             val stateStr = if (ring) "RING" else "SILENCE"
             val payload = JSONObject().apply {
                 put("state", stateStr)
@@ -3514,14 +3567,15 @@ class RailGuardFirebaseService private constructor() {
             var wifiAck = false
             var wifiMsg = ""
             for (candidate in candidateHosts) {
+                if (wifiAck) break
                 // Primary: Direct Wi-Fi HTTP POST
                 try {
                     val conn = (URL("http://$candidate:$port/api/buzzer").openConnection() as HttpURLConnection).apply {
                         requestMethod = "POST"
-                        connectTimeout = 2500
-                        readTimeout = 2500
+                        connectTimeout = 1500
+                        readTimeout = 1800
                         doOutput = true
-                        setRequestProperty("Connection", "close")
+                        applyPiAuth()
                         setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                     }
                     conn.outputStream.use { os ->
@@ -3539,9 +3593,9 @@ class RailGuardFirebaseService private constructor() {
                     val getUrl = "http://$candidate:$port/api/buzzer?state=$stateStr&duration=$durationSeconds"
                     val getConn = (URL(getUrl).openConnection() as HttpURLConnection).apply {
                         requestMethod = "GET"
-                        connectTimeout = 2000
-                        readTimeout = 2000
-                        setRequestProperty("Connection", "close")
+                        connectTimeout = 1200
+                        readTimeout = 1500
+                        applyPiAuth()
                     }
                     if (getConn.responseCode in 200..299) {
                         wifiAck = true
@@ -3552,26 +3606,53 @@ class RailGuardFirebaseService private constructor() {
             }
 
             // 3. Cloud dual-channel command write to Firebase RTDB
-            try {
-                val authParam = authenticatedQueryParam()
-                val buzzerEndpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/commands/buzzer.json$authParam"
-                val conn = (URL(buzzerEndpoint).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "PUT"
-                    connectTimeout = 3000
-                    readTimeout = 3000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            var cloudAck = false
+            var cloudError: String? = null
+            if (autoSyncRtdbEnabled && currentUser != null) {
+                try {
+                    val authParam = authenticatedQueryParam()
+                    val buzzerEndpoint = "${getEffectiveDbUrl()}/${userDataRoot()}/commands/buzzer.json$authParam"
+                    val conn = (URL(buzzerEndpoint).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "PUT"
+                        connectTimeout = 3000
+                        readTimeout = 3000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    }
+                    conn.outputStream.use { os ->
+                        os.write(payload.toByteArray(Charsets.UTF_8))
+                    }
+                    cloudAck = conn.responseCode in 200..299
+                    if (!cloudAck) cloudError = "cloud HTTP ${conn.responseCode}"
+                } catch (e: Exception) {
+                    cloudError = e.message
                 }
-                conn.outputStream.use { os ->
-                    os.write(payload.toByteArray(Charsets.UTF_8))
-                }
-                conn.responseCode
-            } catch (_: Exception) {}
+            }
 
-            if (wifiAck) {
-                Pair(true, wifiMsg)
-            } else {
-                Pair(true, "Buzzer instruction dispatched (Cloud & Local Alarm)")
+            withContext(Dispatchers.Main) {
+                if (wifiAck) {
+                    isPiBuzzerActive = ring
+                    buzzerStatusMessage = if (ring) "Pi buzzer acknowledged (Wi-Fi)" else "Pi buzzer silenced (Wi-Fi)"
+                    isDirectWifiConnected = true
+                } else if (cloudAck) {
+                    // The Pi polls this path and will act on it; we cannot claim
+                    // the physical buzzer is already sounding.
+                    isPiBuzzerActive = ring
+                    buzzerStatusMessage = "Command queued in cloud (Pi will poll it)"
+                } else {
+                    isPiBuzzerActive = false
+                    buzzerStatusMessage = "Buzzer command FAILED" +
+                        (cloudError?.let { " ($it)" } ?: "") +
+                        ". Phone alarm only."
+                    isDirectWifiConnected = false
+                }
+            }
+
+            when {
+                wifiAck -> Pair(true, wifiMsg)
+                cloudAck -> Pair(true, "Command queued in Firebase; Pi will ring when it polls. Phone alarm active.")
+                else -> Pair(false, "Pi unreachable over Wi-Fi and cloud write failed" +
+                    (cloudError?.let { " ($it)" } ?: "") + ". Only the phone alarm sounded.")
             }
         }
     }
@@ -3591,28 +3672,30 @@ class RailGuardFirebaseService private constructor() {
                 .split("/")[0]
                 .split(":")[0]
                 .ifBlank { "192.168.4.1" }
-            val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
-                android.os.Build.HARDWARE.contains("goldfish") ||
-                android.os.Build.HARDWARE.contains("ranchu")
             val candidateHosts = if (cleanHost != "192.168.4.1") {
                 listOf(cleanHost, "192.168.4.1")
             } else {
-                if (isEmulator) listOf(cleanHost, "10.0.2.2", "127.0.0.1")
-                else listOf(cleanHost, "127.0.0.1")
+                // On a real phone the Pi must be reachable on the LAN. Emulator
+                // loopback fallbacks only make sense inside an emulator.
+                val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
+                    android.os.Build.HARDWARE.contains("goldfish") ||
+                    android.os.Build.HARDWARE.contains("ranchu")
+                if (isEmulator) listOf(cleanHost, "10.0.2.2", "127.0.0.1") else listOf(cleanHost, "127.0.0.1")
             }.distinct()
             val endpoints = listOf("/api/all_data", "/api/telemetry", "/telemetry", "/api/sensors", "/sensors", "/api/health", "/")
 
             for (candidate in candidateHosts) {
-                var candidateReachable = true
+                var hostReachable = true
                 for (path in endpoints) {
-                    if (!candidateReachable) break
+                    if (!hostReachable) break
                     val startMs = System.currentTimeMillis()
                     try {
                         val conn = (URL("http://$candidate:8080$path").openConnection() as HttpURLConnection).apply {
                             requestMethod = "GET"
+                            // Short timeouts: a missing Pi must not freeze the UI.
                             connectTimeout = 1200
                             readTimeout = 1500
-                            setRequestProperty("Connection", "close")
+                            applyPiAuth()
                             setRequestProperty("Accept", "application/json, text/html, */*")
                         }
                         if (conn.responseCode in 200..299) {
@@ -3639,7 +3722,7 @@ class RailGuardFirebaseService private constructor() {
                                         autoProcessDetectedCrack(telem)
 
                                         // Asynchronously sync live telemetry into Firebase Cloud when auth is active
-                                        if (currentUser != null) {
+                                        if (autoSyncRtdbEnabled && currentUser != null) {
                                             scope.launch(Dispatchers.IO) {
                                                 try {
                                                     val authParam = authenticatedQueryParam()
@@ -3670,21 +3753,22 @@ class RailGuardFirebaseService private constructor() {
                                         val bat = hwObj.optJSONObject("battery")
                                         val sys = hwObj.optJSONObject("system")
                                         val hwStatus = HardwareHealthStatus(
-                                            status = hwObj.optString("status", "OPERATIONAL"),
+                                            status = hwObj.optString("status", "UNKNOWN"),
                                             cameraOnline = cam?.optString("status") == "ONLINE",
-                                            cameraSensor = cam?.optString("sensor", "Sony IMX708") ?: "Sony IMX708",
-                                            cameraFps = cam?.optInt("fps", 30) ?: 30,
+                                            cameraSensor = cam?.optString("sensor", "Not reported") ?: "Not reported",
+                                            cameraFps = cam?.optInt("fps", 0) ?: 0,
                                             ultrasonicOnline = ut?.optString("status") == "ONLINE",
-                                            ultrasonicSensor = ut?.optString("sensor", "Piezo UT 5MHz") ?: "Piezo UT 5MHz",
+                                            ultrasonicSensor = ut?.optString("sensor", "Not reported") ?: "Not reported",
                                             vibrationOnline = vib?.optString("status") == "ONLINE",
-                                            vibrationSensor = vib?.optString("sensor", "ADXL345 Tri-axial") ?: "ADXL345 Tri-axial",
+                                            vibrationSensor = vib?.optString("sensor", "Not reported") ?: "Not reported",
                                             temperatureOnline = temp?.optString("status") == "ONLINE",
-                                            temperatureSensor = temp?.optString("sensor", "PT100 RTD") ?: "PT100 RTD",
+                                            temperatureSensor = temp?.optString("sensor", "Not reported") ?: "Not reported",
                                             gpsOnline = gnss?.optString("status") == "ONLINE",
-                                            gpsSensor = gnss?.optString("gnss", "RTK-DGPS Locked") ?: "RTK-DGPS Locked",
-                                            batteryPercent = bat?.optInt("percent", 94) ?: 94,
-                                            batteryVoltage = bat?.optDouble("voltage", 12.4)?.toFloat() ?: 12.4f,
-                                            cpuTempC = sys?.optDouble("cpuTempC", 42.8)?.toFloat() ?: 42.8f,
+                                            gpsSensor = gnss?.optString("gnss", "Not reported") ?: "Not reported",
+                                            // Keep null when the Pi has no battery monitor.
+                                            batteryPercent = if (bat != null && bat.has("percent") && !bat.isNull("percent")) bat.optInt("percent") else null,
+                                            batteryVoltage = if (bat != null && bat.has("voltage") && !bat.isNull("voltage")) bat.optDouble("voltage").toFloat() else null,
+                                            cpuTempC = if (sys != null && sys.has("cpuTempC") && !sys.isNull("cpuTempC")) sys.optDouble("cpuTempC").toFloat() else null,
                                             uptimeSeconds = sys?.optLong("uptimeSeconds", 0L) ?: 0L,
                                             latencyMs = roundTripMs
                                         )
@@ -3711,12 +3795,15 @@ class RailGuardFirebaseService private constructor() {
                                         }
                                     }
 
-                                    // 4. TSR Speed Sync
-                                    val tsrVal = json.optInt("activeTsrSpeed", json.optInt("activeTsrSpeedKmH", json.optInt("tsrSpeed", 0)))
-                                    if (tsrVal > 0) {
-                                        withContext(Dispatchers.Main) {
-                                            activeTsrSpeed = tsrVal
-                                        }
+                                    // 4. TSR Speed Sync. null/absent means "no TSR issued".
+                                    val tsrVal: Int? = when {
+                                        json.has("activeTsrSpeed") && !json.isNull("activeTsrSpeed") -> json.optInt("activeTsrSpeed")
+                                        json.has("activeTsrSpeedKmH") && !json.isNull("activeTsrSpeedKmH") -> json.optInt("activeTsrSpeedKmH")
+                                        json.has("tsrSpeed") && !json.isNull("tsrSpeed") -> json.optInt("tsrSpeed")
+                                        else -> null
+                                    }?.takeIf { it > 0 }
+                                    withContext(Dispatchers.Main) {
+                                        activeTsrSpeed = tsrVal
                                     }
 
                                     // 5. Defects, Tasks, Inspections
@@ -3734,19 +3821,19 @@ class RailGuardFirebaseService private constructor() {
                                                     tone = try { Tone.valueOf(item.optString("tone", "CRITICAL")) } catch (_: Exception) { Tone.CRITICAL },
                                                     time = item.optString("time", "Now"),
                                                     detail = item.optString("detail", ""),
-                                                    estimatedLength = item.optString("estimatedLength", "14.8 mm"),
-                                                    latitude = item.optDouble("latitude", 51.5074),
-                                                    longitude = item.optDouble("longitude", -0.1278),
+                                                    estimatedLength = item.optString("estimatedLength", "Unknown"),
+                                                    latitude = item.optDouble("latitude", 0.0),
+                                                    longitude = item.optDouble("longitude", 0.0),
                                                     riskScore = item.optInt("riskScore", 94),
-                                                    chainageCoordinate = item.optString("chainageCoordinate", "Awaiting Chainage"),
-                                                    aiConfidencePercent = item.optInt("aiConfidencePercent", 96),
-                                                    aiPrescribedAction = item.optString("aiPrescribedAction", "Emergency Slow Order (TSR 25 km/h)"),
-                                                    flawType = item.optString("flawType", "Transverse Gauge Corner Fissure"),
-                                                    ultrasonicDepthMm = item.optDouble("ultrasonicDepthMm", 46.2).toFloat(),
-                                                    vibrationG = item.optDouble("vibrationG", 0.425).toFloat(),
-                                                    railTempC = item.optDouble("railTempC", 32.8).toFloat(),
-                                                    speedKmh = item.optDouble("speedKmh", 45.0).toFloat(),
-                                                    boundingBox = item.optString("boundingBox", "x:140,y:88,w:120,h:45")
+                                                    chainageCoordinate = item.optString("chainageCoordinate", "Unknown"),
+                                                    aiConfidencePercent = item.optInt("aiConfidencePercent", 0),
+                                                    aiPrescribedAction = item.optString("aiPrescribedAction", "No recommendation available"),
+                                                    flawType = item.optString("flawType", "Unknown"),
+                                                    ultrasonicDepthMm = item.optDouble("ultrasonicDepthMm", 0.0).toFloat(),
+                                                    vibrationG = item.optDouble("vibrationG", 0.0).toFloat(),
+                                                    railTempC = item.optDouble("railTempC", 0.0).toFloat(),
+                                                    speedKmh = item.optDouble("speedKmh", 0.0).toFloat(),
+                                                    boundingBox = item.optString("boundingBox", "")
                                                 )
                                             )
                                         }
@@ -3835,10 +3922,10 @@ class RailGuardFirebaseService private constructor() {
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                        if (e is java.net.SocketTimeoutException || e is java.net.ConnectException || e is java.net.NoRouteToHostException) {
-                            candidateReachable = false
-                        }
+                    } catch (_: Exception) {
+                        // Host did not answer: stop trying the remaining endpoints
+                        // on this address and fail honestly.
+                        hostReachable = false
                     }
                 }
             }
@@ -3862,66 +3949,21 @@ class RailGuardFirebaseService private constructor() {
      * Issues Emergency Temporary Speed Restriction (TSR) command instantly over Wi-Fi to Raspberry Pi
      */
     suspend fun issueEmergencyTsr(speedKmh: Int = 25, host: String = localWifiIp, port: Int = 8080): Boolean {
-        withContext(Dispatchers.Main) {
-            activeTsrSpeed = speedKmh
-            val updated = (latestSensorTelemetry ?: loadLocalTelemetry())?.copy(
-                axleSpeedKmh = speedKmh.toFloat(),
-                recommendedTsrKmh = speedKmh.toFloat(),
-                timestamp = System.currentTimeMillis()
-            ) ?: LiveSensorTelemetry(
-                nodeId = "RPI-TRACK-01",
-                ultrasonicDepthMm = 68.2f,
-                vibrationG = 0.035f,
-                railTempC = 31.5f,
-                axleSpeedKmh = speedKmh.toFloat(),
-                chainage = "KM 14+320",
-                hardware = "Raspberry Pi Zero W",
-                status = "TSR_${speedKmh}KMH_ACTIVE",
-                timestamp = System.currentTimeMillis()
+        // Single source of truth: dispatchTsrToFirebase validates the speed,
+        // enforces the crack interlock, sends to the Pi, and only then updates state.
+        val ok = dispatchTsrToFirebase("FLEET-ALL", speedKmh, "Operator emergency speed order: $speedKmh km/h")
+        if (ok) {
+            logSafetyAuditEvent(
+                "EMERGENCY_TSR_ENGAGED",
+                mapOf("speedKmh" to speedKmh, "destination" to "Pi Wi-Fi / cloud")
             )
-            latestSensorTelemetry = updated
-            saveLocalTelemetry(updated)
-        }
-        return withContext(Dispatchers.IO) {
-            val cleanHost = host.trim()
-                .removePrefix("http://")
-                .removePrefix("https://")
-                .split("/")[0]
-                .split(":")[0]
-                .ifBlank { "192.168.4.1" }
-            val candidateHosts = listOf(cleanHost, "192.168.4.1", "10.0.2.2", "127.0.0.1", "localhost").distinct()
-            var wifiAck = false
-            for (candidate in candidateHosts) {
-                try {
-                    val conn = (URL("http://$candidate:$port/api/tsr").openConnection() as HttpURLConnection).apply {
-                        requestMethod = "POST"
-                        connectTimeout = 2000
-                        readTimeout = 2000
-                        doOutput = true
-                        setRequestProperty("Connection", "close")
-                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                    }
-                    val payload = JSONObject().apply {
-                        put("speed", speedKmh)
-                        put("reason", "Operator emergency speed order: $speedKmh km/h")
-                        put("timestamp", System.currentTimeMillis())
-                    }
-                    OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
-                    if (conn.responseCode in 200..299) {
-                        wifiAck = true
-                        break
-                    }
-                } catch (_: Exception) {
-                }
-            }
-            postNotification(
-                title = "EMERGENCY TSR ENGAGED",
-                message = "Temporary Speed Restriction applied: $speedKmh km/h across active corridor sector.",
-                tone = Tone.CRITICAL
+        } else {
+            logSafetyAuditEvent(
+                "EMERGENCY_TSR_FAILED",
+                mapOf("speedKmh" to speedKmh, "reason" to (lastTsrMessage ?: "unknown"))
             )
-            logSafetyAuditEvent("EMERGENCY_TSR_ENGAGED", mapOf("speedKmh" to speedKmh, "wifiAcknowledged" to wifiAck))
-            wifiAck
         }
+        return ok
     }
 
     private val processedAnomalies = java.util.Collections.synchronizedSet(mutableSetOf<String>())
@@ -3931,10 +3973,13 @@ class RailGuardFirebaseService private constructor() {
      * notification when an anomaly/crack is detected in telemetry or camera stream.
      */
     suspend fun autoProcessDetectedCrack(telemetry: LiveSensorTelemetry) {
+        // Only an explicit crack/anomaly flag counts. Ultrasonic distance is a
+        // clearance measurement, NOT a crack measurement, so it must not trigger
+        // this pipeline (that produced permanent false alarms before).
         val isAnomaly = telemetry.hasCrack ||
             telemetry.status.contains("ANOMALY", ignoreCase = true) ||
-            telemetry.status.contains("CRACK", ignoreCase = true) ||
-            (telemetry.ultrasonicDepthMm in 10.0f..55.0f)
+            telemetry.flawType.contains("Fissure", ignoreCase = true) ||
+            telemetry.flawType.contains("Crack", ignoreCase = true)
 
         if (!isAnomaly) return
 
@@ -3947,27 +3992,35 @@ class RailGuardFirebaseService private constructor() {
 
         val defectId = "DEF-AUTO-${System.currentTimeMillis() % 100000}"
         val sectionName = if (telemetry.chainage.isNotBlank() && telemetry.chainage != "Unknown" && telemetry.chainage != "Awaiting Chainage") "Active Corridor (${telemetry.chainage})" else "Active Corridor"
+        val confidence = telemetry.aiConfidencePercent
+        val lengthText = if (telemetry.crackLengthMm > 0) "${telemetry.crackLengthMm} mm" else "length not calibrated"
+        val coords = if (telemetry.latitude != 0.0 || telemetry.longitude != 0.0) {
+            "%.5f, %.5f".format(telemetry.latitude, telemetry.longitude)
+        } else "GNSS unavailable"
         val crackDefect = Defect(
             id = defectId,
-            title = "Transverse Rail Fissure (Auto-Detected)",
+            title = "Surface Fissure (Auto-Detected)",
             section = sectionName,
-            score = "CRITICAL (${if (telemetry.aiConfidencePercent > 0) telemetry.aiConfidencePercent else 96}% AI Flaw Match)",
+            score = "CRITICAL (${confidence}% vision confidence)",
             tone = Tone.CRITICAL,
             time = java.text.SimpleDateFormat("HH:mm · dd MMM", java.util.Locale.getDefault()).format(java.util.Date()),
-            detail = "Automated camera & ultrasonic edge scan flagged surface rail crack at ${telemetry.chainage}. Flaw depth: ${telemetry.ultrasonicDepthMm} mm. Impact vibration: ${telemetry.vibrationG} g.",
-            estimatedLength = if (telemetry.crackLengthMm > 0) "${telemetry.crackLengthMm} mm" else "14.8 mm",
-            latitude = 51.5074,
-            longitude = -0.1278,
-            riskScore = 94,
+            detail = "Camera vision flagged a surface fissure at ${telemetry.chainage}. " +
+                "Length: $lengthText; image confidence: $confidence%. " +
+                "Ultrasonic clearance: ${telemetry.ultrasonicDepthMm} mm (not a crack depth); " +
+                "impact shock ${telemetry.vibrationG} g.",
+            estimatedLength = lengthText,
+            latitude = telemetry.latitude,
+            longitude = telemetry.longitude,
+            riskScore = if (confidence >= 80) 94 else 70,
             chainageCoordinate = telemetry.chainage,
-            aiConfidencePercent = if (telemetry.aiConfidencePercent > 0) telemetry.aiConfidencePercent else 96,
-            aiPrescribedAction = "Emergency Slow Order (TSR ${telemetry.recommendedTsrKmh.toInt()} km/h) & urgent weld clamp verification required.",
-            flawType = if (telemetry.flawType.isNotBlank()) telemetry.flawType else "Transverse Gauge Corner Fissure",
+            aiConfidencePercent = confidence,
+            aiPrescribedAction = "Emergency Slow Order (TSR ${telemetry.recommendedTsrKmh.toInt()} km/h) & urgent visual/weld verification required.",
+            flawType = if (telemetry.flawType.isNotBlank()) telemetry.flawType else "Surface Fissure (optical)",
             ultrasonicDepthMm = telemetry.ultrasonicDepthMm,
             vibrationG = telemetry.vibrationG,
             railTempC = telemetry.railTempC,
             speedKmh = telemetry.axleSpeedKmh,
-            boundingBox = if (telemetry.crackBoundingBox.isNotBlank()) telemetry.crackBoundingBox else "x:140,y:88,w:120,h:45"
+            boundingBox = telemetry.crackBoundingBox
         )
 
         // 2. Guarantee Instant Matching Alert Popup is shown in the App
@@ -3985,7 +4038,7 @@ class RailGuardFirebaseService private constructor() {
                     railTempC = crackDefect.railTempC,
                     speedKmh = crackDefect.speedKmh,
                     recommendedTsrKmh = telemetry.recommendedTsrKmh,
-                    coordinates = "51.5074° N, -0.1278° W",
+                    coordinates = coords,
                     action = crackDefect.aiPrescribedAction,
                     boundingBox = crackDefect.boundingBox,
                     timestamp = System.currentTimeMillis()

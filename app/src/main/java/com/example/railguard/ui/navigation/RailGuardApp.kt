@@ -934,16 +934,19 @@ fun RailGuardApp() {
                 onViewDefect = {
                     val matchingDefect = defects.firstOrNull { it.id == crackAlert.defectId } ?: Defect(
                         id = crackAlert.defectId,
-                        title = "Transverse Rail Fissure (Auto-Detected)",
+                        title = "Surface Fissure (Auto-Detected)",
                         section = crackAlert.section,
-                        score = "CRITICAL (${crackAlert.confidence}% AI Flaw Match)",
+                        score = "CRITICAL (${crackAlert.confidence}% vision confidence)",
                         tone = Tone.CRITICAL,
                         time = java.text.SimpleDateFormat("HH:mm · dd MMM", java.util.Locale.getDefault()).format(java.util.Date(crackAlert.timestamp)),
-                        detail = "Automated camera & ultrasonic edge scan flagged surface rail crack at ${crackAlert.chainage}. Flaw depth: ${crackAlert.ultrasonicDepthMm} mm. Impact vibration: ${crackAlert.vibrationG} g.",
+                        detail = "Camera vision flagged a surface fissure at ${crackAlert.chainage}. " +
+                            "Length: ${crackAlert.crackLength}. " +
+                            "Ultrasonic clearance: ${crackAlert.ultrasonicDepthMm} mm (clearance, not crack depth). " +
+                            "Impact vibration: ${crackAlert.vibrationG} g.",
                         estimatedLength = crackAlert.crackLength,
-                        latitude = 51.5074,
-                        longitude = -0.1278,
-                        riskScore = 94,
+                        latitude = 0.0,
+                        longitude = 0.0,
+                        riskScore = if (crackAlert.confidence >= 80) 94 else 70,
                         chainageCoordinate = crackAlert.chainage,
                         aiConfidencePercent = crackAlert.confidence,
                         aiPrescribedAction = crackAlert.action,

@@ -40,7 +40,8 @@ data class AppPreferences(
     }
 
     fun formatSpeedStr(speedKmhStr: String): String {
-        val num = speedKmhStr.filter { it.isDigit() }.toIntOrNull() ?: 25
+        // Do not invent a speed when the input cannot be parsed.
+        val num = speedKmhStr.filter { it.isDigit() }.toIntOrNull() ?: return "Not set"
         return formatSpeed(num)
     }
 

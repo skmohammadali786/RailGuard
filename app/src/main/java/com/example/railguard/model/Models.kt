@@ -25,12 +25,12 @@ data class Defect(
     val chainageCoordinate: String = "Unknown",
     val aiConfidencePercent: Int = 0,
     val aiPrescribedAction: String = "No cloud recommendation available",
-    val flawType: String = "Transverse Gauge Corner Fissure",
-    val ultrasonicDepthMm: Float = 46.2f,
-    val vibrationG: Float = 0.425f,
-    val railTempC: Float = 32.8f,
-    val speedKmh: Float = 45.0f,
-    val boundingBox: String = "x:140,y:88,w:120,h:45"
+    val flawType: String = "Unknown",
+    val ultrasonicDepthMm: Float = 0.0f,
+    val vibrationG: Float = 0.0f,
+    val railTempC: Float = 0.0f,
+    val speedKmh: Float = 0.0f,
+    val boundingBox: String = ""
 )
 
 data class CrackAlertData(
@@ -114,23 +114,26 @@ data class PatrolSchedule(
 )
 
 data class HardwareHealthStatus(
-    val status: String = "OPERATIONAL",
-    val cameraOnline: Boolean = true,
-    val cameraSensor: String = "Sony IMX708 (Camera Module 3)",
-    val cameraFps: Int = 30,
-    val ultrasonicOnline: Boolean = true,
-    val ultrasonicSensor: String = "Piezo UT Dual 5MHz",
-    val vibrationOnline: Boolean = true,
-    val vibrationSensor: String = "ADXL345 Tri-axial (+/-16g)",
-    val temperatureOnline: Boolean = true,
-    val temperatureSensor: String = "PT100 RTD High-Precision Probe",
-    val gpsOnline: Boolean = true,
-    val gpsSensor: String = "NEO-M9N RTK-DGPS Locked (1cm precision)",
-    val batteryPercent: Int = 94,
-    val batteryVoltage: Float = 12.4f,
-    val cpuTempC: Float = 42.8f,
+    // Defaults describe "unknown", never a healthy-but-invented reading. The Pi
+    // fills these in from its real diagnostics endpoint.
+    val status: String = "UNKNOWN",
+    val cameraOnline: Boolean = false,
+    val cameraSensor: String = "Not reported",
+    val cameraFps: Int = 0,
+    val ultrasonicOnline: Boolean = false,
+    val ultrasonicSensor: String = "Not reported",
+    val vibrationOnline: Boolean = false,
+    val vibrationSensor: String = "Not reported",
+    val temperatureOnline: Boolean = false,
+    val temperatureSensor: String = "Not reported",
+    val gpsOnline: Boolean = false,
+    val gpsSensor: String = "Not reported",
+    // null = the Pi has no battery monitor. The app must show "Not monitored".
+    val batteryPercent: Int? = null,
+    val batteryVoltage: Float? = null,
+    val cpuTempC: Float? = null,
     val uptimeSeconds: Long = 0L,
-    val latencyMs: Long = 14L
+    val latencyMs: Long = 0L
 )
 
 data class AiOracleData(

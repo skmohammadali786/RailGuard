@@ -19,15 +19,21 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
+import hmac
 import http.server
+import io
 import json
 import logging
 import math
 import os
 import random
 import socketserver
+import statistics
 import struct
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -35,6 +41,20 @@ import urllib.parse
 import urllib.request
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
+
+# Local modules (same directory as this script).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import crack_vision
+except Exception as _vision_import_error:  # pragma: no cover
+    crack_vision = None
+    _VISION_IMPORT_ERROR = str(_vision_import_error)
+else:
+    _VISION_IMPORT_ERROR = None
+try:
+    from firebase_auth import FirebaseTokenManager
+except Exception:  # pragma: no cover
+    FirebaseTokenManager = None  # type: ignore
 
 logging.basicConfig(
     level=os.getenv("RAILGUARD_LOG_LEVEL", "INFO"),
@@ -61,10 +81,95 @@ LATEST_TELEMETRY: Dict[str, Any] = {
     "longitude": 77.2090,
     "gpsLocked": True
 }
-CURRENT_DEVICE_ID: str = os.getenv("RAILGUARD_DEVICE_ID", "RPI-TRACK-01")
 LATEST_CRACK: Optional[Dict[str, Any]] = None
 LAST_TSR_COMMAND: Optional[Dict[str, Any]] = None
 DEFECTS_REGISTRY: List[Dict[str, Any]] = []
+
+# =============================================================================
+DEVICE_ID: str = os.getenv("RAILGUARD_DEVICE_ID", "RPI-TRACK-01")
+# How long a detected crack stays "active" before it must be re-detected or
+# acknowledged by an operator. Prevents a single reading latching forever.
+CRACK_ACTIVE_SECONDS: int = int(os.getenv("RAILGUARD_CRACK_ACTIVE_SECONDS", "60"))
+# Minimum gap between two automatic crack pipelines (deduplication).
+CRACK_COOLDOWN_SECONDS: int = int(os.getenv("RAILGUARD_CRACK_COOLDOWN_SECONDS", "120"))
+# Optional shared secret for the local HTTP API. When set, every endpoint
+# except /api/health requires X-API-Key or ?api_key=...
+LOCAL_API_KEY: str = os.getenv("RAILGUARD_API_KEY", "").strip()
+# Set by --bind. 127.0.0.1 restricts the API to the Pi itself.
+LOCAL_BIND_HOST: str = os.getenv("RAILGUARD_BIND_HOST", "0.0.0.0")
+# Populated in main()/run_continuous_camera_scan().
+TOKEN_MANAGER: Optional[Any] = None
+LATEST_VISION_RESULT: Dict[str, Any] = {
+    "available": bool(crack_vision and crack_vision.is_available()),
+    "hasCrack": False,
+    "confidencePercent": 0,
+    "mode": "not-run",
+}
+LAST_CRACK_PIPELINE_MS: int = 0
+LAST_CLOUD_OK_MS: int = 0
+LAST_CLOUD_ERROR: str = ""
+LAST_FRAME_SIMULATED: bool = True
+LAST_FRAME_SOURCE: str = "none"
+LATEST_CAMERA_MIME: str = "image/png"
+_PICAMERA2 = None
+_UT_HISTORY: List[float] = []
+_UT_DEVIATION_COUNT: int = 0
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, "1" if default else "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _auth_token(id_token: Optional[str] = None) -> Optional[str]:
+    """Return the freshest ID token available (auto-refresh when configured)."""
+    if TOKEN_MANAGER is not None:
+        token = TOKEN_MANAGER.get_token()
+        if token:
+            return token
+    return id_token
+
+
+def _crack_is_active() -> bool:
+    if not LATEST_CRACK or not LATEST_CRACK.get("hasCrack"):
+        return False
+    ts = int(LATEST_CRACK.get("timestamp", 0) or 0)
+    if ts and (now_ms() - ts) > CRACK_ACTIVE_SECONDS * 1000:
+        return False
+    return True
+
+
+def clear_latest_crack(reason: str = "ACKNOWLEDGED") -> Dict[str, Any]:
+    """Clear the active crack latch so monitoring returns to nominal."""
+    global LATEST_CRACK, LATEST_TELEMETRY
+    previous = LATEST_CRACK
+    LATEST_CRACK = {
+        "status": "CLEARED",
+        "hasCrack": False,
+        "clearedAt": now_ms(),
+        "clearReason": reason,
+        "previousDefectId": ((previous or {}).get("defect") or {}).get("id"),
+    }
+    try:
+        LATEST_TELEMETRY = dict(LATEST_TELEMETRY or {})
+        LATEST_TELEMETRY.update(
+            {
+                "hasCrack": False,
+                "flawType": "NOMINAL_TRACK",
+                "crackLengthMm": 0.0,
+                "status": "ACTIVE_PATROL_SYNC",
+                "timestamp": now_ms(),
+            }
+        )
+    except Exception:
+        pass
+    save_pi_state()
+    log.info("[✓] Crack latch cleared (%s)", reason)
+    return LATEST_CRACK
+
 TASKS_REGISTRY: List[Dict[str, Any]] = []
 INSPECTIONS_REGISTRY: List[Dict[str, Any]] = []
 REPORTS_REGISTRY: List[Dict[str, Any]] = []
@@ -103,8 +208,10 @@ def save_pi_state():
     """Persists local patrol schedules, defects, tasks, and telemetry to disk."""
     try:
         data = {
+            "deviceId": DEVICE_ID,
             "telemetry": LATEST_TELEMETRY,
             "tsr": LAST_TSR_COMMAND,
+            "latestCrack": LATEST_CRACK,
             "schedules": SCHEDULES_REGISTRY,
             "defects": DEFECTS_REGISTRY,
             "tasks": TASKS_REGISTRY,
@@ -119,7 +226,7 @@ def save_pi_state():
 
 def load_pi_state():
     """Restores local patrol schedules, defects, tasks, and telemetry from disk."""
-    global LATEST_TELEMETRY, LAST_TSR_COMMAND, SCHEDULES_REGISTRY, DEFECTS_REGISTRY, TASKS_REGISTRY, INSPECTIONS_REGISTRY
+    global LATEST_TELEMETRY, LAST_TSR_COMMAND, SCHEDULES_REGISTRY, DEFECTS_REGISTRY, TASKS_REGISTRY, INSPECTIONS_REGISTRY, LATEST_CRACK
     try:
         if os.path.exists(STATE_FILE_PATH):
             with open(STATE_FILE_PATH, "r") as f:
@@ -128,6 +235,14 @@ def load_pi_state():
                 LATEST_TELEMETRY.update(data["telemetry"])
             if "tsr" in data and isinstance(data["tsr"], dict):
                 LAST_TSR_COMMAND = data["tsr"]
+            if "latestCrack" in data and isinstance(data["latestCrack"], dict):
+                saved_crack = data["latestCrack"]
+                saved_ts = int(saved_crack.get("timestamp", 0) or 0)
+                # Never restore a stale latch: an old anomaly must not look live.
+                if saved_crack.get("hasCrack") and (now_ms() - saved_ts) <= CRACK_ACTIVE_SECONDS * 1000:
+                    LATEST_CRACK = saved_crack
+                else:
+                    LATEST_CRACK = None
             if "schedules" in data and isinstance(data["schedules"], list):
                 SCHEDULES_REGISTRY = data["schedules"]
             if "defects" in data and isinstance(data["defects"], list):
@@ -658,7 +773,7 @@ ACQUISITION_THREAD: Optional[threading.Thread] = None
 
 def sensor_acquisition_worker():
     """Continuously queries connected physical sensors and updates LATEST_TELEMETRY with guaranteed dynamism."""
-    global LATEST_TELEMETRY, HARDWARE_ULTRASONIC_SENSOR, LAST_HARDWARE_ACQUISITION_MS
+    global LATEST_TELEMETRY, HARDWARE_ULTRASONIC_SENSOR, LAST_HARDWARE_ACQUISITION_MS, _UT_DEVIATION_COUNT
     try:
         HARDWARE_ULTRASONIC_SENSOR = HardwareUltrasonicSensor(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN)
     except Exception as e:
@@ -671,7 +786,9 @@ def sensor_acquisition_worker():
     while True:
         try:
             step += 1
-            now_ms = int(time.time() * 1000)
+            # NOTE: never name this local variable "now_ms" - it would shadow the
+            # module level now_ms() helper used further down in this function.
+            cycle_ts = int(time.time() * 1000)
 
             # 1. Active TSR Speed Enforcement
             tsr_speed = (LAST_TSR_COMMAND or {}).get("speed", LATEST_TELEMETRY.get("activeTsrSpeedKmH", 45))
@@ -687,7 +804,7 @@ def sensor_acquisition_worker():
 
             has_physical_hardware = (phys_dist_mm is not None) or (phys_temp_c is not None) or (serial_data is not None)
             if has_physical_hardware:
-                LAST_HARDWARE_ACQUISITION_MS = now_ms
+                LAST_HARDWARE_ACQUISITION_MS = cycle_ts
 
             # 3. Ultrasonic Depth: Physical hardware reading if present, else continuous dynamic track profile
             if phys_dist_mm is not None:
@@ -721,46 +838,86 @@ def sensor_acquisition_worker():
                 m_int = int((current_km - km_int) * 1000)
                 chainage_str = f"KM {km_int}+{m_int:03d}"
 
-            # 6. Flaw Check: Flag crack if ultrasonic depth deviates significantly from nominal 68.2mm
-            is_anomaly = False
-            flaw_type = "NOMINAL_TRACK"
-            crack_len = 0.0
-            if ut_depth < 58.0 or ut_depth > 78.0:
-                is_anomaly = True
-                flaw_type = "Transverse Ultrasonic Flaw Echo"
-                crack_len = round(abs(68.2 - ut_depth) * 0.8, 1)
+            # 6. Flaw / anomaly logic
+            # IMPORTANT: the HC-SR04 measures the distance from the sensor to the
+            # railhead. It does NOT measure rail thickness and cannot detect a
+            # crack on its own. Treating an out-of-range distance as a crack was
+            # the cause of the permanent false alarms. We now only report a
+            # "clearance warning" when the reading deviates from a rolling
+            # baseline for several consecutive samples.
+            _UT_HISTORY.append(float(ut_depth))
+            if len(_UT_HISTORY) > 20:
+                del _UT_HISTORY[0]
 
-            # Anomaly expiration: Keep flagged anomaly active for 15s so operator can review, then return to nominal
+            ut_clearance_warning = False
+            ut_baseline_mm = round(statistics.median(_UT_HISTORY), 1) if len(_UT_HISTORY) >= 5 else round(float(ut_depth), 1)
+            if len(_UT_HISTORY) >= 5 and abs(float(ut_depth) - ut_baseline_mm) > 15.0:
+                _UT_DEVIATION_COUNT += 1
+            else:
+                _UT_DEVIATION_COUNT = 0
+            if _UT_DEVIATION_COUNT >= 3:
+                ut_clearance_warning = True
+
+            # Expire a crack that has not been re-detected within the active window.
             if LATEST_CRACK and LATEST_CRACK.get("hasCrack"):
-                crack_ts = LATEST_CRACK.get("timestamp", 0)
-                if now_ms - crack_ts < 15000:
-                    is_anomaly = True
-                    flaw_type = (LATEST_CRACK.get("defect") or {}).get("title", "Transverse Railhead Fissure")
-                    crack_len = 14.8
-                    ut_depth = 46.2  # Keep depth consistent with anomaly telemetry during active alert
-                else:
+                crack_ts = int(LATEST_CRACK.get("timestamp", 0) or 0)
+                if (now_ms() - crack_ts) > CRACK_ACTIVE_SECONDS * 1000:
                     LATEST_CRACK["hasCrack"] = False
+                    LATEST_CRACK["status"] = "EXPIRED"
+                    LATEST_CRACK["expiredAt"] = now_ms()
+
+            crack_active = _crack_is_active()
+            if crack_active:
+                active_defect = LATEST_CRACK.get("defect") or {}
+                flaw_type = active_defect.get("flawType") or active_defect.get("title") or "Surface Fissure"
+                try:
+                    crack_len = float(
+                        str(active_defect.get("estimatedLength", "0")).replace("mm", "").strip()
+                    )
+                except Exception:
+                    crack_len = float(active_defect.get("crackLengthMm", 0.0) or 0.0)
+            else:
+                flaw_type = "NOMINAL_TRACK"
+                crack_len = 0.0
+
+            vision_ok = bool(crack_vision and crack_vision.is_available())
+            data_mode = "LIVE" if has_physical_hardware else "SIMULATED"
+
+            # GPS is only reported when a real fix is available from the serial
+            # node. Without a GNSS receiver we must not claim a lock.
+            gps_locked = bool(serial_data and serial_data.get("gpsLocked"))
+            gps_lat = serial_data.get("latitude") if gps_locked else None
+            gps_lon = serial_data.get("longitude") if gps_locked else None
+            if gps_lat is None or gps_lon is None:
+                gps_locked = False
 
             # Update global LATEST_TELEMETRY with guaranteed dynamic updates
             LATEST_TELEMETRY = {
-                "nodeId": CURRENT_DEVICE_ID,
+                "nodeId": DEVICE_ID,
                 "ultrasonicDepthMm": ut_depth,
+                "ultrasonicBaselineMm": ut_baseline_mm,
+                "clearanceWarning": ut_clearance_warning,
                 "vibrationG": vib_g,
                 "railTempC": rail_temp,
                 "axleSpeedKmh": effective_speed,
-                "activeTsrSpeedKmH": int(effective_speed),
-                "recommendedTsrKmh": effective_speed if not is_anomaly else 25.0,
+                "activeTsrSpeedKmH": (LAST_TSR_COMMAND or {}).get("speed"),
+                "recommendedTsrKmh": 25.0 if crack_active else None,
                 "chainage": chainage_str,
                 "hardware": hw_source,
-                "status": "ALL_SENSORS_ONLINE" if has_physical_hardware else "ACTIVE_PATROL_SYNC",
-                "hasCrack": is_anomaly,
+                "status": "ANOMALY_FLAGGED" if crack_active else ("ALL_SENSORS_ONLINE" if has_physical_hardware else "SIMULATED_DEMO"),
+                "dataMode": data_mode,
+                "visionAvailable": vision_ok,
+                "visionMode": (LATEST_VISION_RESULT or {}).get("mode", "not-run"),
+                "hasCrack": crack_active,
                 "flawType": flaw_type,
                 "crackLengthMm": crack_len,
-                "aiConfidencePercent": 98 if not is_anomaly else 96,
-                "timestamp": now_ms,
-                "latitude": round(28.6139 + (current_km - 14.0) * 0.001, 5),
-                "longitude": round(77.2090 + (current_km - 14.0) * 0.001, 5),
-                "gpsLocked": True
+                "aiConfidencePercent": int((LATEST_CRACK or {}).get("defect", {}).get("aiConfidencePercent", 0)) if crack_active else 0,
+                "crackExpiresAt": (int(LATEST_CRACK.get("timestamp", 0)) + CRACK_ACTIVE_SECONDS * 1000) if crack_active else None,
+                "timestamp": cycle_ts,
+                "latitude": gps_lat,
+                "longitude": gps_lon,
+                "gpsLocked": gps_locked,
+                "gpsSource": "GNSS" if gps_locked else "unavailable"
             }
 
         except Exception as e:
@@ -776,8 +933,134 @@ def ensure_sensor_acquisition_started():
         ACQUISITION_THREAD.start()
 
 
+def _camera_available() -> bool:
+    """Best-effort detection of a real camera without taking a picture."""
+    try:
+        import glob
+        if glob.glob("/dev/video*"):
+            return True
+    except Exception:
+        pass
+    try:
+        import picamera2  # noqa: F401
+        return True
+    except Exception:
+        pass
+    import shutil
+    return any(shutil.which(x) for x in ("rpicam-still", "libcamera-still", "fswebcam"))
+
+
+def capture_real_camera_frame(high_res: bool = False) -> Optional[bytes]:
+    """Capture a JPEG from the real camera. Returns None when no camera exists."""
+    global _PICAMERA2, LAST_FRAME_SOURCE
+    # 1. picamera2 persistent session (fastest on Pi OS Bookworm).
+    try:
+        if _PICAMERA2 is None:
+            from picamera2 import Picamera2  # type: ignore
+
+            cam = Picamera2()
+            size = (1640, 1232) if high_res else (820, 616)
+            cfg = cam.create_still_configuration(main={"size": size})
+            cam.configure(cfg)
+            cam.start()
+            time.sleep(0.6)
+            _PICAMERA2 = cam
+        buf = io.BytesIO()
+        _PICAMERA2.capture_file(buf, format="jpeg")
+        data = buf.getvalue()
+        if data:
+            LAST_FRAME_SOURCE = "picamera2"
+            return data
+    except Exception as e:
+        log.debug("picamera2 capture unavailable: %s", e)
+
+    # 2. CLI tools writing to a temporary file.
+    import shutil
+    fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    try:
+        size = "1640x1232" if high_res else "820x616"
+        commands = []
+        if shutil.which("rpicam-still"):
+            commands.append(["rpicam-still", "-t", "350", "-n", "-o", tmp_path, "--width", size.split("x")[0], "--height", size.split("x")[1]])
+        if shutil.which("libcamera-still"):
+            commands.append(["libcamera-still", "-t", "350", "-n", "-o", tmp_path, "--width", size.split("x")[0], "--height", size.split("x")[1]])
+        if shutil.which("fswebcam"):
+            commands.append(["fswebcam", "-r", size, "--no-banner", "--quiet", tmp_path])
+        for cmd in commands:
+            try:
+                res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4.0)
+                if res.returncode == 0 and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 100:
+                    with open(tmp_path, "rb") as f:
+                        data = f.read()
+                    LAST_FRAME_SOURCE = cmd[0]
+                    return data
+            except Exception:
+                continue
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    # 3. OpenCV VideoCapture (USB webcam) when OpenCV is installed.
+    try:
+        if crack_vision and crack_vision.is_available():
+            import cv2
+            cap = cv2.VideoCapture(0)
+            if cap.isOpened():
+                ok, frame = cap.read()
+                cap.release()
+                if ok and frame is not None:
+                    data = crack_vision.encode_jpeg(frame, 85)
+                    if data:
+                        LAST_FRAME_SOURCE = "usb-webcam"
+                        return data
+    except Exception as e:
+        log.debug("USB camera capture error: %s", e)
+
+    return None
+
+
+def run_vision_on_bytes(frame_bytes: bytes, high_res: bool = False) -> Dict[str, Any]:
+    """Run real CV on captured JPEG/PNG bytes and cache the annotated frame."""
+    global LATEST_VISION_RESULT, LATEST_CAMERA_FRAME_BYTES, LATEST_CAMERA_MIME, LATEST_FRAME_CAPTURED_AT
+    if not crack_vision or not crack_vision.is_available():
+        LATEST_VISION_RESULT = {
+            "available": False,
+            "hasCrack": False,
+            "confidencePercent": 0,
+            "mode": "unavailable",
+            "reason": "OpenCV/NumPy not installed (pip3 install -r requirements-ai.txt)",
+        }
+        return LATEST_VISION_RESULT
+
+    frame = crack_vision.decode_image(frame_bytes)
+    if frame is None:
+        LATEST_VISION_RESULT = {
+            "available": True,
+            "hasCrack": False,
+            "confidencePercent": 0,
+            "mode": "decode-error",
+        }
+        return LATEST_VISION_RESULT
+
+    result = crack_vision.analyze_bgr(frame)
+    result["frameSource"] = LAST_FRAME_SOURCE
+    result["timestamp"] = now_ms()
+    LATEST_VISION_RESULT = result
+
+    annotated = crack_vision.annotate_bgr(frame, result)
+    encoded = crack_vision.encode_jpeg(annotated, 84)
+    if encoded:
+        LATEST_CAMERA_FRAME_BYTES = encoded
+        LATEST_CAMERA_MIME = "image/jpeg"
+        LATEST_FRAME_CAPTURED_AT = now_ms()
+    return result
+
+
 def generate_optical_rail_image(w: int = 480, h: int = 320, has_crack: bool = False, bbox: Optional[Dict[str, int]] = None) -> bytes:
-    """Generates an optical railhead surface inspection frame."""
+    """Generates a SYNTHETIC demo frame (used only when no camera is attached)."""
     raw = bytearray()
     bx = bbox.get("x", 160) if bbox else 160
     by = bbox.get("y", 120) if bbox else 120
@@ -812,109 +1095,165 @@ def generate_optical_rail_image(w: int = 480, h: int = 320, has_crack: bool = Fa
 
 
 def get_latest_camera_image() -> Tuple[bytes, str]:
-    # Check for real camera captures from disk first
-    for path in ("camera_frame.jpg", "/tmp/camera_frame.jpg", "latest_frame.jpg"):
-        if os.path.exists(path) and os.path.getsize(path) > 100:
-            try:
-                with open(path, "rb") as f:
-                    return f.read(), "image/jpeg"
-            except Exception:
-                pass
-    global LATEST_CAMERA_FRAME_BYTES
-    has_crack = bool(LATEST_CRACK and LATEST_CRACK.get("hasCrack"))
+    """Return the newest frame: real camera first, synthetic only as fallback.
+
+    The synthetic frame is explicitly marked (global flag + HTTP header) so the
+    Android app never presents it as a real inspection image.
+    """
+    global LATEST_CAMERA_FRAME_BYTES, LATEST_CAMERA_MIME, LATEST_FRAME_CAPTURED_AT, LAST_FRAME_SIMULATED
+
+    # Serve a real cached frame for up to 1 second to avoid hammering the camera.
+    if LATEST_CAMERA_FRAME_BYTES and not LAST_FRAME_SIMULATED and (now_ms() - LATEST_FRAME_CAPTURED_AT) < 1000:
+        return LATEST_CAMERA_FRAME_BYTES, LATEST_CAMERA_MIME
+
+    real = capture_real_camera_frame()
+    if real:
+        LAST_FRAME_SIMULATED = False
+        LATEST_CAMERA_MIME = "image/jpeg"
+        # Annotate with the latest CV result when available.
+        if crack_vision and crack_vision.is_available():
+            frame = crack_vision.decode_image(real)
+            if frame is not None:
+                annotated = crack_vision.annotate_bgr(frame, LATEST_VISION_RESULT or {})
+                encoded = crack_vision.encode_jpeg(annotated, 84)
+                real = encoded or real
+        LATEST_CAMERA_FRAME_BYTES = real
+        LATEST_FRAME_CAPTURED_AT = now_ms()
+        return real, "image/jpeg"
+
+    # No physical camera: explicitly labelled simulation.
+    LAST_FRAME_SIMULATED = True
+    has_crack = _crack_is_active()
     bbox = (LATEST_CRACK.get("defect") or {}).get("boundingBox") if LATEST_CRACK else None
     if not LATEST_CAMERA_FRAME_BYTES or has_crack:
         LATEST_CAMERA_FRAME_BYTES = generate_optical_rail_image(has_crack=has_crack, bbox=bbox)
-    return LATEST_CAMERA_FRAME_BYTES, "image/png"
+        LATEST_CAMERA_MIME = "image/png"
+        LATEST_FRAME_CAPTURED_AT = now_ms()
+    return LATEST_CAMERA_FRAME_BYTES, LATEST_CAMERA_MIME
 
 
-def trigger_camera_snapshot() -> Dict[str, Any]:
-    global LATEST_CAMERA_FRAME_BYTES, LATEST_FRAME_CAPTURED_AT
-    captured_file = "camera_frame.jpg"
-    for cmd in (
-        f"rpicam-still -t 500 -n -o {captured_file} --width 1280 --height 720",
-        f"libcamera-still -t 500 -n -o {captured_file} --width 1280 --height 720",
-        f"fswebcam -r 1280x720 --no-banner {captured_file}"
-    ):
-        try:
-            import subprocess
-            res = subprocess.run(cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.5)
-            if res.returncode == 0 and os.path.exists(captured_file) and os.path.getsize(captured_file) > 100:
-                with open(captured_file, "rb") as f:
-                    LATEST_CAMERA_FRAME_BYTES = f.read()
-                LATEST_FRAME_CAPTURED_AT = int(time.time() * 1000)
-                log.info("[✓] Real hardware optical frame captured via %s", cmd.split()[0])
-                break
-        except Exception:
-            pass
+def trigger_camera_snapshot(high_res: bool = False) -> Dict[str, Any]:
+    """Capture a real frame and run real CV analysis on it."""
+    global LATEST_CAMERA_FRAME_BYTES, LATEST_CAMERA_MIME, LATEST_FRAME_CAPTURED_AT, LAST_FRAME_SIMULATED
 
-    has_crack = bool(LATEST_CRACK and LATEST_CRACK.get("hasCrack"))
+    real = capture_real_camera_frame(high_res=high_res)
+    if real:
+        LAST_FRAME_SIMULATED = False
+        LATEST_CAMERA_FRAME_BYTES = real
+        LATEST_CAMERA_MIME = "image/jpeg"
+        LATEST_FRAME_CAPTURED_AT = now_ms()
+        vision = run_vision_on_bytes(real, high_res=high_res)
+        return {
+            "status": "CAPTURED",
+            "timestamp": LATEST_FRAME_CAPTURED_AT,
+            "sensor": LAST_FRAME_SOURCE,
+            "simulated": False,
+            "resolution": "1640x1232" if high_res else "820x616",
+            "vision": vision,
+            "opticalFlawDetected": bool(vision.get("hasCrack")),
+            "chainage": (LATEST_TELEMETRY or {}).get("chainage", "KM 14+320"),
+        }
+
+    # No camera attached: return a clearly-marked simulated frame.
+    has_crack = _crack_is_active()
     bbox = (LATEST_CRACK.get("defect") or {}).get("boundingBox") if LATEST_CRACK else None
-    if not LATEST_CAMERA_FRAME_BYTES:
-        LATEST_CAMERA_FRAME_BYTES = generate_optical_rail_image(has_crack=has_crack, bbox=bbox)
-    LATEST_FRAME_CAPTURED_AT = int(time.time() * 1000)
-    log.info("[✓] Optical frame ready at %d (Sony IMX708 Camera Module 3)", LATEST_FRAME_CAPTURED_AT)
+    LATEST_CAMERA_FRAME_BYTES = generate_optical_rail_image(has_crack=has_crack, bbox=bbox)
+    LATEST_CAMERA_MIME = "image/png"
+    LATEST_FRAME_CAPTURED_AT = now_ms()
+    LAST_FRAME_SIMULATED = True
     return {
-        "status": "CAPTURED",
+        "status": "SIMULATED",
         "timestamp": LATEST_FRAME_CAPTURED_AT,
-        "sensor": "Sony IMX708 (Camera Module 3)",
-        "resolution": "1920x1080",
-        "fps": 30,
-        "shutterMs": 2.5,
-        "opticalFlawDetected": has_crack,
-        "chainage": (LATEST_TELEMETRY or {}).get("chainage", "KM 14+320")
+        "sensor": "none",
+        "simulated": True,
+        "vision": {
+            "available": bool(crack_vision and crack_vision.is_available()),
+            "hasCrack": False,
+            "mode": "no-camera",
+            "reason": "No camera detected. Connect a Pi Camera / USB webcam.",
+        },
+        "opticalFlawDetected": False,
+        "chainage": (LATEST_TELEMETRY or {}).get("chainage", "KM 14+320"),
     }
 
 
 def get_hardware_diagnostics() -> Dict[str, Any]:
-    # Dynamic detection of physical hardware
-    is_ut_hw = HARDWARE_ULTRASONIC_SENSOR.is_hardware_present if HARDWARE_ULTRASONIC_SENSOR else False
-    is_temp_hw = (os.path.exists("/sys/bus/w1/devices") and any(d.startswith("28-") for d in os.listdir("/sys/bus/w1/devices"))) if os.path.exists("/sys/bus/w1/devices") else False
-    is_cam_hw = os.path.exists("/dev/video0") or os.path.exists("/dev/video1")
-    
-    cpu_temp = 42.8
+    """Report what is physically present. Never hardcode ONLINE for absent parts."""
+    ut_present = bool(HARDWARE_ULTRASONIC_SENSOR and HARDWARE_ULTRASONIC_SENSOR.is_hardware_present)
+    temp_present = False
     try:
-        if os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
-            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-                cpu_temp = round(float(f.read().strip()) / 1000.0, 1)
+        w1 = "/sys/bus/w1/devices"
+        temp_present = os.path.isdir(w1) and any(d.startswith("28-") for d in os.listdir(w1))
+    except Exception:
+        pass
+    cam_present = _camera_available()
+    gps_present = bool((LATEST_TELEMETRY or {}).get("gpsLocked"))
+    vision_ok = bool(crack_vision and crack_vision.is_available())
+
+    cpu_temp = None
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+            cpu_temp = round(float(f.read().strip()) / 1000.0, 1)
     except Exception:
         pass
 
+    def _state(present: bool) -> str:
+        return "ONLINE" if present else "NOT_INSTALLED"
+
     return {
-        "status": "OPERATIONAL",
+        "status": "OPERATIONAL" if (ut_present or temp_present or cam_present) else "LIMITED_SIMULATION",
         "camera": {
-            "status": "ONLINE",
-            "sensor": "Sony IMX708 (Camera Module 3)" if is_cam_hw else "Optical Rail Camera (Emulated Feed)",
-            "fps": 30,
-            "resolution": "1920x1080",
-            "physicalHardware": is_cam_hw
+            "status": "ONLINE" if cam_present else "NOT_INSTALLED",
+            "sensor": "Raspberry Pi Camera / USB webcam" if cam_present else "No camera detected",
+            "fps": 0,
+            "resolution": "n/a",
+            "physicalHardware": cam_present,
+            "source": LAST_FRAME_SOURCE,
+            "simulated": LAST_FRAME_SIMULATED,
+        },
+        "vision": {
+            "status": "ONLINE" if vision_ok else "NOT_INSTALLED",
+            "backend": (crack_vision.backend_info() if crack_vision else {"available": False}),
+            "lastResult": LATEST_VISION_RESULT,
         },
         "ultrasonic": {
-            "status": "ONLINE",
-            "sensor": "HC-SR04 / Piezo Transducer" if is_ut_hw else "Piezo UT Dual 5MHz Transducer",
+            "status": _state(ut_present),
+            "sensor": "HC-SR04 / JSN-SR04T" if ut_present else "No ultrasonic sensor detected",
             "nominalDepthMm": 68.2,
-            "physicalHardware": is_ut_hw
+            "physicalHardware": ut_present,
+            "note": "Measures clearance to the railhead, not rail thickness",
         },
         "vibration": {
-            "status": "ONLINE",
-            "sensor": "ADXL345 Tri-axial Accelerometer",
-            "range": "+/-16g"
+            "status": _state(False),
+            "sensor": "No accelerometer driver configured",
+            "physicalHardware": False,
         },
         "temperature": {
-            "status": "ONLINE",
-            "sensor": "DS18B20 1-Wire Thermal Probe" if is_temp_hw else "PT100 RTD High-Precision Probe",
-            "physicalHardware": is_temp_hw
+            "status": _state(temp_present),
+            "sensor": "DS18B20 1-Wire" if temp_present else "No temperature probe detected",
+            "physicalHardware": temp_present,
         },
-        "encoderGps": {"status": "ONLINE", "gnss": "NEO-M9N RTK-DGPS Locked (1cm precision)"},
-        "battery": {"percent": 94, "voltage": 12.4, "chemistry": "LiPo 3S 5200mAh"},
+        "encoderGps": {
+            "status": _state(gps_present),
+            "gnss": "GNSS fix from serial node" if gps_present else "No GNSS receiver configured",
+            "physicalHardware": gps_present,
+        },
+        "battery": {
+            "present": False,
+            "percent": None,
+            "voltage": None,
+            "chemistry": "Not monitored",
+        },
         "system": {
-            "nodeId": CURRENT_DEVICE_ID,
+            "nodeId": DEVICE_ID,
             "cpuTempC": cpu_temp,
             "uptimeSeconds": int(time.time() - (START_TIME_MS / 1000)),
             "wifiPort": 8080,
-            "latencyEstimateMs": 14
-        }
+            "apiKeyRequired": bool(LOCAL_API_KEY),
+            "dataMode": (LATEST_TELEMETRY or {}).get("dataMode", "SIMULATED"),
+        },
     }
+
 
 
 def get_ai_oracle_metrics(telemetry: Dict[str, Any]) -> Dict[str, Any]:
@@ -963,6 +1302,7 @@ def get_all_system_data() -> Dict[str, Any]:
     return {
         "status": "ONLINE",
         "timestamp": int(time.time() * 1000),
+        "deviceId": DEVICE_ID,
         "telemetry": telem,
         "latestCrack": LATEST_CRACK,
         "defects": DEFECTS_REGISTRY,
@@ -971,7 +1311,17 @@ def get_all_system_data() -> Dict[str, Any]:
         "reports": REPORTS_REGISTRY,
         "aiOracle": get_ai_oracle_metrics(telem),
         "hardware": get_hardware_diagnostics(),
-        "activeTsrSpeed": int((LAST_TSR_COMMAND or {}).get("speed", telem.get("activeTsrSpeedKmH", 45)))
+        "vision": LATEST_VISION_RESULT,
+        "capabilities": {
+            "realCamera": not LAST_FRAME_SIMULATED,
+            "cameraSource": LAST_FRAME_SOURCE,
+            "crackVision": bool(crack_vision and crack_vision.is_available()),
+            "cloudAuth": TOKEN_MANAGER.status() if TOKEN_MANAGER is not None else {"hasToken": False, "canRefresh": False},
+            "apiKeyRequired": bool(LOCAL_API_KEY),
+            "crackActive": _crack_is_active(),
+        },
+        # None means "no TSR has been issued"; never invent 25 km/h.
+        "activeTsrSpeed": (LAST_TSR_COMMAND or {}).get("speed"),
     }
 
 
@@ -984,6 +1334,31 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Silence routine request logging
         pass
+
+    def _is_authorized(self) -> bool:
+        """Optional shared-secret auth for the LAN API.
+
+        When RAILGUARD_API_KEY / --api-key is set, every endpoint except
+        /api/health requires the key. This prevents anyone on the same Wi-Fi
+        from ringing the trackside buzzer or issuing speed restrictions.
+        """
+        if not LOCAL_API_KEY:
+            return True
+        supplied = (
+            self.headers.get("X-API-Key")
+            or self.headers.get("Authorization", "").replace("Bearer ", "").strip()
+            or ""
+        )
+        if not supplied and "?" in self.path:
+            try:
+                query = urllib.parse.parse_qs(self.path.split("?", 1)[1])
+                supplied = (query.get("api_key") or [""])[0]
+            except Exception:
+                supplied = ""
+        return bool(supplied) and hmac.compare_digest(str(supplied), LOCAL_API_KEY)
+
+    def _reject_unauthorized(self):
+        self._send_json(401, {"error": "Unauthorized", "hint": "Send X-API-Key header or ?api_key="})
 
     def _send_json(self, status_code: int, data: Dict[str, Any]):
         content = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -1016,9 +1391,17 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        global LAST_TSR_COMMAND, LATEST_TELEMETRY, ACTIVE_PATROL_STATUS, SCHEDULES_REGISTRY
+        # FIX: LAST_TSR_COMMAND was assigned inside this method without a global
+        # declaration, which raised UnboundLocalError on a plain GET /api/tsr.
+        global LAST_TSR_COMMAND, LATEST_TELEMETRY, LATEST_CRACK, ACTIVE_PATROL_STATUS, SCHEDULES_REGISTRY
         clean_path = self.path.split("?")[0].rstrip("/")
         accept_hdr = self.headers.get("Accept", "")
+
+        # /api/health stays open so monitoring can check liveness.
+        if clean_path != "/api/health" and not self._is_authorized():
+            self._reject_unauthorized()
+            return
+
 
         # Check for web dashboard when requested from a browser or root URL
         if clean_path in ("", "/", "/index.html", "/dashboard"):
@@ -1115,20 +1498,38 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
         elif clean_path == "/api/ai_oracle":
             self._send_json(200, get_ai_oracle_metrics(LATEST_TELEMETRY))
         elif clean_path == "/api/tsr":
-            query_str = self.path.split("?")[1] if "?" in self.path else ""
-            if "speed=" in query_str:
-                for part in query_str.split("&"):
-                    if part.startswith("speed="):
-                        try:
-                            s = float(part.split("=")[1])
-                            LATEST_TELEMETRY["axleSpeedKmh"] = s
-                            LATEST_TELEMETRY["activeTsrSpeedKmH"] = int(s)
-                            LAST_TSR_COMMAND = {"speed": int(s), "timestamp": int(time.time() * 1000)}
-                            save_pi_state()
-                        except Exception:
-                            pass
-            speed_val = (LAST_TSR_COMMAND or {}).get("speed", LATEST_TELEMETRY.get("activeTsrSpeedKmH", 25))
-            self._send_json(200, {"activeTsrSpeedKmH": int(speed_val), "currentSpeedKmh": LATEST_TELEMETRY.get("axleSpeedKmh", speed_val)})
+            query = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+            if "speed" in query:
+                try:
+                    s = float(query["speed"][0])
+                    if not (0.0 <= s <= 160.0):
+                        raise ValueError("speed must be between 0 and 160 km/h")
+                    LATEST_TELEMETRY["activeTsrSpeedKmH"] = int(s)
+                    LATEST_TELEMETRY["recommendedTsrKmh"] = s
+                    LAST_TSR_COMMAND = {"speed": int(s), "timestamp": now_ms(), "source": "local-api"}
+                    save_pi_state()
+                    log.warning("[TSR] Speed restriction applied via local API: %s km/h", s)
+                except Exception as e:
+                    self._send_json(400, {"error": f"Invalid TSR speed: {e}"})
+                    return
+            speed_val = (LAST_TSR_COMMAND or {}).get("speed")
+            self._send_json(200, {
+                "activeTsrSpeedKmH": speed_val,
+                "currentSpeedKmh": LATEST_TELEMETRY.get("axleSpeedKmh"),
+                "speedRestrictionActive": speed_val is not None,
+            })
+        elif clean_path in ("/api/capabilities", "/api/status"):
+            self._send_json(200, {
+                "deviceId": DEVICE_ID,
+                "camera": {"available": _camera_available(), "source": LAST_FRAME_SOURCE, "simulated": LAST_FRAME_SIMULATED},
+                "vision": crack_vision.backend_info() if crack_vision else {"available": False},
+                "lastVision": LATEST_VISION_RESULT,
+                "cloudAuth": TOKEN_MANAGER.status() if TOKEN_MANAGER is not None else {"hasToken": False},
+                "apiKeyRequired": bool(LOCAL_API_KEY),
+                "activeTsrSpeedKmH": (LAST_TSR_COMMAND or {}).get("speed"),
+                "crackActive": _crack_is_active(),
+                "crackExpiresInSeconds": max(0, int(((LATEST_CRACK or {}).get("timestamp", 0) + CRACK_ACTIVE_SECONDS * 1000 - now_ms()) / 1000)) if _crack_is_active() else 0,
+            })
         elif clean_path == "/api/latest_crack":
             if LATEST_CRACK:
                 self._send_json(200, LATEST_CRACK)
@@ -1144,8 +1545,11 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(img_bytes)))
             self.send_header("Connection", "close")
             self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Expose-Headers", "X-RailGuard-Telemetry, X-RailGuard-UT-Depth, X-RailGuard-Vibration, X-RailGuard-Temp, X-RailGuard-Speed, X-RailGuard-Chainage, X-RailGuard-Buzzer")
+            self.send_header("Access-Control-Expose-Headers", "X-RailGuard-Telemetry, X-RailGuard-UT-Depth, X-RailGuard-Vibration, X-RailGuard-Temp, X-RailGuard-Speed, X-RailGuard-Chainage, X-RailGuard-Buzzer, X-RailGuard-Simulated, X-RailGuard-AI")
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("X-RailGuard-Simulated", "1" if LAST_FRAME_SIMULATED else "0")
+            self.send_header("X-RailGuard-Frame-Source", urllib.parse.quote(LAST_FRAME_SOURCE or "none"))
+            self.send_header("X-RailGuard-AI", urllib.parse.quote(json.dumps(LATEST_VISION_RESULT, ensure_ascii=False)))
             if LATEST_TELEMETRY:
                 try:
                     self.send_header("X-RailGuard-Telemetry", urllib.parse.quote(json.dumps(LATEST_TELEMETRY, ensure_ascii=False)))
@@ -1215,22 +1619,33 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             result = trigger_camera_snapshot()
             self._send_json(200, result)
         elif clean_path == "/api/health":
+            cam_present = _camera_available()
             self._send_json(200, {
                 "status": "ONLINE",
                 "service": "RailGuard Camera Crack Detector",
-                "hardware": "Raspberry Pi Zero W / Camera Module 3 / Piezo UT",
+                "deviceId": DEVICE_ID,
                 "buzzerPin": BUZZER_PIN,
                 "buzzerActive": IS_BUZZER_RINGING,
                 "patrolActive": ACTIVE_PATROL_STATUS.get("status") == "PATROL_ACTIVE",
                 "wifiDirectActive": True,
-                "timestamp": int(time.time() * 1000)
+                "cameraPresent": cam_present,
+                "cameraSimulated": LAST_FRAME_SIMULATED,
+                "visionAvailable": bool(crack_vision and crack_vision.is_available()),
+                "cloudAuthConfigured": bool(TOKEN_MANAGER and TOKEN_MANAGER.has_token()),
+                "apiKeyRequired": bool(LOCAL_API_KEY),
+                "crackActive": _crack_is_active(),
+                "timestamp": now_ms()
             })
         else:
             self._send_json(404, {"error": "Endpoint not found", "available": ["/", "/api/all_data", "/api/telemetry", "/api/camera_frame", "/api/latest_crack", "/api/defects", "/api/tasks", "/api/inspections", "/api/reports", "/api/hardware", "/api/ai_oracle", "/api/buzzer", "/api/schedule", "/api/patrol/start", "/api/health", "/api/tsr"]})
 
     def do_POST(self):
-        global LATEST_TELEMETRY, LAST_TSR_COMMAND, LAST_HARDWARE_ACQUISITION_MS, ACTIVE_PATROL_STATUS, SCHEDULES_REGISTRY
+        global LATEST_TELEMETRY, LAST_TSR_COMMAND, LATEST_CRACK, LAST_HARDWARE_ACQUISITION_MS, ACTIVE_PATROL_STATUS, SCHEDULES_REGISTRY
         clean_path = self.path.split("?")[0].rstrip("/")
+        if not self._is_authorized():
+            self._reject_unauthorized()
+            return
+        query = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
         if clean_path in ("/api/telemetry", "/api/sensors", "/api/sensor_data"):
             content_len = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
@@ -1249,20 +1664,28 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
             try:
                 req_data = json.loads(body)
-                LAST_TSR_COMMAND = req_data
-                speed = float(req_data.get("speed", 25))
-                now_ms = int(time.time() * 1000)
+                speed = float(req_data.get("speed", req_data.get("activeTsrSpeedKmH", 25)))
+                if not (0.0 <= speed <= 160.0):
+                    self._send_json(400, {"error": "speed must be between 0 and 160 km/h"})
+                    return
+                LAST_TSR_COMMAND = {
+                    "speed": int(speed),
+                    "reason": req_data.get("reason", ""),
+                    "trainId": req_data.get("trainId"),
+                    "timestamp": now_ms(),
+                    "source": "local-api",
+                }
                 LATEST_TELEMETRY["axleSpeedKmh"] = speed
                 LATEST_TELEMETRY["activeTsrSpeedKmH"] = int(speed)
                 LATEST_TELEMETRY["recommendedTsrKmh"] = speed
-                LATEST_TELEMETRY["timestamp"] = now_ms
+                LATEST_TELEMETRY["timestamp"] = now_ms()
                 save_pi_state()
-                log.warning("🚨 [TSR SPEED ORDER EXECUTED] Hardware & corridor speed clamped to %s km/h", speed)
+                log.warning("[TSR SPEED ORDER EXECUTED] Speed clamped to %s km/h", speed)
                 self._send_json(200, {
                     "status": "EXECUTED",
                     "activeTsrSpeedKmH": int(speed),
                     "currentAxleSpeedKmh": speed,
-                    "acknowledgedAt": now_ms
+                    "acknowledgedAt": now_ms()
                 })
             except Exception as e:
                 self._send_json(400, {"error": str(e)})
@@ -1315,8 +1738,28 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self._send_json(400, {"error": str(e)})
+        elif clean_path in ("/api/crack/clear", "/api/crack/ack", "/api/clear_crack"):
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+            try:
+                req = json.loads(body) if body.strip() else {}
+            except Exception:
+                req = {}
+            result = clear_latest_crack(req.get("reason", "OPERATOR_ACKNOWLEDGED"))
+            self._send_json(200, result)
+        elif clean_path in ("/api/calibrate", "/api/sensors/calibrate"):
+            # Zero the ultrasonic baseline so clearance warnings are relative to
+            # the current mounting position.
+            _UT_HISTORY.clear()
+            self._send_json(200, {
+                "status": "CALIBRATED",
+                "message": "Ultrasonic baseline reset; vision calibration unchanged",
+                "mmPerPixel": crack_vision.MM_PER_PIXEL if crack_vision else 0.0,
+                "timestamp": now_ms(),
+            })
         elif clean_path in ("/api/camera_capture", "/api/camera/capture", "/capture", "/snapshot", "/api/snapshot", "/api/trigger_snapshot"):
-            result = trigger_camera_snapshot()
+            high_res = (query.get("high_res") or ["0"])[0].lower() in ("1", "true", "yes")
+            result = trigger_camera_snapshot(high_res=high_res)
             self._send_json(200, result)
         else:
             self._send_json(404, {"error": "Endpoint not found"})
@@ -1341,9 +1784,15 @@ def start_local_wifi_server(host: str = "0.0.0.0", port: int = 8080) -> Optional
 
 
 def post_to_firebase(db_url: str, path: str, data: Dict[str, Any], id_token: Optional[str] = None) -> bool:
-    """Writes a JSON record to Firebase Realtime Database via REST API."""
+    """Writes a JSON record to Firebase Realtime Database via REST API.
+
+    Uses the auto-refreshing token manager when configured, so long-running Pi
+    installations do not die after the ID token expires (~1 hour).
+    """
+    global LAST_CLOUD_OK_MS, LAST_CLOUD_ERROR
     clean_db = db_url.rstrip("/")
-    auth_query = f"?auth={id_token}" if id_token else ""
+    token = _auth_token(id_token)
+    auth_query = f"?auth={token}" if token else ""
     endpoint = f"{clean_db}/{path.lstrip('/')}.json{auth_query}"
 
     payload = json.dumps(data).encode("utf-8")
@@ -1352,78 +1801,95 @@ def post_to_firebase(db_url: str, path: str, data: Dict[str, Any], id_token: Opt
 
     try:
         with urllib.request.urlopen(req, timeout=6) as response:
-            return response.status in (200, 204)
+            if response.status in (200, 204):
+                LAST_CLOUD_OK_MS = now_ms()
+                LAST_CLOUD_ERROR = ""
+                return True
+            LAST_CLOUD_ERROR = f"HTTP {response.status}"
+            return False
     except urllib.error.HTTPError as e:
-        log.warning("HTTP error posting to %s: %d %s", path, e.code, e.read().decode("utf-8", errors="replace"))
+        LAST_CLOUD_ERROR = f"HTTP {e.code}"
+        log.warning("HTTP error posting to %s: %d %s", path, e.code, e.read().decode("utf-8", errors="replace")[:200])
         return False
     except Exception as e:
+        LAST_CLOUD_ERROR = str(e)
         log.warning("Network error posting to %s: %s", path, e)
         return False
 
 
 def build_camera_defect(
     chainage: str = "KM 14+320",
-    length_mm: float = 14.8,
-    confidence: int = 96,
+    length_mm: float = 0.0,
+    confidence: int = 0,
     bounding_box: Optional[Dict[str, int]] = None
 ) -> Dict[str, Any]:
     now_ms = int(time.time() * 1000)
     now_str = datetime.datetime.now().strftime("%H:%M · %d %b")
     defect_id = f"DEF-CAM-{now_ms % 100000}"
-    bbox = bounding_box or {"x": 140, "y": 88, "width": 120, "height": 45}
+    bbox = bounding_box or {"x": 0, "y": 0, "width": 0, "height": 0}
+    telem = LATEST_TELEMETRY or {}
+    ut_depth = float(telem.get("ultrasonicDepthMm", 0.0) or 0.0)
+    vibration = float(telem.get("vibrationG", 0.0) or 0.0)
+    rail_temp = float(telem.get("railTempC", 0.0) or 0.0)
+    speed = float(telem.get("axleSpeedKmh", 0.0) or 0.0)
+    length_text = f"{length_mm:.1f} mm" if length_mm > 0 else "length not calibrated"
 
     return {
         "id": defect_id,
-        "title": "Transverse Railhead Fissure (Camera Detected)",
+        "title": "Surface Fissure (Camera Detected)",
         "section": f"Corridor Sector 4B ({chainage})",
-        "score": f"CRITICAL ({confidence}% AI Flaw Match)",
+        "score": f"CRITICAL ({confidence}% vision confidence)",
         "tone": "CRITICAL",
         "time": now_str,
         "detail": (
-            f"Automated optical camera & ultrasonic cross-verification detected a "
-            f"{length_mm:.1f}mm surface fissure across gauge corner at {chainage}. "
-            f"Flaw depth: 46.2 mm (-22.0 mm drop from nominal 68.2 mm). Impact shock: 0.425 g."
+            f"Optical camera analysis detected a surface fissure ({length_text}) at {chainage}. "
+            f"Ultrasonic clearance at detection: {ut_depth:.1f} mm; impact shock {vibration:.3f} g; "
+            f"rail temperature {rail_temp:.1f} C; patrol speed {speed:.1f} km/h. "
+            f"Ultrasonic clearance is not a crack measurement; confirm with a manual/UT inspection."
         ),
-        "estimatedLength": f"{length_mm:.1f} mm",
-        "latitude": 51.5074,
-        "longitude": -0.1278,
+        "estimatedLength": length_text,
+        "latitude": telem.get("latitude"),
+        "longitude": telem.get("longitude"),
         "riskScore": 94,
         "chainageCoordinate": chainage,
         "aiConfidencePercent": confidence,
         "aiPrescribedAction": "Emergency Slow Order (TSR 25 km/h) & urgent weld clamp verification required.",
         "timestamp": now_ms,
-        "flawType": "Transverse Gauge Corner Fissure",
-        "ultrasonicDepthMm": 46.2,
+        "flawType": "Surface Fissure (optical)",
+        "ultrasonicDepthMm": ut_depth,
         "nominalDepthMm": 68.2,
-        "depthDepressionMm": 22.0,
-        "vibrationG": 0.425,
-        "railTempC": 32.8,
-        "axleSpeedKmh": 45.0,
+        "vibrationG": vibration,
+        "railTempC": rail_temp,
+        "axleSpeedKmh": speed,
         "recommendedTsrKmh": 25.0,
-        "boundingBox": bbox
+        "boundingBox": bbox,
+        "detectionSource": "camera-cv" if (crack_vision and crack_vision.is_available()) else "simulated"
     }
 
 
 def build_incident_report(defect: Dict[str, Any]) -> Dict[str, Any]:
     now_ms = int(time.time() * 1000)
     report_id = f"REP-CAM-{now_ms % 100000}"
+    lat = defect.get("latitude")
+    lon = defect.get("longitude")
+    coords = f"{lat:.5f}, {lon:.5f}" if (lat is not None and lon is not None) else "GNSS unavailable"
 
     return {
         "id": report_id,
         "title": "Automated Camera Crack Detection Incident Report",
         "section": defect["section"],
-        "inspector": "RailGuard Vision AI (Raspberry Pi)",
+        "inspector": "RailGuard Vision (Raspberry Pi)",
         "status": "CRITICAL INCIDENT LOGGED - IMMEDIATE ACTION REQUIRED",
         "generatedAt": now_ms,
         "defectId": defect["id"],
         "chainage": defect["chainageCoordinate"],
         "confidence": defect["aiConfidencePercent"],
-        "flawType": defect.get("flawType", "Railhead Crack"),
-        "lengthMm": defect.get("estimatedLength", "14.8 mm"),
-        "depthMm": defect.get("ultrasonicDepthMm", 46.2),
-        "vibrationG": defect.get("vibrationG", 0.425),
+        "flawType": defect.get("flawType", "Surface Fissure"),
+        "lengthMm": defect.get("estimatedLength", "uncalibrated"),
+        "vibrationG": defect.get("vibrationG", 0.0),
         "recommendedTsrKmh": defect.get("recommendedTsrKmh", 25.0),
-        "coordinates": f"{defect.get('latitude', 51.5074)} N, {defect.get('longitude', -0.1278)} W"
+        "coordinates": coords,
+        "detectionSource": defect.get("detectionSource", "unknown"),
     }
 
 
@@ -1436,8 +1902,9 @@ def build_safety_notification(defect: Dict[str, Any]) -> Dict[str, Any]:
         "id": notif_id,
         "title": "CRITICAL: Rail Crack Detected by Camera",
         "message": (
-            f"Automated camera scan detected rail fissure at {defect['chainageCoordinate']}. "
-            f"Length: {defect.get('estimatedLength', '14.8 mm')} | Depth: {defect.get('ultrasonicDepthMm', 46.2)}mm. "
+            f"Automated camera scan detected a surface fissure at {defect['chainageCoordinate']}. "
+            f"Length: {defect.get('estimatedLength', 'uncalibrated')} | "
+            f"Confidence: {defect.get('aiConfidencePercent', 0)}%. "
             f"Defect logged & incident safety report generated."
         ),
         "time": now_str,
@@ -1450,27 +1917,30 @@ def build_safety_notification(defect: Dict[str, Any]) -> Dict[str, Any]:
 def build_anomaly_telemetry(
     chainage: str = "KM 14+320",
     device_id: str = "RPI-TRACK-01",
-    bounding_box: Optional[Dict[str, int]] = None
+    bounding_box: Optional[Dict[str, int]] = None,
+    confidence: int = 0,
+    length_mm: float = 0.0,
 ) -> Dict[str, Any]:
     now_ms = int(time.time() * 1000)
-    bbox = bounding_box or {"x": 140, "y": 88, "width": 120, "height": 45}
-    return {
+    bbox = bounding_box or {"x": 0, "y": 0, "width": 0, "height": 0}
+    base = dict(LATEST_TELEMETRY or {})
+    base.update({
         "nodeId": device_id,
-        "ultrasonicDepthMm": 46.2,
-        "vibrationG": 0.425,
-        "railTempC": 32.8,
-        "axleSpeedKmh": 25.0,  # Slowed down for safety TSR
         "chainage": chainage,
-        "hardware": "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
         "status": "ANOMALY_FLAGGED",
         "timestamp": now_ms,
         "hasCrack": True,
-        "flawType": "Transverse Gauge Corner Fissure",
-        "crackLengthMm": 14.8,
-        "aiConfidencePercent": 96,
+        "flawType": "Surface Fissure (optical)",
+        "crackLengthMm": float(length_mm),
+        "aiConfidencePercent": int(confidence),
         "recommendedTsrKmh": 25.0,
-        "crackBoundingBox": f"x:{bbox['x']},y:{bbox['y']},w:{bbox['width']},h:{bbox['height']}"
-    }
+        "crackBoundingBox": f"x:{bbox['x']},y:{bbox['y']},w:{bbox['width']},h:{bbox['height']}",
+        "crackExpiresAt": now_ms + CRACK_ACTIVE_SECONDS * 1000,
+        "detectionSource": "camera-cv" if (crack_vision and crack_vision.is_available()) else "simulated",
+        "dataMode": base.get("dataMode", "LIVE" if (crack_vision and crack_vision.is_available()) else "SIMULATED"),
+        "visionAvailable": bool(crack_vision and crack_vision.is_available()),
+    })
+    return base
 
 
 def trigger_crack_detection_pipeline(
@@ -1479,26 +1949,40 @@ def trigger_crack_detection_pipeline(
     id_token: Optional[str] = None,
     chainage: str = "KM 14+320",
     device_id: str = "RPI-TRACK-01",
-    bounding_box: Optional[Dict[str, int]] = None
+    bounding_box: Optional[Dict[str, int]] = None,
+    confidence: int = 0,
+    length_mm: float = 0.0,
+    force: bool = False,
 ) -> Dict[str, Any]:
     """
-    Executes the full automated camera crack detection & instant Wi-Fi transmission pipeline:
-    1. Generates complete defect, report, notification & telemetry payloads.
-    2. Caches into local Wi-Fi server for instant local Wi-Fi queries (< 50ms).
+    Executes the automated crack detection & transmission pipeline:
+    1. Generates defect, report, notification & telemetry payloads.
+    2. Caches into local Wi-Fi server for instant local queries.
     3. Pushes into Firebase Realtime Database in parallel.
+
+    A cooldown prevents one physical defect from generating an endless stream
+    of duplicate reports. Call with force=True to bypass it (manual trigger).
     """
-    log.info("[!] CRACK DETECTED at %s! Initiating automated safety pipeline...", chainage)
+    global LATEST_CRACK, LAST_CRACK_PIPELINE_MS
+    if not force:
+        since_last = now_ms() - LAST_CRACK_PIPELINE_MS
+        if LAST_CRACK_PIPELINE_MS and since_last < CRACK_COOLDOWN_SECONDS * 1000:
+            log.info("[i] Crack pipeline suppressed by cooldown (%ds remaining)", int((CRACK_COOLDOWN_SECONDS * 1000 - since_last) / 1000))
+            return {"success": False, "reason": "cooldown", "retryAfterSeconds": int((CRACK_COOLDOWN_SECONDS * 1000 - since_last) / 1000)}
+
+    log.info("[!] CRACK DETECTED at %s (confidence %d%%). Initiating safety pipeline...", chainage, confidence)
+    LAST_CRACK_PIPELINE_MS = now_ms()
 
     # Immediately activate Raspberry Pi physical buzzer and acoustic alarm
     activate_buzzer(duration_seconds=8.0, reason=f"CRACK_DETECTED_{chainage}")
 
-    defect = build_camera_defect(chainage=chainage, bounding_box=bounding_box)
+    defect = build_camera_defect(chainage=chainage, length_mm=length_mm, confidence=confidence, bounding_box=bounding_box)
     report = build_incident_report(defect)
     notif = build_safety_notification(defect)
-    telemetry = build_anomaly_telemetry(chainage=chainage, device_id=device_id, bounding_box=bounding_box)
+    telemetry = build_anomaly_telemetry(chainage=chainage, device_id=device_id, bounding_box=bounding_box, confidence=confidence, length_mm=length_mm)
 
     # Cache into local Wi-Fi memory for instant LAN response
-    global LATEST_TELEMETRY, LATEST_CRACK, DEFECTS_REGISTRY, TASKS_REGISTRY, INSPECTIONS_REGISTRY, REPORTS_REGISTRY
+    global LATEST_TELEMETRY, DEFECTS_REGISTRY, TASKS_REGISTRY, INSPECTIONS_REGISTRY, REPORTS_REGISTRY
     LATEST_TELEMETRY = telemetry
     LATEST_CRACK = {
         "status": "ANOMALY_FLAGGED",
@@ -1507,7 +1991,9 @@ def trigger_crack_detection_pipeline(
         "report": report,
         "notification": notif,
         "telemetry": telemetry,
-        "timestamp": int(time.time() * 1000)
+        "timestamp": now_ms(),
+        "expiresAt": now_ms() + CRACK_ACTIVE_SECONDS * 1000,
+        "detectionSource": "camera-cv" if (crack_vision and crack_vision.is_available()) else "simulated",
     }
 
     # Prepend latest defect
@@ -1520,8 +2006,11 @@ def trigger_crack_detection_pipeline(
     if len(REPORTS_REGISTRY) > 50:
         REPORTS_REGISTRY = REPORTS_REGISTRY[:50]
 
-    now_ms = int(time.time() * 1000)
-    task_id = f"TSK-AUTO-{now_ms % 100000}"
+    # NOTE: do not name a local variable "now_ms" in this function: the module
+    # level helper now_ms() would be shadowed and every call above would raise
+    # UnboundLocalError.
+    task_ts = int(time.time() * 1000)
+    task_id = f"TSK-AUTO-{task_ts % 100000}"
     auto_task = {
         "id": task_id,
         "title": f"Emergency Rail Clamp & Ultrasonic Verification ({chainage})",
@@ -1532,20 +2021,20 @@ def trigger_crack_detection_pipeline(
         "status": "Dispatched via Raspberry Pi",
         "torque": "220 Nm verified",
         "defectId": defect["id"],
-        "timestamp": now_ms
+        "timestamp": task_ts
     }
     TASKS_REGISTRY.insert(0, auto_task)
     if len(TASKS_REGISTRY) > 50:
         TASKS_REGISTRY = TASKS_REGISTRY[:50]
 
-    insp_id = f"INSP-CAM-{now_ms % 10000}"
+    insp_id = f"INSP-CAM-{task_ts % 10000}"
     auto_insp = {
         "id": insp_id,
         "section": f"Corridor Sector 4B ({chainage})",
         "date": datetime.datetime.now().strftime("%d %b %Y"),
-        "inspector": "RailGuard Vision AI (Raspberry Pi)",
+        "inspector": "RailGuard Vision (Raspberry Pi)",
         "status": "Crack Flagged · Safety Alert Active",
-        "framesCount": 1420,
+        "framesCount": 1,
         "detectionsCount": len(DEFECTS_REGISTRY),
         "detectedCrackTitle": defect["title"],
         "recommendedMaintenanceAction": defect["aiPrescribedAction"]
@@ -1595,56 +2084,90 @@ def trigger_crack_detection_pipeline(
     }
 
 
-def firebase_cloud_command_poller(db_url: str, uid: str, device_id: str, id_token: Optional[str] = None):
-    """Background polling thread for Firebase RTDB commands (dual-channel cloud fallback)."""
-    clean_db = db_url.rstrip("/")
-    auth_query = f"?auth={id_token}" if id_token else ""
-    last_buzzer_ts = int(time.time() * 1000)
-    last_tsr_ts = int(time.time() * 1000)
+def publish_heartbeat_once(db_url: str, uid: str, device_id: str) -> None:
+    """Write a heartbeat with real capability/health information."""
+    payload = {
+        "deviceId": device_id,
+        "status": "ONLINE",
+        "lastSeen": now_ms(),
+        "port": 8080,
+        "camera": {"present": _camera_available(), "simulated": LAST_FRAME_SIMULATED, "source": LAST_FRAME_SOURCE},
+        "vision": {"available": bool(crack_vision and crack_vision.is_available()), "lastResult": LATEST_VISION_RESULT},
+        "cloudAuth": TOKEN_MANAGER.status() if TOKEN_MANAGER is not None else {"hasToken": False},
+        "crackActive": _crack_is_active(),
+    }
+    if TOKEN_MANAGER is not None and TOKEN_MANAGER.has_token():
+        post_to_firebase(db_url, f"railguard/users/{uid}/devices/{device_id}/heartbeat", payload)
 
-    log.info("[✓] Background Firebase Cloud Command Listener active for user %s (node: %s)", uid, device_id)
-    while True:
+
+def heartbeat_worker(db_url: str, uid: str, device_id: str, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
         try:
-            # 1. Check buzzer command from Firebase RTDB
-            bz_url = f"{clean_db}/railguard/users/{uid}/commands/buzzer.json{auth_query}"
-            req = urllib.request.Request(bz_url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=3.0) as resp:
-                if resp.status == 200:
-                    body = resp.read().decode("utf-8")
-                    if body and body != "null":
-                        cmd = json.loads(body)
-                        ts = int(cmd.get("timestamp", 0))
-                        if ts > last_buzzer_ts:
-                            last_buzzer_ts = ts
-                            state = str(cmd.get("state", "RING")).upper()
-                            dur = float(cmd.get("duration", 8.0))
-                            if state in ("OFF", "SILENCE", "STOP"):
-                                silence_buzzer()
-                            else:
-                                activate_buzzer(duration_seconds=dur, reason="CLOUD_FIREBASE_INSTRUCTION")
+            publish_heartbeat_once(db_url, uid, device_id)
+        except Exception as e:
+            log.debug("Heartbeat error: %s", e)
+        stop_event.wait(10.0)
 
-            # 2. Check TSR speed restriction command from Firebase RTDB
-            tsr_url = f"{clean_db}/railguard/users/{uid}/trains/{device_id}/tsr.json{auth_query}"
-            req2 = urllib.request.Request(tsr_url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req2, timeout=3.0) as resp2:
-                if resp2.status == 200:
-                    body2 = resp2.read().decode("utf-8")
-                    if body2 and body2 != "null":
-                        cmd2 = json.loads(body2)
-                        ts2 = int(cmd2.get("issuedAt", cmd2.get("timestamp", 0)))
-                        if ts2 > last_tsr_ts:
-                            last_tsr_ts = ts2
-                            speed = float(cmd2.get("activeTsrSpeedKmH", cmd2.get("speed", 25)))
-                            global LAST_TSR_COMMAND
-                            LAST_TSR_COMMAND = {"speed": int(speed), "timestamp": ts2}
-                            LATEST_TELEMETRY["axleSpeedKmh"] = speed
-                            LATEST_TELEMETRY["activeTsrSpeedKmH"] = int(speed)
-                            save_pi_state()
-                            log.warning("🚨 [CLOUD TSR APPLIED] Speed clamped to %s km/h via Firebase RTDB", speed)
-        except Exception:
-            pass
 
-        time.sleep(2.5)
+def firebase_cloud_command_poller(
+    db_url: str,
+    uid: str,
+    device_id: str,
+    stop_event: Optional[threading.Event] = None,
+) -> None:
+    """Poll Firebase RTDB for buzzer/TSR commands (cloud fallback channel)."""
+    global LAST_TSR_COMMAND, LATEST_TELEMETRY
+    clean_db = db_url.rstrip("/")
+    last_buzzer_ts = now_ms()
+    last_tsr_ts = now_ms()
+    log.info("[✓] Cloud command listener active for user %s (node %s)", uid, device_id)
+
+    while not (stop_event and stop_event.is_set()):
+        token = _auth_token()
+        if not token:
+            time.sleep(5.0)
+            continue
+        auth_q = f"?auth={token}"
+        try:
+            req = urllib.request.Request(f"{clean_db}/railguard/users/{uid}/commands/buzzer.json{auth_q}")
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                body = resp.read().decode("utf-8")
+            if body and body != "null":
+                cmd = json.loads(body)
+                ts = int(cmd.get("timestamp", 0) or 0)
+                if ts > last_buzzer_ts:
+                    last_buzzer_ts = ts
+                    state = str(cmd.get("state", "RING")).upper()
+                    if state in ("OFF", "SILENCE", "STOP"):
+                        silence_buzzer()
+                    else:
+                        activate_buzzer(duration_seconds=float(cmd.get("duration", 8.0)), reason="CLOUD_COMMAND")
+        except Exception as e:
+            log.debug("Buzzer poll error: %s", e)
+
+        try:
+            req2 = urllib.request.Request(f"{clean_db}/railguard/users/{uid}/trains/{device_id}/tsr.json{auth_q}")
+            with urllib.request.urlopen(req2, timeout=4) as resp2:
+                body2 = resp2.read().decode("utf-8")
+            if body2 and body2 != "null":
+                cmd2 = json.loads(body2)
+                ts2 = int(cmd2.get("issuedAt", cmd2.get("timestamp", 0)) or 0)
+                if ts2 > last_tsr_ts:
+                    last_tsr_ts = ts2
+                    speed = float(cmd2.get("activeTsrSpeedKmH", cmd2.get("speed", 25)))
+                    if 0.0 <= speed <= 160.0:
+                        LAST_TSR_COMMAND = {"speed": int(speed), "timestamp": ts2, "source": "cloud"}
+                        LATEST_TELEMETRY["activeTsrSpeedKmH"] = int(speed)
+                        LATEST_TELEMETRY["recommendedTsrKmh"] = speed
+                        save_pi_state()
+                        log.warning("[TSR] Speed clamped to %s km/h via Firebase command", speed)
+        except Exception as e:
+            log.debug("TSR poll error: %s", e)
+
+        if stop_event:
+            stop_event.wait(2.5)
+        else:
+            time.sleep(2.5)
 
 
 def run_continuous_camera_scan(
@@ -1654,82 +2177,120 @@ def run_continuous_camera_scan(
     device_id: str = "RPI-TRACK-01",
     scan_interval: float = 2.5,
     simulate_anomaly_interval: int = 0,
-    wifi_port: int = 8080
+    wifi_port: int = 8080,
+    no_cloud: bool = False,
 ) -> None:
     """
-    Simulates continuous camera frame acquisition from track patrol.
-    Starts direct local Wi-Fi API server and streams telemetry over Wi-Fi.
+    Real camera + sensor patrol loop.
+
+    - Captures a real camera frame when hardware is present and runs real CV.
+    - Only raises a crack when the vision model returns a confident detection,
+      or when --simulate-anomaly-interval is explicitly set for a demo.
+    - Serves the local Wi-Fi API and publishes to Firebase when credentials exist.
     """
-    global CURRENT_DEVICE_ID
-    CURRENT_DEVICE_ID = device_id
+    global DEVICE_ID, LATEST_TELEMETRY
+    DEVICE_ID = device_id
     log.info("Starting RailGuard Camera Crack Detector on %s...", device_id)
     log.info("Target Firebase: %s/railguard/users/%s", db_url, uid)
+    log.info("Camera: %s | Vision: %s", "detected" if _camera_available() else "NOT DETECTED",
+             "opencv" if (crack_vision and crack_vision.is_available()) else "UNAVAILABLE")
 
-    # Start local Wi-Fi server for sub-50ms local direct access
-    start_local_wifi_server(host="0.0.0.0", port=wifi_port)
+    start_local_wifi_server(host=LOCAL_BIND_HOST, port=wifi_port)
 
-    # Start cloud command listener thread
-    threading.Thread(
-        target=firebase_cloud_command_poller,
-        args=(db_url, uid, device_id, id_token),
-        daemon=True
-    ).start()
+    stop_event = threading.Event()
+    threading.Thread(target=heartbeat_worker, args=(db_url, uid, device_id, stop_event), daemon=True).start()
+    if not no_cloud and TOKEN_MANAGER is not None and TOKEN_MANAGER.has_token():
+        threading.Thread(target=firebase_cloud_command_poller, args=(db_url, uid, device_id, stop_event), daemon=True).start()
+    elif no_cloud:
+        log.info("[i] Cloud sync disabled by --no-cloud")
+    else:
+        log.warning("[!] Cloud sync disabled: no Firebase token configured")
 
     step = 0
-    global LATEST_TELEMETRY
     try:
         while True:
             step += 1
             km = 14.0 + (step * 0.02)
             chainage = f"KM {int(km)}+{int((km % 1) * 1000):03d}"
 
-            # Anomaly trigger logic: only if explicitly requested (0 = disabled during live sensor polling)
-            is_crack = (simulate_anomaly_interval > 0 and step % simulate_anomaly_interval == 0)
+            # 1. Real camera capture + real computer vision.
+            frame = capture_real_camera_frame()
+            vision: Optional[Dict[str, Any]] = None
+            if frame:
+                vision = run_vision_on_bytes(frame)
+                if vision.get("hasCrack"):
+                    now = now_ms()
+                    if now - LAST_CRACK_PIPELINE_MS >= CRACK_COOLDOWN_SECONDS * 1000:
+                        trigger_crack_detection_pipeline(
+                            db_url=db_url,
+                            uid=uid,
+                            id_token=id_token,
+                            chainage=chainage,
+                            device_id=device_id,
+                            bounding_box=vision.get("boundingBox"),
+                            confidence=int(vision.get("confidencePercent", 0)),
+                            length_mm=float(vision.get("crackLengthMm", 0.0) or 0.0),
+                        )
+                        if not no_cloud:
+                            pass  # pipeline already pushes asynchronously
+                    time.sleep(scan_interval)
+                    continue
 
-            if is_crack:
+            # 2. Explicit demo simulation (never on by default).
+            if simulate_anomaly_interval > 0 and step % simulate_anomaly_interval == 0:
+                log.warning("[DEMO] Simulated anomaly requested by --simulate-anomaly-interval")
                 trigger_crack_detection_pipeline(
                     db_url=db_url,
                     uid=uid,
                     id_token=id_token,
                     chainage=chainage,
-                    device_id=device_id
+                    device_id=device_id,
+                    confidence=96,
+                    length_mm=14.8,
+                    force=True,
                 )
-            else:
-                # Nominal frame scan telemetry - preserve real physical sensor readings
-                now_ms = int(time.time() * 1000)
-                has_hw = (now_ms - LAST_HARDWARE_ACQUISITION_MS < 5000)
-                ut_depth = LATEST_TELEMETRY.get("ultrasonicDepthMm") if has_hw else round(68.2 + random.uniform(-0.3, 0.3), 1)
-                vib_g = LATEST_TELEMETRY.get("vibrationG") if has_hw else round(random.uniform(0.02, 0.05), 3)
-                rail_temp = LATEST_TELEMETRY.get("railTempC") if has_hw else round(31.5 + random.uniform(-0.2, 0.2), 1)
-                speed_kmh = LATEST_TELEMETRY.get("axleSpeedKmh", 45.0)
+                time.sleep(scan_interval)
+                continue
 
-                norm_telem = dict(LATEST_TELEMETRY)
-                norm_telem.update({
-                    "nodeId": device_id,
-                    "ultrasonicDepthMm": ut_depth,
-                    "vibrationG": vib_g,
-                    "railTempC": rail_temp,
-                    "axleSpeedKmh": speed_kmh,
-                    "chainage": chainage,
-                    "hardware": "Raspberry Pi Zero W / Camera Module 3 / Piezo UT",
-                    "status": "ALL_SENSORS_ONLINE" if has_hw else "ACTIVE_SYNC",
-                    "timestamp": now_ms,
-                    "hasCrack": LATEST_TELEMETRY.get("hasCrack", False)
-                })
-                LATEST_TELEMETRY = norm_telem
-                # Non-blocking async push to Firebase so local Wi-Fi scan never stalls
+            # 3. Nominal frame: preserve real sensor-worker readings.
+            current = dict(LATEST_TELEMETRY or {})
+            crack_active = _crack_is_active()
+            current.update({
+                "nodeId": device_id,
+                "chainage": chainage,
+                "hasCrack": crack_active,
+                "visionAvailable": bool(crack_vision and crack_vision.is_available()),
+                "visionMode": (vision or {}).get("mode", LATEST_VISION_RESULT.get("mode", "not-run")),
+                "timestamp": now_ms(),
+            })
+            if vision is not None:
+                current["lastVisionConfidence"] = int(vision.get("confidencePercent", 0))
+            LATEST_TELEMETRY = current
+
+            if not no_cloud and TOKEN_MANAGER is not None and TOKEN_MANAGER.has_token():
                 threading.Thread(
                     target=post_to_firebase,
-                    args=(db_url, f"railguard/users/{uid}/live_sensors/telemetry", norm_telem, id_token),
-                    daemon=True
+                    args=(db_url, f"railguard/users/{uid}/live_sensors/telemetry", current, id_token),
+                    daemon=True,
                 ).start()
-                log.info("[%d] Scan Frame -> %s | Depth: %.1fmm (%s) | Speed: %.1fkm/h (TSR: %s)",
-                         step, chainage, norm_telem["ultrasonicDepthMm"], "LIVE HW" if has_hw else "DYNAMIC",
-                         norm_telem["axleSpeedKmh"], norm_telem.get("activeTsrSpeedKmH", 45))
 
-            time.sleep(scan_interval)
+            log.info(
+                "[%d] Scan -> %s | depth %.1fmm | vision %s (%d%%) | crack %s",
+                step,
+                chainage,
+                float(current.get("ultrasonicDepthMm", 0.0) or 0.0),
+                "REAL" if frame else "NO-CAMERA",
+                int((vision or {}).get("confidencePercent", 0)),
+                "ACTIVE" if crack_active else "none",
+            )
+
+            if stop_event.wait(scan_interval):
+                break
     except KeyboardInterrupt:
         log.info("Camera crack detector stopped by operator.")
+    finally:
+        stop_event.set()
+
 
 
 def main():
@@ -1737,7 +2298,11 @@ def main():
     parser.add_argument("--uid", help="Firebase User UID", default="test-user")
     parser.add_argument("--db", help="Firebase Database URL",
                         default="https://railguard-72a70-default-rtdb.asia-southeast1.firebasedatabase.app")
-    parser.add_argument("--auth", help="Firebase Auth ID Token (optional)", default=None)
+    parser.add_argument("--auth", help="Firebase Auth ID Token (quick test, expires ~1h)", default=None)
+    parser.add_argument("--refresh-token", help="Firebase refresh token (enables automatic renewal)", default=None)
+    parser.add_argument("--firebase-api-key", help="Firebase Web API key (needed with --refresh-token)", default=None)
+    parser.add_argument("--local-api-key", help="Shared secret required by the local Wi-Fi API", default=None)
+    parser.add_argument("--bind", help="Local API bind address (default 0.0.0.0; use 127.0.0.1 for Pi-only)", default=None)
     parser.add_argument("--device", help="Device Node ID", default="RPI-TRACK-01")
     parser.add_argument("--port", type=int, help="Local Wi-Fi HTTP API port", default=8080)
     parser.add_argument("--interval", type=float, help="Seconds between camera scans", default=2.5)
@@ -1747,32 +2312,59 @@ def main():
     parser.add_argument("--echo-pin", type=int, help="BCM GPIO pin for ultrasonic ECHO", default=None)
     parser.add_argument("--test-buzzer", action="store_true", help="Immediately test ring the buzzer for 3 seconds and exit")
     parser.add_argument("--test-sensors", action="store_true", help="Test read physical ultrasonic and temp sensors once and exit")
-    parser.add_argument("--trigger-once", action="store_true", help="Immediately trigger one crack detection and exit")
-    parser.add_argument("--simulate-anomaly-interval", type=int, help="Interval in steps to simulate anomaly (0=disabled)", default=0)
+    parser.add_argument("--test-vision", action="store_true", help="Run the computer-vision self-test and exit")
+    parser.add_argument("--trigger-once", action="store_true", help="Run one detection pipeline once and exit")
+    parser.add_argument("--simulate-anomaly-interval", type=int, help="DEMO ONLY: simulate an anomaly every N scans (0=disabled)", default=0)
+    parser.add_argument("--no-cloud", action="store_true", help="Local Wi-Fi API only; do not contact Firebase")
 
     args = parser.parse_args()
 
-    global CURRENT_DEVICE_ID
-    if args.device:
-        CURRENT_DEVICE_ID = args.device
+    global BUZZER_PIN, BUZZER_ACTIVE_LOW, ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN
+    global DEVICE_ID, TOKEN_MANAGER, LOCAL_API_KEY, LOCAL_BIND_HOST
+
+    DEVICE_ID = args.device
+    if FirebaseTokenManager is not None:
+        try:
+            from firebase_auth import from_args_or_env as _token_from_args
+            TOKEN_MANAGER = _token_from_args(args)
+            if TOKEN_MANAGER.can_refresh():
+                TOKEN_MANAGER.start_refresh_loop()
+                TOKEN_MANAGER.refresh()
+        except Exception as e:
+            log.warning("Token manager init failed: %s", e)
+            TOKEN_MANAGER = None
+    if args.local_api_key:
+        LOCAL_API_KEY = args.local_api_key.strip()
+    if args.bind:
+        LOCAL_BIND_HOST = args.bind.strip()
+    if LOCAL_API_KEY:
+        log.info("[✓] Local API key protection ENABLED")
+    else:
+        log.warning("[!] Local API is unauthenticated. Use --local-api-key or RAILGUARD_API_KEY on shared networks.")
+
+    if args.test_vision:
+        if crack_vision is None:
+            print(f"[!] Vision module unavailable: {_VISION_IMPORT_ERROR}")
+            return
+        info = crack_vision.backend_info()
+        print(f"[*] Vision backend: {info}")
+        if info.get("available"):
+            print(f"[*] Self-test: {crack_vision.self_test()}")
+        return
 
     if args.buzzer_pin is not None:
-        global BUZZER_PIN
         BUZZER_PIN = args.buzzer_pin
         log.info("[i] Buzzer pin configured to BCM GPIO %d", BUZZER_PIN)
 
     if args.buzzer_active_low:
-        global BUZZER_ACTIVE_LOW
         BUZZER_ACTIVE_LOW = True
         log.info("[i] Buzzer polarity set to ACTIVE-LOW")
 
     if args.trig_pin is not None:
-        global ULTRASONIC_TRIG_PIN
         ULTRASONIC_TRIG_PIN = args.trig_pin
         log.info("[i] Ultrasonic TRIG pin configured to BCM GPIO %d", ULTRASONIC_TRIG_PIN)
 
     if args.echo_pin is not None:
-        global ULTRASONIC_ECHO_PIN
         ULTRASONIC_ECHO_PIN = args.echo_pin
         log.info("[i] Ultrasonic ECHO pin configured to BCM GPIO %d", ULTRASONIC_ECHO_PIN)
 
@@ -1807,14 +2399,35 @@ def main():
         return
 
     if args.trigger_once:
-        start_local_wifi_server(host="0.0.0.0", port=args.port)
-        trigger_crack_detection_pipeline(
-            db_url=args.db,
-            uid=args.uid,
-            id_token=args.auth,
-            chainage="KM 14+320",
-            device_id=args.device
-        )
+        start_local_wifi_server(host=LOCAL_BIND_HOST, port=args.port)
+        # Use real CV when a camera is present; otherwise run an explicit demo.
+        frame = capture_real_camera_frame()
+        vision = run_vision_on_bytes(frame) if frame else None
+        if vision and vision.get("hasCrack"):
+            trigger_crack_detection_pipeline(
+                db_url=args.db,
+                uid=args.uid,
+                id_token=args.auth,
+                chainage="KM 14+320",
+                device_id=args.device,
+                bounding_box=vision.get("boundingBox"),
+                confidence=int(vision.get("confidencePercent", 0)),
+                length_mm=float(vision.get("crackLengthMm", 0.0) or 0.0),
+                force=True,
+            )
+        else:
+            log.warning("[DEMO] No confident camera detection; generating an explicitly simulated defect")
+            trigger_crack_detection_pipeline(
+                db_url=args.db,
+                uid=args.uid,
+                id_token=args.auth,
+                chainage="KM 14+320",
+                device_id=args.device,
+                confidence=0,
+                length_mm=0.0,
+                force=True,
+            )
+        time.sleep(1.0)
     else:
         run_continuous_camera_scan(
             db_url=args.db,
@@ -1823,7 +2436,8 @@ def main():
             device_id=args.device,
             scan_interval=args.interval,
             simulate_anomaly_interval=args.simulate_anomaly_interval,
-            wifi_port=args.port
+            wifi_port=args.port,
+            no_cloud=args.no_cloud,
         )
 
 
