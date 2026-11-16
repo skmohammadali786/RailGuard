@@ -126,20 +126,45 @@ export GOOGLE_APPLICATION_CREDENTIALS=/etc/railguard/firebase-service-account.js
 python3 railguard_gateway.py
 ```
 
-Packet contract:
+Packet contract (`/api/telemetry` and `telemetry` inside `/api/all_data`):
 
 ```json
 {
   "nodeId": "RPI-TRACK-01",
+  "version": "2.2.2",
+  "instanceId": "1234-1794828166010",
+  "pid": 1234,
   "ultrasonicDepthMm": 68.2,
   "vibrationG": 0.041,
   "railTempC": 31.4,
   "axleSpeedKmh": 14.2,
-  "chainage": "14+320",
-  "hardware": "Pi + ESP32 + UT + ADXL345 + PT100",
-  "status": "ACTIVE_SYNC"
+  "chainage": "KM 14+320",
+  "hardware": "PHYSICAL_ULTRASONIC_HC_SR04 ...",
+  "status": "PARTIAL_HARDWARE",
+  "dataMode": "PARTIAL",
+  "dataSource": "RASPBERRY_PI_HARDWARE",
+  "sensorMode": {"ultrasonic": "hardware", "temperature": "simulated", "vibration": "simulated", "speed": "simulated", "chainage": "simulated"},
+  "ultrasonicLive": true,
+  "timestamp": 1794828169031,
+  "telemetryAgeSeconds": 0.2,
+  "sensorLoopAlive": true,
+  "stale": false
 }
 ```
+
+Before the first sensor sample, or if the acquisition loop has never run, the packet is
+explicitly empty:
+
+```json
+{"dataMode": "NO_DATA", "status": "NO_TELEMETRY_YET", "timestamp": 0,
+ "ultrasonicDepthMm": null, "vibrationG": null, "railTempC": null,
+ "axleSpeedKmh": null, "chainage": null, "sensorLoopAlive": false}
+```
+
+`dataMode` is `LIVE` only when **all four** values are measured, `PARTIAL` when at least
+one is real, and `SIMULATED` when none are. Old telemetry is never restored from
+`railguard_pi_state.json`; only schedules, defects, tasks, inspections, TSR and a
+non-expired crack latch are persisted.
 
 The gateway keeps polling Firebase commands even when the serial port is disconnected, and
 it reconnects to the serial port automatically when it comes back.

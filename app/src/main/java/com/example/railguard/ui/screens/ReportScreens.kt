@@ -351,10 +351,12 @@ fun PdfPreviewScreen(
     val cachedInspections = remember { fbService.getCachedInspections() }
 
     // Null = the Pi did not report it. Never substitute demo numbers.
-    val liveUtDepth: Float? = activeTelemetry?.ultrasonicDepthMm
-    val liveTemp: Float? = activeTelemetry?.railTempC
-    val liveSpeed: Float? = activeTelemetry?.axleSpeedKmh
-    val liveVib: Float? = activeTelemetry?.vibrationG
+    // dataValid=false means the Pi answered but explicitly had no reading.
+    val hasReadings = activeTelemetry?.dataValid == true
+    val liveUtDepth: Float? = activeTelemetry?.ultrasonicDepthMm?.takeIf { hasReadings }
+    val liveTemp: Float? = activeTelemetry?.railTempC?.takeIf { hasReadings }
+    val liveSpeed: Float? = activeTelemetry?.axleSpeedKmh?.takeIf { hasReadings }
+    val liveVib: Float? = activeTelemetry?.vibrationG?.takeIf { hasReadings }
     fun f1(v: Float?): String = v?.let { "%.1f".format(it) } ?: "—"
     fun f3(v: Float?): String = v?.let { "%.3f".format(it) } ?: "—"
     fun f0(v: Float?): String = v?.let { "%.0f".format(it) } ?: "—"
@@ -368,7 +370,9 @@ fun PdfPreviewScreen(
     val liveCycles = activeOracle?.fatigueCyclesRemaining
     val liveThermalStress: Float? = liveTemp?.let { (it - 27.0f) * 2.5f }
     val activeSection = cachedInspections.firstOrNull()?.section ?: "Section 14 (North Loop Line)"
-    val liveChainage = activeTelemetry?.chainage?.takeIf { it.isNotBlank() && it != "Unknown" } ?: "Unknown"
+    val liveChainage = activeTelemetry?.chainage?.takeIf {
+        hasReadings && it.isNotBlank() && it != "Unknown"
+    } ?: "Unknown"
     val isDirectWifi = fbService.isDirectPiConnected
     val wifiLatency = activeTelemetry?.latencyMs ?: -1
     var isDownloaded by remember { mutableStateOf(false) }

@@ -62,25 +62,13 @@ logging.basicConfig(
 )
 log = logging.getLogger("camera-crack-detector")
 
-# Global in-memory cache for ultra-low latency direct Wi-Fi endpoints
-LATEST_TELEMETRY: Dict[str, Any] = {
-    "nodeId": "RPI-TRACK-01",
-    "ultrasonicDepthMm": 68.2,
-    "vibrationG": 0.035,
-    "railTempC": 31.5,
-    "axleSpeedKmh": 45.0,
-    "chainage": "KM 14+250",
-    "hardware": "Raspberry Pi Zero W / Camera Module 3 / Piezo UT",
-    "hasCrack": False,
-    "crackLengthMm": 0.0,
-    "flawType": "NOMINAL_TRACK",
-    "aiConfidencePercent": 98,
-    "status": "ALL_SENSORS_ONLINE",
-    "timestamp": int(time.time() * 1000),
-    "latitude": 28.6139,
-    "longitude": 77.2090,
-    "gpsLocked": True
-}
+# Global in-memory cache for ultra-low latency direct Wi-Fi endpoints.
+#
+# IMPORTANT: this starts EMPTY on purpose. It used to be pre-filled with
+# 68.2 mm / 0.035 g / 31.5 C / 45.0 km/h / KM 14+250, which the app then showed
+# as if it were a live measurement even when the sensor loop had never produced
+# a single sample. Telemetry may only come from sensor_acquisition_worker().
+LATEST_TELEMETRY: Dict[str, Any] = {}
 LATEST_CRACK: Optional[Dict[str, Any]] = None
 LAST_TSR_COMMAND: Optional[Dict[str, Any]] = None
 DEFECTS_REGISTRY: List[Dict[str, Any]] = []
@@ -118,6 +106,11 @@ _UT_DEVIATION_COUNT: int = 0
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _header_value(value: Any) -> str:
+    """HTTP header value for a possibly-absent sensor reading (never a demo)."""
+    return "" if value is None else str(value)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -178,7 +171,7 @@ ACTIVE_PATROL_STATUS: Dict[str, Any] = {"status": "STANDBY", "sensors": ["camera
 # Version + process identity. The app shows these so a stale instance that is
 # still holding port 8080 is immediately visible instead of silently serving
 # old/frozen telemetry.
-RAILGUARD_VERSION: str = "2.2.1"
+RAILGUARD_VERSION: str = "2.2.2"
 START_TIME_MS: int = int(time.time() * 1000)
 PROCESS_PID: int = os.getpid()
 INSTANCE_ID: str = f"{PROCESS_PID}-{START_TIME_MS}"
@@ -214,6 +207,12 @@ MOTOR_CUT_PIN: int = int(os.getenv("RAILGUARD_MOTOR_CUT_PIN", "17"))
 MOTOR_CUT_ACTIVE_LOW: bool = os.getenv("RAILGUARD_MOTOR_CUT_ACTIVE_LOW", "0").strip().lower() in ("1", "true", "yes", "on")
 MOTOR_CUT_WATCHDOG_SECONDS: float = float(os.getenv("RAILGUARD_MOTOR_WATCHDOG_SECONDS", "30"))
 LAST_SCAN_TICK_MS: int = 0
+# Pi-clock timestamp of the last COMPLETED acquisition cycle. 0 means the
+# sensor loop has never produced a sample (do not guess values in that case).
+TELEMETRY_UPDATED_AT_MS: int = 0
+# A packet older than this is reported as stale. The worker writes every
+# 500 ms, so 15 s already means something is badly wrong.
+TELEMETRY_STALE_SECONDS: float = float(os.getenv("RAILGUARD_TELEMETRY_STALE_SECONDS", "15"))
 
 IS_BUZZER_RINGING: bool = False
 BUZZER_TRIGGERED_AT: int = 0
@@ -224,11 +223,17 @@ STATE_FILE_PATH: str = os.getenv("RAILGUARD_STATE_FILE", os.path.join(os.path.di
 
 
 def save_pi_state():
-    """Persists local patrol schedules, defects, tasks, and telemetry to disk."""
+    """Persists local patrol schedules, defects, tasks and crack state.
+
+    Telemetry is deliberately NOT written here. A persisted sensor packet is
+    indistinguishable from a live one after a restart, and restoring it was the
+    reason the app showed days-old demo numbers with a fake "Pi v1.0.1".
+    """
     try:
         data = {
             "deviceId": DEVICE_ID,
-            "telemetry": LATEST_TELEMETRY,
+            # Explicit marker: older builds wrote a "telemetry" object here.
+            "telemetry": None,
             "tsr": LAST_TSR_COMMAND,
             "latestCrack": LATEST_CRACK,
             "schedules": SCHEDULES_REGISTRY,
@@ -244,14 +249,22 @@ def save_pi_state():
 
 
 def load_pi_state():
-    """Restores local patrol schedules, defects, tasks, and telemetry from disk."""
-    global LATEST_TELEMETRY, LAST_TSR_COMMAND, SCHEDULES_REGISTRY, DEFECTS_REGISTRY, TASKS_REGISTRY, INSPECTIONS_REGISTRY, LATEST_CRACK
+    """Restores patrol data from disk. NEVER restores telemetry."""
+    global LAST_TSR_COMMAND, SCHEDULES_REGISTRY, DEFECTS_REGISTRY, TASKS_REGISTRY, INSPECTIONS_REGISTRY, LATEST_CRACK
     try:
         if os.path.exists(STATE_FILE_PATH):
             with open(STATE_FILE_PATH, "r") as f:
                 data = json.load(f)
-            if "telemetry" in data and isinstance(data["telemetry"], dict):
-                LATEST_TELEMETRY.update(data["telemetry"])
+            # Older builds saved a "telemetry" object. Ignore it completely:
+            # live values must only ever come from the sensor loop in THIS
+            # process. This is what made the app display 68.2/0.035/31.5/45.0
+            # and an obsolete "version" from a previous run.
+            if data.get("telemetry"):
+                log.warning(
+                    "[!] Ignoring persisted telemetry in %s (from an older run). "
+                    "Waiting for a fresh sensor sample instead.",
+                    STATE_FILE_PATH,
+                )
             if "tsr" in data and isinstance(data["tsr"], dict):
                 LAST_TSR_COMMAND = data["tsr"]
             if "latestCrack" in data and isinstance(data["latestCrack"], dict):
@@ -1001,7 +1014,7 @@ def resolve_effective_speed(tsr_speed: Any = None, telem: Optional[Dict[str, Any
 def sensor_acquisition_worker():
     """Continuously queries connected physical sensors and updates LATEST_TELEMETRY with guaranteed dynamism."""
     global LATEST_TELEMETRY, HARDWARE_ULTRASONIC_SENSOR, LAST_HARDWARE_ACQUISITION_MS, _UT_DEVIATION_COUNT
-    global LAST_SCAN_TICK_MS
+    global LAST_SCAN_TICK_MS, TELEMETRY_UPDATED_AT_MS
     try:
         HARDWARE_ULTRASONIC_SENSOR = HardwareUltrasonicSensor(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN)
     except Exception as e:
@@ -1126,9 +1139,11 @@ def sensor_acquisition_worker():
                 crack_len = 0.0
 
             vision_ok = bool(crack_vision and crack_vision.is_available())
-            # LIVE only when the primary rail sensor (ultrasonic) is real. A real
-            # temperature probe alone must not label simulated rail depth as LIVE.
-            data_mode = "LIVE" if ut_live else ("PARTIAL" if has_physical_hardware else "SIMULATED")
+            # LIVE means EVERY displayed value is measured. A real ultrasonic
+            # sensor alone must not label simulated speed/vibration as LIVE.
+            live_sensor_count = sum([bool(ut_live), bool(temp_live), bool(vib_live), bool(serial_data)])
+            data_mode = ("LIVE" if live_sensor_count == 4
+                         else ("PARTIAL" if has_physical_hardware else "SIMULATED"))
 
             # GPS is only reported when a real fix is available from the serial
             # node. Without a GNSS receiver we must not claim a lock.
@@ -1159,7 +1174,7 @@ def sensor_acquisition_worker():
                 "chainage": chainage_str,
                 "hardware": hw_source,
                 "status": ("ANOMALY_FLAGGED" if crack_active else
-                           ("ALL_SENSORS_ONLINE" if ut_live else
+                           ("ALL_SENSORS_ONLINE" if live_sensor_count == 4 else
                             ("PARTIAL_HARDWARE" if has_physical_hardware else "SIMULATED_DEMO"))),
                 "dataMode": data_mode,
                 # Per-sensor provenance: the app uses this to show exactly which
@@ -1196,6 +1211,20 @@ def sensor_acquisition_worker():
                 "motorCutEnabled": motor_status().get("enabled"),
                 "tsrAutoApplied": bool((LAST_TSR_COMMAND or {}).get("automatic")),
             }
+            # Mark the sample as produced by THIS process, now. The HTTP layer
+            # uses this to distinguish a live loop from a dead/frozen one.
+            TELEMETRY_UPDATED_AT_MS = cycle_ts
+            # Periodic proof in the terminal: which values are real hardware and
+            # which are simulated. This line is what the phone will show.
+            if step % 40 == 0:
+                log.info(
+                    "[Telemetry] mode=%s | UT=%.1f mm (%s) | temp=%.1f C (%s) | "
+                    "vib=%.3f g (%s) | speed=%.1f km/h | chainage=%s",
+                    data_mode, float(ut_depth), "LIVE" if ut_live else "SIMULATED",
+                    float(rail_temp), "LIVE" if temp_live else "SIMULATED",
+                    float(vib_g), "LIVE" if vib_live else "SIMULATED",
+                    float(effective_speed), chainage_str,
+                )
 
         except Exception as e:
             log.debug("Sensor acquisition cycle error: %s", e)
@@ -1203,11 +1232,145 @@ def sensor_acquisition_worker():
         time.sleep(0.5)
 
 
-def ensure_sensor_acquisition_started():
+def _sensor_loop_alive() -> bool:
+    """True only if this process's acquisition thread is currently running."""
+    return bool(ACQUISITION_THREAD is not None and ACQUISITION_THREAD.is_alive())
+
+
+def telemetry_age_seconds() -> Optional[float]:
+    """Age of the last completed acquisition cycle in seconds (None = never)."""
+    if TELEMETRY_UPDATED_AT_MS <= 0:
+        return None
+    return max(0.0, (now_ms() - TELEMETRY_UPDATED_AT_MS) / 1000.0)
+
+
+def ensure_sensor_acquisition_started(force_restart: bool = False):
     global ACQUISITION_THREAD
+    if force_restart:
+        # Only used when the old thread is confirmed dead. A live thread is
+        # never replaced, to avoid two writers racing on LATEST_TELEMETRY.
+        ACQUISITION_THREAD = None
     if ACQUISITION_THREAD is None or not ACQUISITION_THREAD.is_alive():
-        ACQUISITION_THREAD = threading.Thread(target=sensor_acquisition_worker, daemon=True)
+        ACQUISITION_THREAD = threading.Thread(
+            target=sensor_acquisition_worker, name="sensor-acquisition", daemon=True
+        )
         ACQUISITION_THREAD.start()
+        log.info("[✓] Sensor acquisition thread started (pid %d)", PROCESS_PID)
+    return ACQUISITION_THREAD
+
+
+ACQUISITION_SUPERVISOR_STARTED: bool = False
+
+
+def _acquisition_supervisor_worker():
+    """Restart the sensor loop if it dies; shout if it is alive but frozen."""
+    global ACQUISITION_SUPERVISOR_STARTED
+    last_stall_log_ms = 0
+    while True:
+        time.sleep(3.0)
+        try:
+            if not _sensor_loop_alive():
+                log.error("[!] Sensor acquisition thread is DEAD — restarting it now.")
+                ensure_sensor_acquisition_started(force_restart=True)
+                log_audit("SENSOR_LOOP_RESTARTED", {"pid": PROCESS_PID})
+                continue
+            age = telemetry_age_seconds()
+            if age is not None and age > max(30.0, TELEMETRY_STALE_SECONDS * 2) \
+                    and (now_ms() - last_stall_log_ms) > 30_000:
+                last_stall_log_ms = now_ms()
+                log.critical(
+                    "[!] Sensor loop is ALIVE but telemetry has not advanced for %.1f s. "
+                    "The app will show STALE data. Check the ultrasonic sensor wiring and "
+                    "the Pi log for repeated 'Sensor acquisition cycle error' lines.", age,
+                )
+        except Exception:
+            pass
+
+
+def start_acquisition_supervisor():
+    global ACQUISITION_SUPERVISOR_STARTED
+    if ACQUISITION_SUPERVISOR_STARTED:
+        return
+    ACQUISITION_SUPERVISOR_STARTED = True
+    threading.Thread(target=_acquisition_supervisor_worker, name="acquisition-supervisor", daemon=True).start()
+    log.info("[✓] Sensor acquisition supervisor armed (restarts a dead loop)")
+
+
+def current_telemetry() -> Dict[str, Any]:
+    """Return exactly what the Pi knows right now, with provenance.
+
+    - No sample yet  -> dataMode "NO_DATA", numeric fields null, timestamp 0.
+    - Sample present -> the real sample plus telemetryAgeSeconds/sensorLoopAlive.
+    Values are NEVER invented to fill a gap.
+    """
+    telem = dict(LATEST_TELEMETRY or {})
+    age = telemetry_age_seconds()
+    alive = _sensor_loop_alive()
+    stale = (age is None) or (age > TELEMETRY_STALE_SECONDS)
+
+    if not telem:
+        crack_active = _crack_is_active()
+        return {
+            "nodeId": DEVICE_ID,
+            "version": RAILGUARD_VERSION,
+            "instanceId": INSTANCE_ID,
+            "pid": PROCESS_PID,
+            "startedAt": START_TIME_MS,
+            "uptimeSeconds": int(time.time() - (START_TIME_MS / 1000)),
+            "ultrasonicDepthMm": None,
+            "vibrationG": None,
+            "railTempC": None,
+            "axleSpeedKmh": None,
+            "chainage": None,
+            "hardware": "No sensor sample yet",
+            "status": "NO_TELEMETRY_YET",
+            "dataMode": "NO_DATA",
+            "dataSource": "NONE",
+            "sensorMode": {
+                "ultrasonic": "unavailable",
+                "temperature": "unavailable",
+                "vibration": "unavailable",
+                "speed": "unavailable",
+                "chainage": "unavailable",
+            },
+            "ultrasonicLive": False,
+            "ultrasonicSource": "unavailable",
+            "hasCrack": crack_active,
+            "flawType": ((LATEST_CRACK or {}).get("defect") or {}).get("flawType", "NOMINAL_TRACK")
+            if crack_active else "NOMINAL_TRACK",
+            "crackLengthMm": float((LATEST_CRACK or {}).get("crackLengthMm", 0.0) or 0.0) if crack_active else 0.0,
+            "recommendedTsrKmh": 25.0 if crack_active else None,
+            "aiConfidencePercent": 0,
+            "timestamp": 0,
+            "telemetryAgeSeconds": None,
+            "sensorLoopAlive": alive,
+            "stale": True,
+            "gpsLocked": False,
+            "gpsSource": "unavailable",
+            "latitude": None,
+            "longitude": None,
+            "motorState": motor_status().get("state"),
+            "motorStopped": motor_status().get("motorStopped"),
+            "motorCutLatched": motor_status().get("latched"),
+            "motorCutReason": motor_status().get("reason"),
+            "motorCutPin": motor_status().get("pin"),
+            "motorCutEnabled": motor_status().get("enabled"),
+            "tsrAutoApplied": bool((LAST_TSR_COMMAND or {}).get("automatic")),
+        }
+
+    # Identity always reflects THIS process. A restored/old packet must never
+    # be able to report a different version or uptime (the app used to show a
+    # phantom "Pi v1.0.1 · up 9641" because of exactly that).
+    telem["version"] = RAILGUARD_VERSION
+    telem["instanceId"] = INSTANCE_ID
+    telem["pid"] = PROCESS_PID
+    telem["startedAt"] = START_TIME_MS
+    telem["uptimeSeconds"] = int(time.time() - (START_TIME_MS / 1000))
+    telem["telemetryAgeSeconds"] = round(age, 1) if age is not None else None
+    telem["sensorLoopAlive"] = alive
+    telem["stale"] = stale
+    return telem
+
 
 
 def _camera_available() -> bool:
@@ -1428,7 +1591,7 @@ def trigger_camera_snapshot(high_res: bool = False) -> Dict[str, Any]:
             "resolution": "1640x1232" if high_res else "820x616",
             "vision": vision,
             "opticalFlawDetected": bool(vision.get("hasCrack")),
-            "chainage": (LATEST_TELEMETRY or {}).get("chainage", "KM 14+320"),
+            "chainage": (LATEST_TELEMETRY or {}).get("chainage") or "Unknown",
         }
 
     # No camera attached: return a clearly-marked simulated frame.
@@ -1450,17 +1613,22 @@ def trigger_camera_snapshot(high_res: bool = False) -> Dict[str, Any]:
             "reason": "No camera detected. Connect a Pi Camera / USB webcam.",
         },
         "opticalFlawDetected": False,
-        "chainage": (LATEST_TELEMETRY or {}).get("chainage", "KM 14+320"),
+        "chainage": (LATEST_TELEMETRY or {}).get("chainage") or "Unknown",
     }
 
 
 def get_hardware_diagnostics() -> Dict[str, Any]:
     """Report what is physically present. Never hardcode ONLINE for absent parts."""
-    ut_present = bool(HARDWARE_ULTRASONIC_SENSOR and HARDWARE_ULTRASONIC_SENSOR.is_hardware_present)
-    temp_present = False
+    telem = LATEST_TELEMETRY or {}
+    ut_present = bool(
+        (HARDWARE_ULTRASONIC_SENSOR and HARDWARE_ULTRASONIC_SENSOR.is_hardware_present)
+        or telem.get("ultrasonicLive")
+    )
+    temp_present = str((telem.get("sensorMode") or {}).get("temperature", "")).lower() == "hardware"
     try:
         w1 = "/sys/bus/w1/devices"
-        temp_present = os.path.isdir(w1) and any(d.startswith("28-") for d in os.listdir(w1))
+        detected_w1 = os.path.isdir(w1) and any(d.startswith("28-") for d in os.listdir(w1))
+        temp_present = temp_present or detected_w1
     except Exception:
         pass
     cam_present = _camera_available()
@@ -1527,21 +1695,57 @@ def get_hardware_diagnostics() -> Dict[str, Any]:
             "uptimeSeconds": int(time.time() - (START_TIME_MS / 1000)),
             "wifiPort": 8080,
             "apiKeyRequired": bool(LOCAL_API_KEY),
-            "dataMode": (LATEST_TELEMETRY or {}).get("dataMode", "SIMULATED"),
+            "dataMode": (LATEST_TELEMETRY or {}).get("dataMode", "NO_DATA"),
+            "sensorLoopAlive": _sensor_loop_alive(),
+            "telemetryAgeSeconds": telemetry_age_seconds(),
         },
     }
 
 
 
+def _num(value: Any) -> Optional[float]:
+    """Best-effort numeric conversion that never invents a value."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def get_ai_oracle_metrics(telemetry: Dict[str, Any]) -> Dict[str, Any]:
-    crack_len = telemetry.get("crackLengthMm", 14.8 if telemetry.get("hasCrack") else 0.0)
-    vibration_g = telemetry.get("vibrationG", 0.035)
-    rail_temp = telemetry.get("railTempC", 31.5)
-    speed_kmh = telemetry.get("axleSpeedKmh", 45.0)
+    """Fracture-mechanics estimates from measured values only.
+
+    When a sensor value is absent the metrics are marked unavailable instead of
+    being computed from demo constants (0.035 g / 31.5 C / 45 km/h).
+    """
+    telemetry = telemetry or {}
+    crack_len = _num(telemetry.get("crackLengthMm")) or 0.0
+    vibration_g = _num(telemetry.get("vibrationG"))
+    rail_temp = _num(telemetry.get("railTempC"))
+    speed_kmh = _num(telemetry.get("axleSpeedKmh"))
+
+    unavailable = {
+        "available": False,
+        "status": "NO_TELEMETRY",
+        "reason": "vibrationG / railTempC / axleSpeedKmh not measured by the Pi",
+        "parisDeltaK": None,
+        "parisGrowthRate": "not measured",
+        "nadalRatio": None,
+        "derailmentRisk": "not available",
+        "thermalStressMpa": None,
+        "neutralTempDelta": None,
+        "fatigueCyclesRemaining": None,
+        "timestamp": int(time.time() * 1000),
+    }
+    if vibration_g is None or rail_temp is None or speed_kmh is None:
+        return unavailable
+    if str(telemetry.get("dataMode", "")).upper() == "NO_DATA":
+        return unavailable
 
     # Paris Law: Stress intensity factor delta_K = delta_sigma * sqrt(pi * a) * Y
-    delta_k = round(180.0 * math.sqrt(math.pi * max(0.001, crack_len / 2000.0)) * 1.12, 2) if crack_len > 0 else 4.2
-    paris_growth_rate = f"{delta_k * 0.12:.2f} um/k-cycle" if crack_len > 0 else "0.02 um/k-cycle"
+    delta_k = round(180.0 * math.sqrt(math.pi * max(0.001, crack_len / 2000.0)) * 1.12, 2) if crack_len > 0 else None
+    paris_growth_rate = f"{delta_k * 0.12:.2f} um/k-cycle" if crack_len > 0 and delta_k else "not measured"
 
     # Nadal Derailment Criterion:
     nadal_ratio = round(min(1.4, (vibration_g * 1.5) + (speed_kmh / 120.0 * 0.3)), 2)
@@ -1552,13 +1756,15 @@ def get_ai_oracle_metrics(telemetry: Dict[str, Any]) -> Dict[str, Any]:
     thermal_stress_mpa = round(2.415 * temp_diff, 1)
 
     return {
+        "available": True,
+        "status": "COMPUTED",
         "parisDeltaK": delta_k,
         "parisGrowthRate": paris_growth_rate,
         "nadalRatio": nadal_ratio,
         "derailmentRisk": derailment_risk,
         "thermalStressMpa": thermal_stress_mpa,
         "neutralTempDelta": round(temp_diff, 1),
-        "fatigueCyclesRemaining": max(500, int(150000 / max(1.0, delta_k))) if crack_len > 0 else 850000,
+        "fatigueCyclesRemaining": (max(500, int(150000 / max(1.0, delta_k))) if crack_len > 0 and delta_k else None),
         "timestamp": int(time.time() * 1000)
     }
 
@@ -1566,37 +1772,43 @@ def get_ai_oracle_metrics(telemetry: Dict[str, Any]) -> Dict[str, Any]:
 def instance_info() -> Dict[str, Any]:
     """Identity of the running process, so the app can spot a stale server."""
     telem = LATEST_TELEMETRY or {}
+    age = telemetry_age_seconds()
     return {
         "version": RAILGUARD_VERSION,
         "instanceId": INSTANCE_ID,
         "pid": PROCESS_PID,
         "startedAt": START_TIME_MS,
         "uptimeSeconds": int(time.time() - (START_TIME_MS / 1000)),
-        "dataMode": telem.get("dataMode", "SIMULATED"),
+        "dataMode": telem.get("dataMode", "NO_DATA"),
         "ultrasonicLive": bool(telem.get("ultrasonicLive", False)),
+        "sensorLoopAlive": _sensor_loop_alive(),
+        "telemetryAgeSeconds": round(age, 1) if age is not None else None,
+        "stale": (age is None) or (age > TELEMETRY_STALE_SECONDS),
         "port": LOCAL_SERVER_PORT,
     }
 
 
 def get_all_system_data() -> Dict[str, Any]:
-    telem = LATEST_TELEMETRY or {
-        "nodeId": "RPI-TRACK-01",
-        "ultrasonicDepthMm": 68.2,
-        "vibrationG": 0.035,
-        "railTempC": 31.5,
-        "axleSpeedKmh": 45.0,
-        "chainage": "KM 14+320",
-        "hardware": "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
-        "status": "ACTIVE_SYNC",
-        "timestamp": int(time.time() * 1000),
-        "hasCrack": False
-    }
+    telem = current_telemetry()
+    data_mode = str(telem.get("dataMode") or "NO_DATA")
+    if data_mode == "NO_DATA":
+        status = "NO_TELEMETRY"
+    elif telem.get("stale"):
+        status = "STALE"
+    else:
+        status = "ONLINE"
     return {
-        "status": "ONLINE",
+        "status": status,
         "timestamp": int(time.time() * 1000),
         "deviceId": DEVICE_ID,
         "instance": instance_info(),
         "telemetry": telem,
+        "sensorLoop": {
+            "alive": _sensor_loop_alive(),
+            "telemetryAgeSeconds": telem.get("telemetryAgeSeconds"),
+            "stale": bool(telem.get("stale")),
+            "staleAfterSeconds": TELEMETRY_STALE_SECONDS,
+        },
         "latestCrack": LATEST_CRACK,
         "defects": DEFECTS_REGISTRY,
         "tasks": TASKS_REGISTRY,
@@ -1702,7 +1914,15 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
         # Check for web dashboard when requested from a browser or root URL
         if clean_path in ("", "/", "/index.html", "/dashboard"):
             if "application/json" not in accept_hdr:
-                telem = LATEST_TELEMETRY or {}
+                telem = current_telemetry()
+                def _html_val(key: str, suffix: str = "", digits: int = 1) -> str:
+                    v = telem.get(key)
+                    if v is None:
+                        return "—"
+                    try:
+                        return f"{float(v):.{digits}f}{suffix}"
+                    except (TypeError, ValueError):
+                        return f"{v}{suffix}"
                 html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -1739,11 +1959,11 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
     </div>
   </div>
   <div class="grid">
-    <div class="metric"><div class="lbl">Ultrasonic Depth</div><div class="val" id="ut">{telem.get('ultrasonicDepthMm', 68.2)} mm</div></div>
-    <div class="metric"><div class="lbl">Vibration Shock</div><div class="val" id="vib">{telem.get('vibrationG', 0.035)} g</div></div>
-    <div class="metric"><div class="lbl">Rail Temperature</div><div class="val" id="temp">{telem.get('railTempC', 31.5)} °C</div></div>
-    <div class="metric"><div class="lbl">Axle Speed</div><div class="val" id="spd">{telem.get('axleSpeedKmh', 45.0)} km/h</div></div>
-    <div class="metric"><div class="lbl">Chainage</div><div class="val" id="ch">{telem.get('chainage', 'KM 14+250')}</div></div>
+    <div class="metric"><div class="lbl">Ultrasonic Depth</div><div class="val" id="ut">{_html_val('ultrasonicDepthMm', ' mm')}</div></div>
+    <div class="metric"><div class="lbl">Vibration Shock</div><div class="val" id="vib">{_html_val('vibrationG', ' g', 3)}</div></div>
+    <div class="metric"><div class="lbl">Rail Temperature</div><div class="val" id="temp">{_html_val('railTempC', ' °C')}</div></div>
+    <div class="metric"><div class="lbl">Axle Speed</div><div class="val" id="spd">{_html_val('axleSpeedKmh', ' km/h')}</div></div>
+    <div class="metric"><div class="lbl">Chainage</div><div class="val" id="ch">{_html_val('chainage', '')}</div></div>
   </div>
   <script>
     function refreshImg() {{
@@ -1752,11 +1972,13 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
     }}
     function updateTelemetry() {{
       fetch('/api/telemetry').then(r => r.json()).then(d => {{
-        if (d.ultrasonicDepthMm !== undefined) document.getElementById('ut').innerText = d.ultrasonicDepthMm + ' mm';
-        if (d.vibrationG !== undefined) document.getElementById('vib').innerText = d.vibrationG + ' g';
-        if (d.railTempC !== undefined) document.getElementById('temp').innerText = d.railTempC + ' °C';
-        if (d.axleSpeedKmh !== undefined) document.getElementById('spd').innerText = d.axleSpeedKmh + ' km/h';
-        if (d.chainage !== undefined) document.getElementById('ch').innerText = d.chainage;
+        const fmt = (v, suffix, digits) => (v === null || v === undefined) ? '—' : Number(v).toFixed(digits) + suffix;
+        document.getElementById('ut').innerText = fmt(d.ultrasonicDepthMm, ' mm', 1);
+        document.getElementById('vib').innerText = fmt(d.vibrationG, ' g', 3);
+        document.getElementById('temp').innerText = fmt(d.railTempC, ' °C', 1);
+        document.getElementById('spd').innerText = fmt(d.axleSpeedKmh, ' km/h', 1);
+        document.getElementById('ch').innerText = (d.chainage === null || d.chainage === undefined) ? '—' : d.chainage;
+        document.getElementById('ts').innerText = (d.stale ? 'STALE · ' : 'LIVE · ') + (d.dataMode || 'NO_DATA');
       }}).catch(e => console.error(e));
     }}
     function capture() {{
@@ -1774,11 +1996,11 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 self._send_html(html)
                 return
             else:
-                self._send_json(200, LATEST_TELEMETRY or {"status": "ACTIVE_SYNC", "nodeId": "RPI-TRACK-01"})
+                self._send_json(200, current_telemetry())
                 return
 
         if clean_path in ("/api/telemetry", "/telemetry", "/sensors", "/api/sensors"):
-            self._send_json(200, LATEST_TELEMETRY or {"status": "ACTIVE_SYNC", "nodeId": "RPI-TRACK-01"})
+            self._send_json(200, current_telemetry())
         elif clean_path in ("/api/all_data", "/all_data"):
             self._send_json(200, get_all_system_data())
         elif clean_path == "/api/defects":
@@ -1792,7 +2014,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
         elif clean_path == "/api/hardware":
             self._send_json(200, get_hardware_diagnostics())
         elif clean_path == "/api/ai_oracle":
-            self._send_json(200, get_ai_oracle_metrics(LATEST_TELEMETRY))
+            self._send_json(200, get_ai_oracle_metrics(current_telemetry()))
         elif clean_path == "/api/tsr":
             query = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
             if "speed" in query:
@@ -1855,11 +2077,11 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             if LATEST_TELEMETRY:
                 try:
                     self.send_header("X-RailGuard-Telemetry", urllib.parse.quote(json.dumps(LATEST_TELEMETRY, ensure_ascii=False)))
-                    self.send_header("X-RailGuard-UT-Depth", str(LATEST_TELEMETRY.get("ultrasonicDepthMm", 68.2)))
-                    self.send_header("X-RailGuard-Vibration", str(LATEST_TELEMETRY.get("vibrationG", 0.035)))
-                    self.send_header("X-RailGuard-Temp", str(LATEST_TELEMETRY.get("railTempC", 31.5)))
-                    self.send_header("X-RailGuard-Speed", str(LATEST_TELEMETRY.get("axleSpeedKmh", 45.0)))
-                    self.send_header("X-RailGuard-Chainage", urllib.parse.quote(str(LATEST_TELEMETRY.get("chainage", "KM 14+320"))))
+                    self.send_header("X-RailGuard-UT-Depth", _header_value(LATEST_TELEMETRY.get("ultrasonicDepthMm")))
+                    self.send_header("X-RailGuard-Vibration", _header_value(LATEST_TELEMETRY.get("vibrationG")))
+                    self.send_header("X-RailGuard-Temp", _header_value(LATEST_TELEMETRY.get("railTempC")))
+                    self.send_header("X-RailGuard-Speed", _header_value(LATEST_TELEMETRY.get("axleSpeedKmh")))
+                    self.send_header("X-RailGuard-Chainage", urllib.parse.quote(_header_value(LATEST_TELEMETRY.get("chainage"))))
                     self.send_header("X-RailGuard-Buzzer", "RINGING" if IS_BUZZER_RINGING else "IDLE")
                 except Exception:
                     pass
@@ -1878,11 +2100,11 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 if LATEST_TELEMETRY:
                     try:
                         self.send_header("X-RailGuard-Telemetry", urllib.parse.quote(json.dumps(LATEST_TELEMETRY, ensure_ascii=False)))
-                        self.send_header("X-RailGuard-UT-Depth", str(LATEST_TELEMETRY.get("ultrasonicDepthMm", 68.2)))
-                        self.send_header("X-RailGuard-Vibration", str(LATEST_TELEMETRY.get("vibrationG", 0.035)))
-                        self.send_header("X-RailGuard-Temp", str(LATEST_TELEMETRY.get("railTempC", 31.5)))
-                        self.send_header("X-RailGuard-Speed", str(LATEST_TELEMETRY.get("axleSpeedKmh", 45.0)))
-                        self.send_header("X-RailGuard-Chainage", urllib.parse.quote(str(LATEST_TELEMETRY.get("chainage", "KM 14+320"))))
+                        self.send_header("X-RailGuard-UT-Depth", _header_value(LATEST_TELEMETRY.get("ultrasonicDepthMm")))
+                        self.send_header("X-RailGuard-Vibration", _header_value(LATEST_TELEMETRY.get("vibrationG")))
+                        self.send_header("X-RailGuard-Temp", _header_value(LATEST_TELEMETRY.get("railTempC")))
+                        self.send_header("X-RailGuard-Speed", _header_value(LATEST_TELEMETRY.get("axleSpeedKmh")))
+                        self.send_header("X-RailGuard-Chainage", urllib.parse.quote(_header_value(LATEST_TELEMETRY.get("chainage"))))
                         self.send_header("X-RailGuard-Buzzer", "RINGING" if IS_BUZZER_RINGING else "IDLE")
                     except Exception:
                         pass
@@ -1922,11 +2144,22 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(200, result)
         elif clean_path == "/api/health":
             cam_present = _camera_available()
+            sensor_age = telemetry_age_seconds()
             self._send_json(200, {
                 "status": "ONLINE",
                 "service": "RailGuard Camera Crack Detector",
                 "deviceId": DEVICE_ID,
                 "instance": instance_info(),
+                # Honest sensor-loop health. "service ONLINE" only means the HTTP
+                # server answers; it does NOT mean telemetry is flowing.
+                "sensorLoop": {
+                    "alive": _sensor_loop_alive(),
+                    "hasTelemetry": bool(LATEST_TELEMETRY),
+                    "telemetryAgeSeconds": round(sensor_age, 1) if sensor_age is not None else None,
+                    "stale": (sensor_age is None) or (sensor_age > TELEMETRY_STALE_SECONDS),
+                    "staleAfterSeconds": TELEMETRY_STALE_SECONDS,
+                    "dataMode": (LATEST_TELEMETRY or {}).get("dataMode", "NO_DATA"),
+                },
                 "buzzerPin": BUZZER_PIN,
                 "buzzerActive": IS_BUZZER_RINGING,
                 "patrolActive": ACTIVE_PATROL_STATUS.get("status") == "PATROL_ACTIVE",
@@ -1946,6 +2179,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         global LATEST_TELEMETRY, LAST_TSR_COMMAND, LATEST_CRACK, LAST_HARDWARE_ACQUISITION_MS, ACTIVE_PATROL_STATUS, SCHEDULES_REGISTRY
+        global TELEMETRY_UPDATED_AT_MS
         clean_path = self.path.split("?")[0].rstrip("/")
         if not self._is_authorized():
             self._reject_unauthorized()
@@ -1956,12 +2190,24 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
             try:
                 req_data = json.loads(body) if body.strip() else {}
-                for k, v in req_data.items():
-                    LATEST_TELEMETRY[k] = v
-                LATEST_TELEMETRY["timestamp"] = int(time.time() * 1000)
-                LATEST_TELEMETRY["status"] = "ALL_SENSORS_ONLINE"
-                LAST_HARDWARE_ACQUISITION_MS = int(time.time() * 1000)
-                self._send_json(200, {"status": "INGESTED", "telemetry": LATEST_TELEMETRY})
+                if not isinstance(req_data, dict) or not req_data:
+                    self._send_json(400, {"error": "telemetry body must be a JSON object"})
+                    return
+                ingest_ts = int(time.time() * 1000)
+                # Build a complete packet instead of mutating the live one: a
+                # partial POST must not leave old sensor values behind.
+                incoming: Dict[str, Any] = dict(req_data)
+                incoming.setdefault("nodeId", DEVICE_ID)
+                incoming["timestamp"] = ingest_ts
+                incoming["status"] = str(incoming.get("status") or "EXTERNAL_TELEMETRY")
+                # Do not claim ALL_SENSORS_ONLINE: this packet came over HTTP,
+                # not from a verified local sensor read.
+                incoming["dataMode"] = str(incoming.get("dataMode") or "EXTERNAL")
+                incoming["dataSource"] = str(incoming.get("dataSource") or "EXTERNAL_POST")
+                LATEST_TELEMETRY = incoming
+                TELEMETRY_UPDATED_AT_MS = ingest_ts
+                LAST_HARDWARE_ACQUISITION_MS = ingest_ts
+                self._send_json(200, {"status": "INGESTED", "telemetry": current_telemetry()})
             except Exception as e:
                 self._send_json(400, {"error": str(e)})
         elif clean_path == "/api/tsr":
@@ -2107,6 +2353,7 @@ def start_local_wifi_server(host: str = "0.0.0.0", port: int = 8080,
     global LOCAL_SERVER_BIND_ERROR, LOCAL_SERVER_PORT
     load_pi_state()
     ensure_sensor_acquisition_started()
+    start_acquisition_supervisor()
     class ReusableServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         allow_reuse_address = True
 
@@ -2186,7 +2433,7 @@ def post_to_firebase(db_url: str, path: str, data: Dict[str, Any], id_token: Opt
 
 
 def build_camera_defect(
-    chainage: str = "KM 14+320",
+    chainage: str = "Unknown",
     length_mm: float = 0.0,
     confidence: int = 0,
     bounding_box: Optional[Dict[str, int]] = None
@@ -2283,7 +2530,7 @@ def build_safety_notification(defect: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_anomaly_telemetry(
-    chainage: str = "KM 14+320",
+    chainage: str = "Unknown",
     device_id: str = "RPI-TRACK-01",
     bounding_box: Optional[Dict[str, int]] = None,
     confidence: int = 0,
@@ -2305,7 +2552,7 @@ def build_anomaly_telemetry(
         "crackBoundingBox": f"x:{bbox['x']},y:{bbox['y']},w:{bbox['width']},h:{bbox['height']}",
         "crackExpiresAt": now_ms + CRACK_ACTIVE_SECONDS * 1000,
         "detectionSource": "camera-cv" if (crack_vision and crack_vision.is_available()) else "simulated",
-        "dataMode": base.get("dataMode", "LIVE" if (crack_vision and crack_vision.is_available()) else "SIMULATED"),
+        "dataMode": base.get("dataMode") or "UNKNOWN",
         "visionAvailable": bool(crack_vision and crack_vision.is_available()),
         "motorState": motor_status().get("state"),
         "motorStopped": motor_status().get("motorStopped"),
@@ -2321,7 +2568,7 @@ def trigger_crack_detection_pipeline(
     db_url: str,
     uid: str,
     id_token: Optional[str] = None,
-    chainage: str = "KM 14+320",
+    chainage: str = "Unknown",
     device_id: str = "RPI-TRACK-01",
     bounding_box: Optional[Dict[str, int]] = None,
     confidence: int = 0,
@@ -2364,7 +2611,10 @@ def trigger_crack_detection_pipeline(
 
     # Cache into local Wi-Fi memory for instant LAN response
     global LATEST_TELEMETRY, DEFECTS_REGISTRY, TASKS_REGISTRY, INSPECTIONS_REGISTRY, REPORTS_REGISTRY
+    global TELEMETRY_UPDATED_AT_MS
     LATEST_TELEMETRY = telemetry
+    # This packet is freshly produced by this process, not restored from disk.
+    TELEMETRY_UPDATED_AT_MS = int(time.time() * 1000)
     LATEST_CRACK = {
         "status": "ANOMALY_FLAGGED",
         "hasCrack": True,
@@ -2827,7 +3077,7 @@ def main():
                 db_url=args.db,
                 uid=args.uid,
                 id_token=args.auth,
-                chainage="KM 14+320",
+                chainage="Unknown",
                 device_id=args.device,
                 bounding_box=vision.get("boundingBox"),
                 confidence=int(vision.get("confidencePercent", 0)),
@@ -2840,7 +3090,7 @@ def main():
                 db_url=args.db,
                 uid=args.uid,
                 id_token=args.auth,
-                chainage="KM 14+320",
+                chainage="Unknown",
                 device_id=args.device,
                 confidence=0,
                 length_mm=0.0,

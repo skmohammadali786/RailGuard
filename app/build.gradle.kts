@@ -12,8 +12,8 @@ android {
         applicationId = "com.railguard.app"
         minSdk = 26
         targetSdk = 33
-        versionCode = 3
-        versionName = "2.2.1"
+        versionCode = 4
+        versionName = "2.2.2"
     }
 
     // Keep the existing key for this repair build so it can update an

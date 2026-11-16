@@ -51,8 +51,20 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val fbService = com.example.railguard.data.RailGuardFirebaseService.instance
     val effectiveTelemetry = fbService.latestSensorTelemetry ?: telemetry
-    val gatewayOnline = effectiveTelemetry != null &&
-        (effectiveTelemetry.timestamp == 0L || System.currentTimeMillis() - effectiveTelemetry.timestamp < 30_000L)
+    // Freshness must use the PHONE clock at receipt time. An offline Pi has no
+    // RTC, so its payload timestamp can be days behind while data is arriving
+    // every second (the old code showed a false "STALE 363195s").
+    val isDirectTransport = fbService.lastTelemetryTransport == "DIRECT_WIFI" ||
+        fbService.lastTelemetryTransport == "DIRECT_WIFI_HTML"
+    val receiptAgeSeconds: Long? = if (fbService.lastTelemetryReceivedAt > 0L) {
+        ((System.currentTimeMillis() - fbService.lastTelemetryReceivedAt) / 1000L).coerceAtLeast(0L)
+    } else null
+    val gatewayOnline = effectiveTelemetry != null && if (isDirectTransport) {
+        receiptAgeSeconds != null && receiptAgeSeconds < 30L
+    } else {
+        effectiveTelemetry.timestamp > 0L &&
+            System.currentTimeMillis() - effectiveTelemetry.timestamp < 30_000L
+    }
     var showWifiDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -298,7 +310,9 @@ fun HomeScreen(
                             color = colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = if (gatewayOnline) "Live" else "Waiting",
+                            text = if (gatewayOnline) {
+                                (effectiveTelemetry?.dataMode ?: "CONNECTED").uppercase()
+                            } else "Waiting",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = colorScheme.primary
@@ -394,13 +408,35 @@ fun HomeScreen(
             val scope = rememberCoroutineScope()
             var tsrFeedback by remember { mutableStateOf<String?>(null) }
             var tsrFeedbackOk by remember { mutableStateOf(true) }
-            val ageSeconds = effectiveTelemetry?.timestamp?.takeIf { it > 0L }
-                ?.let { ((System.currentTimeMillis() - it) / 1000L).coerceAtLeast(0L) }
-            val isStale = effectiveTelemetry != null && (ageSeconds == null || ageSeconds > 30L)
+            val nowMs = System.currentTimeMillis()
             val telemetryMode = effectiveTelemetry?.dataMode?.uppercase() ?: "NO_DATA"
-            val isSimulated = telemetryMode.contains("SIMUL") || effectiveTelemetry?.ultrasonicLive == false
-            val isLiveHardware = telemetryMode == "LIVE" && effectiveTelemetry?.ultrasonicLive != false && !isStale
-            val isAnySensorActive = effectiveTelemetry != null && !isStale
+            val transport = fbService.lastTelemetryTransport
+            val isDirect = transport == "DIRECT_WIFI" || transport == "DIRECT_WIFI_HTML"
+            val isCached = transport == "CACHE" || (transport.isEmpty() && fbService.lastTelemetryReceivedAt <= 0L)
+            val dataValid = effectiveTelemetry?.dataValid == true
+            val isNoData = effectiveTelemetry == null || !dataValid ||
+                telemetryMode == "NO_DATA" || telemetryMode == "NO_TELEMETRY"
+            val liveReceiptAge: Long? = if (fbService.lastTelemetryReceivedAt > 0L) {
+                ((nowMs - fbService.lastTelemetryReceivedAt) / 1000L).coerceAtLeast(0L)
+            } else null
+            val ageSeconds: Long? = if (isDirect) {
+                liveReceiptAge
+            } else {
+                effectiveTelemetry?.timestamp?.takeIf { it > 0L }
+                    ?.let { ((nowMs - it) / 1000L).coerceAtLeast(0L) }
+            }
+            val payloadFrozen = fbService.telemetryPayloadFrozen
+            val isStale = !isNoData && (isCached || payloadFrozen || effectiveTelemetry?.piPayloadStale == true ||
+                ageSeconds == null || ageSeconds > 30L)
+            val isSimulated = !isNoData && (telemetryMode.contains("SIMUL") || effectiveTelemetry?.ultrasonicLive == false)
+            val isPartial = !isNoData && telemetryMode == "PARTIAL" && !isSimulated
+            val isLiveHardware = !isNoData && telemetryMode == "LIVE" &&
+                effectiveTelemetry?.ultrasonicLive != false && !isStale
+            val isAnySensorActive = !isNoData && !isStale
+            val piVersion = effectiveTelemetry?.piVersion.orEmpty().trim()
+            val piBuildOld = effectiveTelemetry != null && isVersionOlderThan(piVersion, "2.2.2")
+            val piClockSkew = effectiveTelemetry?.timestamp?.takeIf { it > 0L && isDirect }
+                ?.let { (nowMs - it) / 1000L }
 
             RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                 Column(modifier = Modifier.padding(14.dp)) {
@@ -422,15 +458,17 @@ fun HomeScreen(
                         }
                         StatusPill(
                             label = when {
-                                effectiveTelemetry == null -> "NO DATA"
+                                isNoData -> "NO DATA"
+                                payloadFrozen -> "FROZEN"
                                 isStale -> "STALE"
                                 isSimulated -> "SIMULATED"
                                 isLiveHardware -> "LIVE"
+                                isPartial -> "PARTIAL"
                                 else -> "UNVERIFIED"
                             },
                             tone = when {
-                                effectiveTelemetry == null -> Tone.NEUTRAL
-                                isStale || isSimulated -> Tone.WARNING
+                                isNoData -> Tone.NEUTRAL
+                                isStale || isSimulated || isPartial -> Tone.WARNING
                                 isLiveHardware -> Tone.HEALTHY
                                 else -> Tone.NEUTRAL
                             }
@@ -444,20 +482,23 @@ fun HomeScreen(
                     // ---------------------------------------------------------
                     Spacer(modifier = Modifier.height(8.dp))
                     val provBg = when {
-                        effectiveTelemetry == null -> Color(0xFF64748B).copy(alpha = 0.12f)
+                        isNoData -> Color(0xFF64748B).copy(alpha = 0.12f)
                         isStale -> Color(0xFFD97706).copy(alpha = 0.14f)
-                        isSimulated -> Color(0xFFD97706).copy(alpha = 0.14f)
+                        isSimulated || isPartial -> Color(0xFFD97706).copy(alpha = 0.14f)
                         else -> Color(0xFF16A34A).copy(alpha = 0.12f)
                     }
                     val provFg = when {
-                        effectiveTelemetry == null -> Color(0xFF475569)
-                        isStale || isSimulated -> Color(0xFFB45309)
+                        isNoData -> Color(0xFF475569)
+                        isStale || isSimulated || isPartial -> Color(0xFFB45309)
                         else -> Color(0xFF15803D)
                     }
                     val provTitle = when {
-                        effectiveTelemetry == null -> "NO LIVE DATA — the app is not receiving telemetry"
-                        isStale -> "STALE DATA — last packet ${ageSeconds ?: "?"}s ago"
+                        isNoData -> "NO SENSOR DATA — the Pi answered, but has not produced a reading yet"
+                        payloadFrozen -> "Pi SENSOR LOOP IS FROZEN — it answers HTTP but the sample timestamp is not advancing"
+                        isCached && isStale -> "STALE CACHED DATA — no packet has been received from the Pi in this session"
+                        isStale -> "STALE DATA — last packet received ${ageSeconds ?: "?"}s ago"
                         isSimulated -> "SIMULATED — the Pi is NOT reading its sensors"
+                        isPartial -> "PARTIAL DATA — some readings are measured, others are simulated"
                         isLiveHardware -> "LIVE HARDWARE DATA — measured on the Raspberry Pi"
                         else -> "DATA RECEIVED — this Pi build does not report its provenance"
                     }
@@ -476,8 +517,7 @@ fun HomeScreen(
                                 color = provFg
                             )
                             val piInfo = buildString {
-                                val v = effectiveTelemetry?.piVersion?.takeIf { it.isNotBlank() }
-                                if (v != null) append("Pi v$v")
+                                if (piVersion.isNotBlank()) append("Pi v$piVersion") else append("Pi version NOT reported")
                                 val up = effectiveTelemetry?.piUptimeSeconds ?: 0L
                                 if (up > 0) {
                                     if (isNotEmpty()) append(" · ")
@@ -488,9 +528,30 @@ fun HomeScreen(
                                         else -> "${up}s"
                                     })
                                 }
+                                if (effectiveTelemetry?.piSensorLoopAlive != null) {
+                                    append(" · loop ")
+                                    append(if (effectiveTelemetry.piSensorLoopAlive == true) "alive" else "DEAD")
+                                }
                                 if (fbService.isDirectWifiConnected) {
                                     if (isNotEmpty()) append(" · ")
                                     append("Wi-Fi ${fbService.directWifiLatencyMs} ms")
+                                }
+                            }
+                            val ageInfo = buildString {
+                                append("packet received ")
+                                if (isDirect && liveReceiptAge != null) {
+                                    append("${liveReceiptAge}s ago (phone clock)")
+                                } else if (ageSeconds != null) {
+                                    append("${ageSeconds}s ago (payload clock)")
+                                } else {
+                                    append("never")
+                                }
+                                if (effectiveTelemetry?.piTelemetryAgeSeconds != null &&
+                                    effectiveTelemetry.piTelemetryAgeSeconds >= 0L) {
+                                    append(" · Pi loop age ${effectiveTelemetry.piTelemetryAgeSeconds}s")
+                                }
+                                if (piClockSkew != null && kotlin.math.abs(piClockSkew) > 90L) {
+                                    append(" · Pi clock skew ${piClockSkew}s")
                                 }
                             }
                             val syncInfo = if (fbService.lastDirectSyncAt > 0L) {
@@ -500,14 +561,42 @@ fun HomeScreen(
                                 "No request to ${fbService.localWifiIp}:8080 yet"
                             }
                             Text(
-                                listOf(piInfo, syncInfo).filter { it.isNotBlank() }.joinToString("\n"),
+                                listOf(piInfo, ageInfo, syncInfo).filter { it.isNotBlank() }.joinToString("\n"),
                                 fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace,
                                 color = provFg.copy(alpha = 0.85f)
                             )
+                            if (piBuildOld) {
+                                Text(
+                                    "Pi software is OLD (${piVersion.ifBlank { "version not reported" }}). This app expects Pi v2.2.2+. On the Pi run: cd into the RailGuard folder, git pull, then sudo systemctl restart railguard.",
+                                    fontSize = 9.sp,
+                                    color = provFg
+                                )
+                            }
+                            if (payloadFrozen) {
+                                Text(
+                                    "The Pi HTTP server answers, but its sensor loop stopped producing new samples. On the Pi run: sudo systemctl restart railguard, then check the terminal for 'Sensor acquisition cycle error'.",
+                                    fontSize = 9.sp,
+                                    color = provFg
+                                )
+                            }
+                            if (isNoData && effectiveTelemetry != null) {
+                                Text(
+                                    "The Pi answered but sent NO measured values. Verify it is the new build: curl -s http://${fbService.localWifiIp}:8080/api/all_data (look for \"version\":\"2.2.2\" and \"dataMode\").",
+                                    fontSize = 9.sp,
+                                    color = provFg
+                                )
+                            }
                             if (isSimulated) {
                                 Text(
-                                    "The Pi reported ultrasonicLive=false. Check the HC-SR04 wiring (VCC 5V, TRIG BCM 23, ECHO BCM 24 via divider) and that no old RailGuard process is holding port 8080.",
+                                    "The Pi reported simulated sensors. Check the HC-SR04 wiring (VCC 5V, TRIG BCM 23, ECHO BCM 24 via divider). Each tile below says SIMULATED when its value is not measured.",
+                                    fontSize = 9.sp,
+                                    color = provFg
+                                )
+                            }
+                            if (isPartial && !isSimulated) {
+                                Text(
+                                    "Some readings are real hardware and some are simulated. Tiles marked SIMULATED are not measurements.",
                                     fontSize = 9.sp,
                                     color = provFg
                                 )
@@ -517,21 +606,49 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 4-Sensor Live Grid
+                    // 4-Sensor Live Grid. Missing values show "—", never 0.0.
+                    val telem = effectiveTelemetry
+                    fun reading(value: Float, unit: String, digits: Int): String =
+                        if (!dataValid) "—"
+                        else String.format(java.util.Locale.US, "%.${digits}f %s", value, unit)
+                    val utSimulated = !dataValid || telemetryMode.contains("SIMUL") ||
+                        telem?.sensorModeUltrasonic == "simulated" || telem?.ultrasonicLive == false
+                    val vibSimulated = !dataValid || telemetryMode.contains("SIMUL") || telem?.sensorModeVibration == "simulated"
+                    val tempSimulated = !dataValid || telemetryMode.contains("SIMUL") || telem?.sensorModeTemperature == "simulated"
+                    val speedSimulated = !dataValid || telemetryMode.contains("SIMUL") || telem?.sensorModeSpeed == "simulated"
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         MetricTile(
-                            value = effectiveTelemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "Awaiting sensor",
+                            value = reading(telem?.ultrasonicDepthMm ?: 0f, "mm", 1),
                             label = settings.translate("ultrasonic_depth"),
-                            tone = if (effectiveTelemetry != null && (effectiveTelemetry.hasCrack || effectiveTelemetry.ultrasonicDepthMm in 10.0..55.0)) Tone.CRITICAL else Tone.HEALTHY,
+                            tone = when {
+                                !dataValid -> Tone.NEUTRAL
+                                telem?.hasCrack == true || (telem?.ultrasonicDepthMm ?: 0f) in 10.0f..55.0f -> Tone.CRITICAL
+                                else -> Tone.HEALTHY
+                            },
+                            note = when {
+                                !dataValid -> "NOT MEASURED"
+                                utSimulated -> "SIMULATED"
+                                else -> null
+                            },
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
-                            value = effectiveTelemetry?.let { "${it.vibrationG} g" } ?: "Awaiting sensor",
+                            value = reading(telem?.vibrationG ?: 0f, "g", 3),
                             label = settings.translate("vibration_shock"),
-                            tone = if (effectiveTelemetry != null && (effectiveTelemetry.vibrationG > 0.35 || effectiveTelemetry.hasCrack)) Tone.CRITICAL else if (effectiveTelemetry != null && effectiveTelemetry.vibrationG > 0.15) Tone.WARNING else Tone.HEALTHY,
+                            tone = when {
+                                !dataValid -> Tone.NEUTRAL
+                                (telem?.vibrationG ?: 0f) > 0.35f || telem?.hasCrack == true -> Tone.CRITICAL
+                                (telem?.vibrationG ?: 0f) > 0.15f -> Tone.WARNING
+                                else -> Tone.HEALTHY
+                            },
+                            note = when {
+                                !dataValid -> "NOT MEASURED"
+                                vibSimulated -> "SIMULATED"
+                                else -> null
+                            },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -543,15 +660,33 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         MetricTile(
-                            value = effectiveTelemetry?.let { "${it.railTempC} °C" } ?: "Awaiting sensor",
+                            value = reading(telem?.railTempC ?: 0f, "°C", 1),
                             label = settings.translate("rail_temp"),
-                            tone = if (effectiveTelemetry != null && effectiveTelemetry.railTempC > 45.0) Tone.WARNING else Tone.HEALTHY,
+                            tone = when {
+                                !dataValid -> Tone.NEUTRAL
+                                (telem?.railTempC ?: 0f) > 45.0f -> Tone.WARNING
+                                else -> Tone.HEALTHY
+                            },
+                            note = when {
+                                !dataValid -> "NOT MEASURED"
+                                tempSimulated -> "SIMULATED"
+                                else -> null
+                            },
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
-                            value = effectiveTelemetry?.let { "${it.axleSpeedKmh} km/h" } ?: "Awaiting sensor",
+                            value = reading(telem?.axleSpeedKmh ?: 0f, "km/h", 1),
                             label = settings.translate("axle_speed"),
-                            tone = if (effectiveTelemetry != null && effectiveTelemetry.axleSpeedKmh > 80.0) Tone.WARNING else Tone.HEALTHY,
+                            tone = when {
+                                !dataValid -> Tone.NEUTRAL
+                                (telem?.axleSpeedKmh ?: 0f) > 80.0f -> Tone.WARNING
+                                else -> Tone.HEALTHY
+                            },
+                            note = when {
+                                !dataValid -> "NOT MEASURED"
+                                speedSimulated -> "SIMULATED"
+                                else -> null
+                            },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -754,7 +889,7 @@ fun HomeScreen(
         item {
             val isDirectWifiConnected = com.example.railguard.data.RailGuardFirebaseService.instance.isDirectWifiConnected
             val liveTrackHealth: Pair<String, Tone> = remember(defects, effectiveTelemetry, isDirectWifiConnected) {
-                if (!isDirectWifiConnected && defects.isEmpty() && (effectiveTelemetry == null || (effectiveTelemetry.vibrationG == 0.0f && effectiveTelemetry.ultrasonicDepthMm == 0.0f))) {
+                if (!isDirectWifiConnected && defects.isEmpty() && (effectiveTelemetry == null || effectiveTelemetry.dataValid != true || (effectiveTelemetry.vibrationG == 0.0f && effectiveTelemetry.ultrasonicDepthMm == 0.0f))) {
                     Pair("Awaiting Scan", Tone.NEUTRAL)
                 } else {
                     var score = 98.4
@@ -1290,3 +1425,28 @@ fun WorkspaceTile(
     }
 }
 
+
+/**
+ * True when [actual] is missing or older than [minimum].
+ *
+ * A missing version means the Pi is running a build from before process
+ * identity was reported (v2.2.2), so the app cannot prove which code is
+ * serving telemetry. Treat that as old instead of silently trusting it.
+ */
+private fun isVersionOlderThan(actual: String, minimum: String): Boolean {
+    if (actual.isBlank()) return true
+    fun parts(v: String): List<Int> = v.trim()
+        .removePrefix("v")
+        .split(".", "-", "+")
+        .mapNotNull { it.takeWhile(Char::isDigit).toIntOrNull() }
+    val a = parts(actual)
+    val b = parts(minimum)
+    if (a.isEmpty()) return true
+    for (i in 0 until maxOf(a.size, b.size)) {
+        val av = a.getOrElse(i) { 0 }
+        val bv = b.getOrElse(i) { 0 }
+        if (av < bv) return true
+        if (av > bv) return false
+    }
+    return false
+}

@@ -205,6 +205,12 @@ class RailGuardFirebaseService private constructor() {
             localWifiIp = prefs.getString(KEY_RPI_WIFI_IP, "192.168.4.1") ?: "192.168.4.1"
             localWifiApiKey = prefs.getString(KEY_RPI_API_KEY, "") ?: ""
             latestSensorTelemetry = loadLocalTelemetry()
+            // A cached packet is shown as CACHE (never as a fresh packet). This
+            // prevents yesterday's numbers from looking live after app restart.
+            if (latestSensorTelemetry != null) {
+                lastTelemetryTransport = "CACHE"
+                lastTelemetryReceivedAt = 0L
+            }
             latestCrackImagePath = prefs.getString(KEY_CRACK_IMAGE_PATH, null)?.takeIf { java.io.File(it).exists() }
 
             // Restore user session if saved
@@ -875,11 +881,20 @@ class RailGuardFirebaseService private constructor() {
                 put("dataMode", telem.dataMode)
                 put("dataSource", telem.dataSource)
                 if (telem.ultrasonicLive != null) put("ultrasonicLive", telem.ultrasonicLive)
-                put("sensorMode", JSONObject().put("ultrasonic", telem.sensorModeUltrasonic))
+                put("sensorMode", JSONObject()
+                    .put("ultrasonic", telem.sensorModeUltrasonic)
+                    .put("vibration", telem.sensorModeVibration)
+                    .put("temperature", telem.sensorModeTemperature)
+                    .put("speed", telem.sensorModeSpeed)
+                    .put("chainage", telem.sensorModeChainage))
                 put("version", telem.piVersion)
                 put("instanceId", telem.piInstanceId)
                 put("startedAt", telem.piStartedAt)
                 put("uptimeSeconds", telem.piUptimeSeconds)
+                put("dataValid", telem.dataValid)
+                if (telem.piSensorLoopAlive != null) put("sensorLoopAlive", telem.piSensorLoopAlive)
+                put("telemetryAgeSeconds", telem.piTelemetryAgeSeconds)
+                put("stale", telem.piPayloadStale)
             }
             sharedPreferences?.edit()?.putString(KEY_LOCAL_TELEMETRY, json.toString())?.apply()
         } catch (_: Exception) {}
@@ -2950,7 +2965,19 @@ class RailGuardFirebaseService private constructor() {
         val piVersion: String = "",
         val piInstanceId: String = "",
         val piStartedAt: Long = 0L,
-        val piUptimeSeconds: Long = 0L
+        val piUptimeSeconds: Long = 0L,
+        /** false when the Pi explicitly reports NO_DATA / NO_TELEMETRY_YET. */
+        val dataValid: Boolean = true,
+        /** true/false from the Pi's acquisition loop; null on older builds. */
+        val piSensorLoopAlive: Boolean? = null,
+        /** Pi-reported age of its last sensor sample (seconds), -1 = unknown. */
+        val piTelemetryAgeSeconds: Long = -1L,
+        /** The Pi itself says its sample is older than its staleness limit. */
+        val piPayloadStale: Boolean = false,
+        val sensorModeVibration: String = "",
+        val sensorModeTemperature: String = "",
+        val sensorModeSpeed: String = "",
+        val sensorModeChainage: String = ""
     )
 
     var latestSensorTelemetry by mutableStateOf<LiveSensorTelemetry?>(null)
@@ -2965,6 +2992,46 @@ class RailGuardFirebaseService private constructor() {
     var lastDirectSyncHttp by mutableStateOf(0)
     var lastDirectSyncUrl by mutableStateOf("")
     var lastDirectSyncError by mutableStateOf("")
+    /**
+     * Phone-clock time of the last telemetry packet accepted from any source.
+     * Freshness MUST use this, not the Pi payload timestamp: an offline Pi has
+     * no RTC and its clock can be days behind, which made a healthy link look
+     * "STALE 363195s" while data was actually arriving every second.
+     */
+    var lastTelemetryReceivedAt by mutableStateOf(0L)
+    var lastTelemetryTransport by mutableStateOf("")
+    /** True when the Pi answers but keeps sending the same packet timestamp. */
+    var telemetryPayloadFrozen by mutableStateOf(false)
+    private var lastPiTimestampSeen = 0L
+    private var frozenPacketCount = 0
+
+    /**
+     * Detect a Pi that answers HTTP but whose sensor loop is frozen. The Pi
+     * timestamp must advance between packets; three identical packets in a row
+     * means the loop is not producing new samples.
+     */
+    private fun updatePayloadFrozen(telem: LiveSensorTelemetry) {
+        if (!telem.dataValid || telem.timestamp <= 0L) {
+            frozenPacketCount = 0
+            telemetryPayloadFrozen = false
+            return
+        }
+        if (lastPiTimestampSeen > 0L && telem.timestamp <= lastPiTimestampSeen) {
+            frozenPacketCount += 1
+        } else {
+            frozenPacketCount = 0
+        }
+        lastPiTimestampSeen = telem.timestamp
+        telemetryPayloadFrozen = frozenPacketCount >= 3
+    }
+
+    fun resetTelemetryReceipt() {
+        lastTelemetryReceivedAt = 0L
+        lastTelemetryTransport = ""
+        telemetryPayloadFrozen = false
+        lastPiTimestampSeen = 0L
+        frozenPacketCount = 0
+    }
 
     /**
      * Reads real-time hardware telemetry pushed by Raspberry Pi or ESP32 nodes via Firebase Cloud
@@ -2996,6 +3063,12 @@ class RailGuardFirebaseService private constructor() {
                 val json = JSONObject(body)
                 val statusStr = json.optString("status", "Unknown")
                 val isAnomalyFlagged = json.optBoolean("hasCrack", false) || statusStr.contains("ANOMALY", ignoreCase = true)
+                val cloudMode = json.optString("dataMode", "CLOUD")
+                val cloudHasReading = listOf(
+                    "ultrasonicDepthMm", "vibrationG", "railTempC", "axleSpeedKmh"
+                ).any { json.has(it) && !json.isNull(it) }
+                val cloudNoData = cloudMode.equals("NO_DATA", ignoreCase = true) ||
+                    statusStr.contains("NO_TELEMETRY", ignoreCase = true) || !cloudHasReading
                 val telemetry = LiveSensorTelemetry(
                     nodeId = json.optString("nodeId", "Unknown"),
                     ultrasonicDepthMm = json.optDouble("ultrasonicDepthMm", 0.0).toFloat(),
@@ -3005,7 +3078,7 @@ class RailGuardFirebaseService private constructor() {
                     chainage = json.optString("chainage", "Unknown"),
                     hardware = json.optString("hardware", "Not reported"),
                     status = statusStr,
-                    timestamp = json.optLong("timestamp", System.currentTimeMillis()),
+                    timestamp = json.optLong("timestamp", 0L),
                     hasCrack = isAnomalyFlagged,
                     flawType = json.optString("flawType", if (isAnomalyFlagged) "Surface Fissure (optical)" else ""),
                     crackLengthMm = json.optDouble("crackLengthMm", 0.0).toFloat(),
@@ -3021,18 +3094,28 @@ class RailGuardFirebaseService private constructor() {
                     motorCutReason = json.optString("motorCutReason", ""),
                     motorCutPin = json.optInt("motorCutPin", -1),
                     tsrAutoApplied = json.optBoolean("tsrAutoApplied", false),
-                    dataMode = json.optString("dataMode", "CLOUD"),
+                    dataMode = cloudMode,
                     dataSource = json.optString("dataSource", "FIREBASE_CLOUD"),
                     ultrasonicLive = if (json.has("ultrasonicLive") && !json.isNull("ultrasonicLive")) json.optBoolean("ultrasonicLive", false) else null,
                     sensorModeUltrasonic = json.optJSONObject("sensorMode")?.optString("ultrasonic", "") ?: "",
                     piVersion = json.optString("version", ""),
                     piInstanceId = json.optString("instanceId", ""),
                     piStartedAt = json.optLong("startedAt", 0L),
-                    piUptimeSeconds = json.optLong("uptimeSeconds", 0L)
+                    piUptimeSeconds = json.optLong("uptimeSeconds", 0L),
+                    dataValid = !cloudNoData,
+                    piSensorLoopAlive = if (json.has("sensorLoopAlive") && !json.isNull("sensorLoopAlive")) json.optBoolean("sensorLoopAlive", false) else null,
+                    piTelemetryAgeSeconds = if (json.has("telemetryAgeSeconds") && !json.isNull("telemetryAgeSeconds")) json.optLong("telemetryAgeSeconds", -1L) else -1L,
+                    piPayloadStale = json.optBoolean("stale", false),
+                    sensorModeVibration = json.optJSONObject("sensorMode")?.optString("vibration", "") ?: "",
+                    sensorModeTemperature = json.optJSONObject("sensorMode")?.optString("temperature", "") ?: "",
+                    sensorModeSpeed = json.optJSONObject("sensorMode")?.optString("speed", "") ?: "",
+                    sensorModeChainage = json.optJSONObject("sensorMode")?.optString("chainage", "") ?: ""
                 )
                 withContext(Dispatchers.Main) {
                     latestSensorTelemetry = telemetry
                     isConnectedToFirebase = true
+                    lastTelemetryReceivedAt = System.currentTimeMillis()
+                    lastTelemetryTransport = "FIREBASE_CLOUD"
                 }
                 autoProcessDetectedCrack(telemetry)
                 telemetry
@@ -3051,11 +3134,16 @@ class RailGuardFirebaseService private constructor() {
      * Parse flexible telemetry JSON supporting both nested {"telemetry": {...}} and top-level fields
      */
     fun parseTelemetryJson(json: JSONObject): LiveSensorTelemetry? {
-        val telemObj = json.optJSONObject("telemetry") ?: if (
-            json.has("ultrasonicDepthMm") || json.has("ut_depth_mm") || json.has("vibrationG") ||
-            json.has("railTempC") || json.has("chainage") || json.has("axleSpeedKmh") ||
-            json.has("distanceMm") || json.has("flawType")
-        ) json else null ?: return null
+        // /api/all_data wraps the packet in "telemetry"; /api/telemetry is the
+        // packet itself. Accept both, but reject unrelated JSON (e.g. /api/health)
+        // so a health check can never be mistaken for live sensor values.
+        val telemObj = json.optJSONObject("telemetry") ?: json
+        val looksLikeTelemetry = telemObj.has("nodeId") || telemObj.has("dataMode") ||
+            telemObj.has("ultrasonicDepthMm") || telemObj.has("ut_depth_mm") ||
+            telemObj.has("vibrationG") || telemObj.has("railTempC") ||
+            telemObj.has("axleSpeedKmh") || telemObj.has("chainage") ||
+            telemObj.has("distanceMm") || telemObj.has("flawType")
+        if (!looksLikeTelemetry) return null
 
         val statusStr = telemObj.optString("status", "ACTIVE_SYNC")
         val isAnomalyFlagged = telemObj.optBoolean("hasCrack", false) ||
@@ -3092,6 +3180,14 @@ class RailGuardFirebaseService private constructor() {
                     telemObj.optDouble("speed",
                         telemObj.optDouble("speedKmh", 0.0)))))
 
+        // A numeric key that is actually present (and not JSON null) is the
+        // only proof that the Pi measured something.
+        val hasNumericReading = listOf(
+            "ultrasonicDepthMm", "ut_depth_mm", "ultrasonic_mm", "ultrasonic",
+            "distanceMm", "vibrationG", "vib_g", "vibration_g", "railTempC",
+            "rail_temp_c", "temp_c", "axleSpeedKmh", "speed_kmh", "speedKmh"
+        ).any { telemObj.has(it) && !telemObj.isNull(it) }
+
         val chainage = telemObj.optString("chainage",
             telemObj.optString("milepost",
                 telemObj.optString("location",
@@ -3113,6 +3209,15 @@ class RailGuardFirebaseService private constructor() {
                 null -> if (statusStr.contains("SIMULATED", ignoreCase = true)) "SIMULATED" else "UNKNOWN"
             }
         }
+        val explicitlyNoData = dataModeStr.equals("NO_DATA", ignoreCase = true) ||
+            statusStr.contains("NO_TELEMETRY", ignoreCase = true)
+        val dataValid = hasNumericReading && !explicitlyNoData
+        val loopAlive: Boolean? = if (telemObj.has("sensorLoopAlive") && !telemObj.isNull("sensorLoopAlive")) {
+            telemObj.optBoolean("sensorLoopAlive", false)
+        } else null
+        val telemetryAge = if (telemObj.has("telemetryAgeSeconds") && !telemObj.isNull("telemetryAgeSeconds")) {
+            telemObj.optLong("telemetryAgeSeconds", -1L)
+        } else -1L
 
         return LiveSensorTelemetry(
             nodeId = telemObj.optString("nodeId", telemObj.optString("device_id", "Unknown")),
@@ -3123,7 +3228,9 @@ class RailGuardFirebaseService private constructor() {
             chainage = chainage,
             hardware = telemObj.optString("hardware", "Not reported"),
             status = statusStr,
-            timestamp = telemObj.optLong("timestamp", System.currentTimeMillis()),
+            // 0 = the Pi did not provide a sample clock. Freshness is judged on
+            // the phone's receipt time, because an offline Pi has no RTC.
+            timestamp = telemObj.optLong("timestamp", 0L),
             hasCrack = isAnomalyFlagged,
             flawType = telemObj.optString("flawType", if (isAnomalyFlagged) "Surface Fissure (optical)" else ""),
             crackLengthMm = telemObj.optDouble("crackLengthMm", 0.0).toFloat(),
@@ -3146,7 +3253,15 @@ class RailGuardFirebaseService private constructor() {
             piVersion = telemObj.optString("version", ""),
             piInstanceId = telemObj.optString("instanceId", ""),
             piStartedAt = telemObj.optLong("startedAt", 0L),
-            piUptimeSeconds = telemObj.optLong("uptimeSeconds", 0L)
+            piUptimeSeconds = telemObj.optLong("uptimeSeconds", 0L),
+            dataValid = dataValid,
+            piSensorLoopAlive = loopAlive,
+            piTelemetryAgeSeconds = telemetryAge,
+            piPayloadStale = telemObj.optBoolean("stale", false),
+            sensorModeVibration = sensorModeObj?.optString("vibration", "") ?: "",
+            sensorModeTemperature = sensorModeObj?.optString("temperature", "") ?: "",
+            sensorModeSpeed = sensorModeObj?.optString("speed", "") ?: "",
+            sensorModeChainage = sensorModeObj?.optString("chainage", "") ?: ""
         )
     }
 
@@ -3180,10 +3295,13 @@ class RailGuardFirebaseService private constructor() {
                                     if (telemetry != null) {
                                         saveLocalTelemetry(telemetry)
                                         withContext(Dispatchers.Main) {
+                                            updatePayloadFrozen(telemetry)
                                             latestSensorTelemetry = telemetry
                                             localWifiIp = candidate
                                             isConnectedToFirebase = true
                                             isDirectWifiConnected = true
+                                            lastTelemetryReceivedAt = System.currentTimeMillis()
+                                            lastTelemetryTransport = "DIRECT_WIFI"
                                         }
                                         autoProcessDetectedCrack(telemetry)
                                         return@withContext telemetry
@@ -3923,6 +4041,7 @@ class RailGuardFirebaseService private constructor() {
                                     if (telem != null) {
                                         saveLocalTelemetry(telem)
                                         withContext(Dispatchers.Main) {
+                                            updatePayloadFrozen(telem)
                                             latestSensorTelemetry = telem
                                             localWifiIp = candidate
                                             isConnectedToFirebase = true
@@ -3932,6 +4051,8 @@ class RailGuardFirebaseService private constructor() {
                                             lastDirectSyncHttp = httpCode
                                             lastDirectSyncUrl = attemptUrl
                                             lastDirectSyncError = ""
+                                            lastTelemetryReceivedAt = System.currentTimeMillis()
+                                            lastTelemetryTransport = "DIRECT_WIFI"
                                         }
                                         autoProcessDetectedCrack(telem)
 
@@ -4131,6 +4252,7 @@ class RailGuardFirebaseService private constructor() {
                                             ultrasonicLive = null
                                         )
                                         withContext(Dispatchers.Main) {
+                                            updatePayloadFrozen(telem)
                                             latestSensorTelemetry = telem
                                             isConnectedToFirebase = true
                                             isDirectWifiConnected = true
@@ -4139,6 +4261,8 @@ class RailGuardFirebaseService private constructor() {
                                             lastDirectSyncHttp = httpCode
                                             lastDirectSyncUrl = attemptUrl
                                             lastDirectSyncError = ""
+                                            lastTelemetryReceivedAt = System.currentTimeMillis()
+                                            lastTelemetryTransport = "DIRECT_WIFI_HTML"
                                         }
                                         return@withContext true
                                     }

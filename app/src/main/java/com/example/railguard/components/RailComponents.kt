@@ -378,6 +378,7 @@ fun MetricTile(
     label: String,
     tone: Tone,
     modifier: Modifier = Modifier,
+    note: String? = null,
     onClick: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDark.current
@@ -434,6 +435,18 @@ fun MetricTile(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+        if (!note.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = note,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFFB45309),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 

@@ -104,12 +104,29 @@ class TestCameraCrackDetector(unittest.TestCase):
 
         telem = ccd.build_anomaly_telemetry("KM 14+320")
         self.assertEqual(telem["status"], "ANOMALY_FLAGGED")
-        # The old test asserted a fake 46.2 mm "crack depth". Real telemetry is
-        # preserved now; ultrasonic distance is not a crack measurement.
-        self.assertIn("ultrasonicDepthMm", telem)
+        # The old test asserted a fake 46.2 mm "crack depth". Ultrasonic
+        # distance is not a crack measurement, and with no sensor sample yet the
+        # packet must NOT invent one.
+        self.assertNotIn("ultrasonicDepthMm", telem)
+        self.assertNotEqual(telem.get("dataMode"), "LIVE")
         self.assertTrue(telem["hasCrack"])
         self.assertIn("x:", telem["crackBoundingBox"])
         self.assertIn("crackExpiresAt", telem)
+
+        # A real live reading must survive the anomaly packet unchanged.
+        previous = ccd.LATEST_TELEMETRY
+        try:
+            ccd.LATEST_TELEMETRY = {
+                "ultrasonicDepthMm": 71.4,
+                "dataMode": "PARTIAL",
+                "ultrasonicLive": True,
+            }
+            preserved = ccd.build_anomaly_telemetry("KM 14+320")
+            self.assertEqual(preserved["ultrasonicDepthMm"], 71.4)
+            self.assertTrue(preserved["ultrasonicLive"])
+            self.assertEqual(preserved["dataMode"], "PARTIAL")
+        finally:
+            ccd.LATEST_TELEMETRY = previous
 
     def test_local_wifi_server_endpoints(self):
         import camera_crack_detector as ccd
@@ -138,7 +155,12 @@ class TestCameraCrackDetector(unittest.TestCase):
         with urllib.request.urlopen("http://127.0.0.1:18080/api/all_data", timeout=2) as res:
             self.assertEqual(res.status, 200)
             data = json.loads(res.read().decode())
-            self.assertEqual(data["status"], "ONLINE")
+            # "ONLINE" only means the HTTP server answers. A brand-new process
+            # may legitimately answer with NO_TELEMETRY before its first sample.
+            self.assertIn(data["status"], ("ONLINE", "STALE", "NO_TELEMETRY"))
+            self.assertIn("sensorLoop", data)
+            self.assertIn("alive", data["sensorLoop"])
+            self.assertIn("telemetryAgeSeconds", data["sensorLoop"])
             self.assertIn("telemetry", data)
             self.assertIn("defects", data)
             self.assertIn("tasks", data)
@@ -148,11 +170,16 @@ class TestCameraCrackDetector(unittest.TestCase):
             self.assertIn("instance", data)
             # Every packet must state whether the readings are real or simulated.
             telem = data["telemetry"]
-            self.assertIn(telem.get("dataMode"), ("LIVE", "PARTIAL", "SIMULATED"))
+            self.assertIn(telem.get("dataMode"), ("LIVE", "PARTIAL", "SIMULATED", "NO_DATA"))
             self.assertIn("sensorMode", telem)
             self.assertIn("ultrasonic", telem["sensorMode"])
             self.assertIn("ultrasonicLive", telem)
             self.assertIn("dataSource", telem)
+            if telem.get("dataMode") == "NO_DATA":
+                # Never invent a reading when the loop has not produced one.
+                self.assertIsNone(telem.get("ultrasonicDepthMm"))
+                self.assertEqual(telem.get("timestamp"), 0)
+                self.assertTrue(telem.get("stale"))
 
         # 4. Hardware diagnostics endpoint
         with urllib.request.urlopen("http://127.0.0.1:18080/api/hardware", timeout=2) as res:
@@ -393,6 +420,108 @@ class TestCameraCrackDetector(unittest.TestCase):
         self.assertEqual(
             ccd.resolve_effective_speed("bad", {"activeTsrSpeedKmH": "worse", "axleSpeedKmh": 12.5}), 12.5
         )
+
+
+class TestNoDemoTelemetry(unittest.TestCase):
+    """Regressions for the "app shows 68.2 / 0.035 / 31.5 / 45.0 forever" bug."""
+
+    def _restore(self, ccd, old_telem, old_ts):
+        ccd.LATEST_TELEMETRY = old_telem
+        ccd.TELEMETRY_UPDATED_AT_MS = old_ts
+
+    def test_no_sample_means_no_data_not_demo_numbers(self):
+        import camera_crack_detector as ccd
+        old_telem, old_ts = ccd.LATEST_TELEMETRY, ccd.TELEMETRY_UPDATED_AT_MS
+        try:
+            ccd.LATEST_TELEMETRY = {}
+            ccd.TELEMETRY_UPDATED_AT_MS = 0
+            telem = ccd.current_telemetry()
+            self.assertEqual(telem["dataMode"], "NO_DATA")
+            self.assertEqual(telem["status"], "NO_TELEMETRY_YET")
+            self.assertIsNone(telem["ultrasonicDepthMm"])
+            self.assertIsNone(telem["vibrationG"])
+            self.assertIsNone(telem["railTempC"])
+            self.assertIsNone(telem["axleSpeedKmh"])
+            self.assertIsNone(telem["chainage"])
+            self.assertEqual(telem["timestamp"], 0)
+            self.assertTrue(telem["stale"])
+            self.assertEqual(telem["sensorMode"]["ultrasonic"], "unavailable")
+
+            snapshot = ccd.get_all_system_data()
+            self.assertEqual(snapshot["status"], "NO_TELEMETRY")
+            self.assertFalse(snapshot["aiOracle"]["available"])
+            self.assertIsNone(snapshot["aiOracle"]["nadalRatio"])
+        finally:
+            self._restore(ccd, old_telem, old_ts)
+
+    def test_persisted_telemetry_is_ignored_on_restart(self):
+        import tempfile
+        import camera_crack_detector as ccd
+        old_path, old_telem = ccd.STATE_FILE_PATH, ccd.LATEST_TELEMETRY
+        old_schedules = ccd.SCHEDULES_REGISTRY
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+                json.dump({
+                    "telemetry": {
+                        "version": "1.0.1",
+                        "uptimeSeconds": 9641,
+                        "ultrasonicDepthMm": 68.2,
+                        "vibrationG": 0.035,
+                        "railTempC": 31.5,
+                        "axleSpeedKmh": 45.0,
+                        "chainage": "KM 14+320",
+                        "timestamp": 1700000000000,
+                    },
+                    "schedules": [{"id": "S-1", "section": "Mainline"}],
+                }, f)
+                temp_path = f.name
+            ccd.STATE_FILE_PATH = temp_path
+            ccd.LATEST_TELEMETRY = {}
+            ccd.SCHEDULES_REGISTRY = []
+            ccd.load_pi_state()
+            self.assertEqual(ccd.LATEST_TELEMETRY, {}, "old telemetry must never be restored")
+            self.assertEqual(len(ccd.SCHEDULES_REGISTRY), 1)
+            self.assertEqual(ccd.SCHEDULES_REGISTRY[0]["id"], "S-1")
+        finally:
+            ccd.STATE_FILE_PATH = old_path
+            ccd.LATEST_TELEMETRY = old_telem
+            ccd.SCHEDULES_REGISTRY = old_schedules
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+
+    def test_identity_and_staleness_are_computed_from_this_process(self):
+        import camera_crack_detector as ccd
+        old_telem, old_ts = ccd.LATEST_TELEMETRY, ccd.TELEMETRY_UPDATED_AT_MS
+        try:
+            ccd.LATEST_TELEMETRY = {
+                "version": "1.0.1",
+                "instanceId": "old-process",
+                "uptimeSeconds": 9641,
+                "ultrasonicDepthMm": 68.2,
+                "vibrationG": 0.035,
+                "railTempC": 31.5,
+                "axleSpeedKmh": 45.0,
+                "dataMode": "SIMULATED",
+                "timestamp": int(time.time() * 1000) - 4 * 86400 * 1000,
+            }
+            ccd.TELEMETRY_UPDATED_AT_MS = int(time.time() * 1000)
+            telem = ccd.current_telemetry()
+            self.assertEqual(telem["version"], ccd.RAILGUARD_VERSION)
+            self.assertEqual(telem["instanceId"], ccd.INSTANCE_ID)
+            self.assertLess(telem["uptimeSeconds"], 3600)
+            self.assertFalse(telem["stale"])
+            self.assertLess(telem["telemetryAgeSeconds"], 2)
+
+            # A packet whose worker timestamp has not advanced is STALE even if
+            # its own payload timestamp looks fresh (Pi clocks can be wrong).
+            ccd.TELEMETRY_UPDATED_AT_MS = int(time.time() * 1000) - 120_000
+            stale = ccd.current_telemetry()
+            self.assertTrue(stale["stale"])
+            self.assertGreater(stale["telemetryAgeSeconds"], 60)
+        finally:
+            self._restore(ccd, old_telem, old_ts)
 
 
 if __name__ == "__main__":

@@ -369,18 +369,30 @@ The Home telemetry card always states where the numbers came from:
 
 | Badge | Meaning |
 |---|---|
-| **LIVE** | The Pi measured the rail with real hardware (`dataMode: LIVE`, `ultrasonicLive: true`). |
+| **LIVE** | Every displayed value was measured by real hardware (`dataMode: LIVE`). |
+| **PARTIAL** | Some sensors are real, others are simulated. Each tile is marked `SIMULATED`. |
 | **SIMULATED** | The Pi could **not** read its ultrasonic sensor, so it generated values. They are not measurements. |
-| **STALE** | No packet for more than 30 s — the Wi-Fi link or the Pi service is down. |
-| **NO DATA** | The app has never received anything from the Pi. |
+| **STALE** | No packet received for more than 30 s — the Wi-Fi link or the Pi service is down. |
+| **FROZEN** | The Pi answers HTTP, but its sensor loop stopped producing new samples. Restart the Pi service. |
+| **NO DATA** | The Pi answered but has not produced a reading yet (or the app has never reached it). |
 
-Under the badge the app prints the Pi version, its uptime, the request URL and the
-**exact HTTP status** of the last attempt, for example:
+Staleness is measured with the **phone clock at packet receipt**, not the Pi payload
+clock. A Pi without an RTC can be days behind while still sending data every second;
+the old code called that "STALE". The app also shows clock skew separately when it is
+larger than 90 s.
+
+Under the badge the app prints the Pi version, its uptime, when the packet arrived, the
+request URL and the **exact HTTP status** of the last attempt, for example:
 
 ```
-Pi v2.2.1 · up 2h 14m · Wi-Fi 23 ms
+Pi v2.2.2 · up 2h 14m · loop alive · Wi-Fi 23 ms
+packet received 0s ago (phone clock) · Pi loop age 0.4s
 http://192.168.4.1:8080/api/all_data → HTTP 200
 ```
+
+If the Pi is running old software the app says so explicitly and prints the fix
+(`git pull` + `sudo systemctl restart railguard`). It also warns when the Pi's payload
+timestamp is not advancing (frozen sensor loop).
 
 The Pi also reports a per-sensor map (`sensorMode`) so a real temperature probe is never
 mistaken for a real rail measurement.
@@ -394,7 +406,8 @@ This has three common causes, in order of likelihood. The badge above tells you 
    TRIG BCM 23 (pin 16), ECHO BCM 24 (pin 18) **through a 1k/2k divider**.
 2. **An old RailGuard process is still holding port 8080.** You restart the Pi service,
    the new process prints live values in the terminal, but the phone keeps talking to the
-   old process (which may serve frozen values). New builds **refuse to start** in that case
+   old process (which may serve frozen values). The app now shows **Pi software is OLD**
+   if the version is missing or below 2.2.2. New builds **refuse to start** in that case
    and print:
 
    ```
@@ -409,7 +422,12 @@ This has three common causes, in order of likelihood. The badge above tells you 
    (wrong IP / different Wi-Fi).
 
 The app no longer substitutes `68.2 mm`, `0.035 g`, `31.5 °C` or `KM 14+250` when a
-reading is missing; it shows `--` instead.
+reading is missing; it shows `--` instead. The Pi likewise starts with **no telemetry**
+(`dataMode: NO_DATA`, `timestamp: 0`, numeric fields `null`) and refuses to restore an
+old telemetry packet from `railguard_pi_state.json` after a restart. Telemetry may only
+come from the live sensor loop. The HTTP layer also reports
+`telemetryAgeSeconds`, `sensorLoopAlive` and `stale` in `/api/telemetry`,
+`/api/all_data` and `/api/health`.
 
 ---
 
@@ -418,7 +436,7 @@ reading is missing; it shows `--` instead.
 ```bash
 cd ~/RailGuard/raspberry_pi
 python3 -m py_compile *.py          # syntax check
-python3 test_gateway.py             # 8 tests: HTTP API, TSR, crack latch, API key
+python3 test_gateway.py             # 14 tests: HTTP API, TSR, crack latch, API key, no-demo telemetry
 python3 test_vision.py              # OpenCV tests (auto-skips without OpenCV)
 ```
 
