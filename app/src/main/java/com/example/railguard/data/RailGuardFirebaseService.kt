@@ -3594,9 +3594,16 @@ class RailGuardFirebaseService private constructor() {
                                         railTempC = tempHdr?.toFloatOrNull() ?: 0f,
                                         axleSpeedKmh = speedHdr?.toFloatOrNull() ?: 0f,
                                         chainage = ch,
-                                        hardware = "Raspberry Pi",
+                                        hardware = "Raspberry Pi (HTTP response headers)",
                                         status = if (isSimulated) "SIMULATED_DEMO" else "ACTIVE_SYNC",
-                                        timestamp = System.currentTimeMillis()
+                                        // Headers carry no Pi sample clock. Using the
+                                        // phone clock here would defeat frozen-payload
+                                        // detection, so leave it unknown.
+                                        timestamp = 0L,
+                                        dataMode = if (isSimulated) "SIMULATED" else "UNKNOWN",
+                                        dataSource = "PI_HTTP_HEADERS",
+                                        ultrasonicLive = if (isSimulated) false else null,
+                                        dataValid = utHdr != null || tempHdr != null
                                     )
                                 } catch (_: Exception) {}
                             }
