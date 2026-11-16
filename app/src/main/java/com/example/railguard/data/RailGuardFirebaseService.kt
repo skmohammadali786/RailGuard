@@ -106,6 +106,7 @@ class RailGuardFirebaseService private constructor() {
         private const val KEY_TSR_INTERLOCK = "app_tsr_interlock"
         private const val KEY_RPI_WIFI_IP = "rpi_wifi_ip"
         private const val KEY_RPI_API_KEY = "rpi_api_key"
+        private const val KEY_CRACK_IMAGE_PATH = "crack_image_path"
         private const val KEY_LOCAL_OBSERVATIONS = "local_cached_observations"
         private const val KEY_LOCAL_SCHEDULES = "local_cached_schedules"
         private const val KEY_LOCAL_DEFECTS = "local_cached_defects"
@@ -149,6 +150,8 @@ class RailGuardFirebaseService private constructor() {
     val isDirectPiConnected: Boolean get() = isDirectWifiConnected
     var directWifiLatencyMs by mutableStateOf(0L)
     var latestPiCameraBitmap by mutableStateOf<Bitmap?>(null)
+    /** Absolute path of the last crack evidence photograph saved from the Pi. */
+    var latestCrackImagePath by mutableStateOf<String?>(null)
     var latestPiCameraTimestamp by mutableStateOf(0L)
     // null = no TSR has been acknowledged yet. Never invent 25 km/h.
     var activeTsrSpeed by mutableStateOf<Int?>(null)
@@ -202,6 +205,7 @@ class RailGuardFirebaseService private constructor() {
             localWifiIp = prefs.getString(KEY_RPI_WIFI_IP, "192.168.4.1") ?: "192.168.4.1"
             localWifiApiKey = prefs.getString(KEY_RPI_API_KEY, "") ?: ""
             latestSensorTelemetry = loadLocalTelemetry()
+            latestCrackImagePath = prefs.getString(KEY_CRACK_IMAGE_PATH, null)?.takeIf { java.io.File(it).exists() }
 
             // Restore user session if saved
             val savedUserId = prefs.getString(KEY_USER_ID, null)
@@ -2914,7 +2918,14 @@ class RailGuardFirebaseService private constructor() {
         // 0.0 = no GNSS fix; the Pi reports gpsLocked=false.
         val latitude: Double = 0.0,
         val longitude: Double = 0.0,
-        val latencyMs: Int = 0
+        val latencyMs: Int = 0,
+        // Fail-safe traction interlock reported by the Pi.
+        val motorState: String = "ALLOWED",
+        val motorStopped: Boolean = false,
+        val motorCutLatched: Boolean = false,
+        val motorCutReason: String = "",
+        val motorCutPin: Int = -1,
+        val tsrAutoApplied: Boolean = false
     )
 
     var latestSensorTelemetry by mutableStateOf<LiveSensorTelemetry?>(null)
@@ -3059,7 +3070,13 @@ class RailGuardFirebaseService private constructor() {
             crackBoundingBox = telemObj.optString("crackBoundingBox", ""),
             latitude = telemObj.optDouble("latitude", telemObj.optDouble("lat", 0.0)),
             longitude = telemObj.optDouble("longitude", telemObj.optDouble("lon", telemObj.optDouble("lng", 0.0))),
-            latencyMs = telemObj.optInt("latencyMs", 0)
+            latencyMs = telemObj.optInt("latencyMs", 0),
+            motorState = telemObj.optString("motorState", "ALLOWED"),
+            motorStopped = telemObj.optBoolean("motorStopped", false),
+            motorCutLatched = telemObj.optBoolean("motorCutLatched", false),
+            motorCutReason = telemObj.optString("motorCutReason", ""),
+            motorCutPin = telemObj.optInt("motorCutPin", -1),
+            tsrAutoApplied = telemObj.optBoolean("tsrAutoApplied", false)
         )
     }
 
@@ -3499,6 +3516,122 @@ class RailGuardFirebaseService private constructor() {
             }
             Pair(false, "Could not reach the Pi camera API at ${candidateHosts.joinToString()}:$port")
         }
+    }
+
+    /**
+     * Downloads the annotated crack frame from the Pi and stores it permanently,
+     * so it can be embedded in the PDF dossier later (the Pi only keeps the last
+     * frame in memory).
+     */
+    suspend fun captureCrackEvidence(defectId: String): String? = withContext(Dispatchers.IO) {
+        val ctx = appContext ?: return@withContext null
+        try {
+            val bitmap = try { fetchPiCameraFrame() } catch (_: Exception) { null }
+                ?: latestPiCameraBitmap
+            if (bitmap == null) return@withContext null
+            val dir = java.io.File(ctx.filesDir, "crack_evidence")
+            if (!dir.exists()) dir.mkdirs()
+            val safeId = defectId.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val file = java.io.File(dir, "$safeId.jpg")
+            java.io.FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+            }
+            withContext(Dispatchers.Main) { latestCrackImagePath = file.absolutePath }
+            sharedPreferences?.edit()?.putString(KEY_CRACK_IMAGE_PATH, file.absolutePath)?.apply()
+            file.absolutePath
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Manual release of the Pi's fail-safe traction interlock.
+     * The Pi refuses while a crack alert is still active.
+     */
+    suspend fun resetPiMotor(
+        host: String = localWifiIp,
+        port: Int = 8080,
+        force: Boolean = false,
+        reason: String = "Operator manual reset"
+    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val candidateHosts = piCandidateHosts(host)
+        for (candidate in candidateHosts) {
+            try {
+                val url = "http://$candidate:$port/api/motor/reset" + if (force) "?force=1" else ""
+                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 1500
+                    readTimeout = 2500
+                    doOutput = true
+                    applyPiAuth()
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                val payload = JSONObject().apply {
+                    put("reason", reason)
+                    put("force", force)
+                }
+                conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                    ?.bufferedReader()?.use { it.readText() } ?: ""
+                val json = try { JSONObject(body) } catch (_: Exception) { JSONObject() }
+                val state = json.optString("state", "")
+                val message = json.optString("error", "")
+                return@withContext if (code in 200..299 && state == "ALLOWED") {
+                    withContext(Dispatchers.Main) {
+                        latestSensorTelemetry = latestSensorTelemetry?.copy(
+                            motorState = "ALLOWED",
+                            motorStopped = false,
+                            motorCutLatched = false,
+                            motorCutReason = reason
+                        )
+                    }
+                    Pair(true, "Motors re-enabled (relay closed)")
+                } else {
+                    Pair(false, message.ifBlank { "Pi refused the reset (HTTP $code)" })
+                }
+            } catch (_: Exception) {
+            }
+        }
+        Pair(false, "Could not reach the Pi motor API at ${candidateHosts.joinToString()}:$port")
+    }
+
+    /**
+     * Immediately cuts the Pi traction relay from the app (safety stop button).
+     */
+    suspend fun cutPiMotor(
+        host: String = localWifiIp,
+        port: Int = 8080,
+        reason: String = "Operator emergency motor cut"
+    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val candidateHosts = piCandidateHosts(host)
+        for (candidate in candidateHosts) {
+            try {
+                val conn = (URL("http://$candidate:$port/api/motor/cut").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 1500
+                    readTimeout = 2500
+                    doOutput = true
+                    applyPiAuth()
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
+                val payload = JSONObject().apply { put("reason", reason) }
+                conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+                if (conn.responseCode in 200..299) {
+                    withContext(Dispatchers.Main) {
+                        latestSensorTelemetry = latestSensorTelemetry?.copy(
+                            motorState = "CUT",
+                            motorStopped = true,
+                            motorCutLatched = true,
+                            motorCutReason = reason
+                        )
+                    }
+                    return@withContext Pair(true, "Motors stopped (relay open)")
+                }
+            } catch (_: Exception) {
+            }
+        }
+        Pair(false, "Could not reach the Pi motor API at ${candidateHosts.joinToString()}:$port")
     }
 
     /**
@@ -3983,6 +4116,11 @@ class RailGuardFirebaseService private constructor() {
 
         if (!isAnomaly) return
 
+        // 0. Save the annotated crack photograph from the Pi before the frame is
+        //    overwritten, so the PDF dossier can embed it later.
+        val evidenceDefectId = "DEF-AUTO-${System.currentTimeMillis() % 100000}"
+        val evidencePath = captureCrackEvidence(evidenceDefectId)
+
         // 1. Immediately send instructions to Raspberry Pi buzzer & trigger phone alarm
         triggerPiBuzzer(
             ring = true,
@@ -3990,7 +4128,7 @@ class RailGuardFirebaseService private constructor() {
             reason = "CRACK_DETECTED: ${if (telemetry.flawType.isNotBlank()) telemetry.flawType else "Rail Fissure"} at ${telemetry.chainage}"
         )
 
-        val defectId = "DEF-AUTO-${System.currentTimeMillis() % 100000}"
+        val defectId = evidenceDefectId
         val sectionName = if (telemetry.chainage.isNotBlank() && telemetry.chainage != "Unknown" && telemetry.chainage != "Awaiting Chainage") "Active Corridor (${telemetry.chainage})" else "Active Corridor"
         val confidence = telemetry.aiConfidencePercent
         val lengthText = if (telemetry.crackLengthMm > 0) "${telemetry.crackLengthMm} mm" else "length not calibrated"
@@ -4020,7 +4158,8 @@ class RailGuardFirebaseService private constructor() {
             vibrationG = telemetry.vibrationG,
             railTempC = telemetry.railTempC,
             speedKmh = telemetry.axleSpeedKmh,
-            boundingBox = telemetry.crackBoundingBox
+            boundingBox = telemetry.crackBoundingBox,
+            imagePath = evidencePath ?: latestCrackImagePath ?: ""
         )
 
         // 2. Guarantee Instant Matching Alert Popup is shown in the App

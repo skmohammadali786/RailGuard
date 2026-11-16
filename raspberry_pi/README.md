@@ -53,6 +53,9 @@ curl -H "X-API-Key: my-secret" http://127.0.0.1:8080/api/capabilities
 | `--test-buzzer` | Ring the buzzer once and exit |
 | `--test-sensors` | Read the sensors once and exit |
 | `--simulate-anomaly-interval N` | **DEMO ONLY** – forces a fake anomaly every N scans |
+| `--motor-cut-pin <N>` | BCM pin of the fail-safe motor cut relay (default 17) |
+| `--no-motor-cut` | Disable the motor cut relay output |
+| `--motor-watchdog-seconds <S>` | Cut motors if telemetry stops for S seconds (default 30) |
 
 ## 3. Environment variables
 
@@ -66,6 +69,10 @@ curl -H "X-API-Key: my-secret" http://127.0.0.1:8080/api/capabilities
 | `RAILGUARD_MM_PER_PIXEL` | `0` | Pixel→mm calibration (0 = uncalibrated) |
 | `RAILGUARD_CRACK_CONFIDENCE` | `0.55` | Vision confidence threshold |
 | `RAILGUARD_ID_TOKEN` / `RAILGUARD_REFRESH_TOKEN` / `RAILGUARD_FIREBASE_API_KEY` | – | Firebase credentials |
+| `RAILGUARD_MOTOR_CUT` | `1` | Enable the motor cut relay (0 = disabled) |
+| `RAILGUARD_MOTOR_CUT_PIN` | `17` | BCM pin of the fail-safe motor relay |
+| `RAILGUARD_MOTOR_CUT_ACTIVE_LOW` | `0` | Set to 1 for an active-low relay module |
+| `RAILGUARD_MOTOR_WATCHDOG_SECONDS` | `30` | Cut motors when telemetry stalls |
 
 ## 4. Important behaviour notes
 
@@ -76,6 +83,11 @@ curl -H "X-API-Key: my-secret" http://127.0.0.1:8080/api/capabilities
   service says so instead of faking a detection.
 * **Crack latches expire.** After `RAILGUARD_CRACK_ACTIVE_SECONDS` the anomaly clears
   itself, and `POST /api/crack/clear` acknowledges it immediately.
+* **A crack stops the motors.** The fail-safe relay on BCM 17 is **energised =
+  motors allowed**; a crack de-energises it and latches CUT. Power loss or a Pi
+  crash therefore also stops the motors. Reset is manual only
+  (`POST /api/motor/reset`) and is refused while a crack is still active.
+* **A crack also applies a 25 km/h TSR automatically** (`source: crack-interlock`).
 * **Synthetic frames are labelled.** Any generated image is returned with
   `X-RailGuard-Simulated: 1`.
 * **Diagnostics are honest.** Missing sensors are reported as `NOT_INSTALLED`; the battery is

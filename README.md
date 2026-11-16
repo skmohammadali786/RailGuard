@@ -59,6 +59,8 @@ The app always tries **Pi Wi-Fi first**, then falls back to the cloud.
 | Battery level | **Not monitored** by the Pi — the app shows "not monitored" |
 | TSR (speed restriction) | Delivered to the Pi over Wi-Fi and/or written to Firebase |
 | Buzzer | Driven on the configured GPIO pin (RPi.GPIO / lgpio / gpiozero) |
+| **Motor / traction cut** | Fail-safe relay on BCM 17: a crack de-energises it and latches the motors OFF until a manual reset |
+| Crack photograph in the PDF | The annotated crack frame is saved on the phone and embedded in page 2 of the dossier |
 | PDF dossier | Generated on-device, real SHA-256 of the package content |
 | AI Oracle screen | Physics **model estimates** from the received telemetry — not a trained neural network |
 
@@ -69,6 +71,32 @@ The app always tries **Pi Wi-Fi first**, then falls back to the cloud.
 * It will not invent GPS coordinates, battery percentage or "all sensors online".
 * It will not show a TSR as active unless the Pi or Firebase acknowledged it.
 * It will not present a synthetic camera frame as real — such frames carry `X-RailGuard-Simulated: 1`.
+
+---
+
+## 2b. What happens automatically when a crack is detected
+
+| Step | Action |
+|---|---|
+| 1 | Trackside **buzzer rings for 8 s** |
+| 2 | **Motors stop** — traction relay (BCM 17) de-energised and **latched** |
+| 3 | **25 km/h TSR applied automatically** (`source: crack-interlock`) and reported in telemetry |
+| 4 | Defect, incident report, notification and emergency work order created |
+| 5 | The annotated camera frame is downloaded by the app and embedded in the PDF |
+| 6 | Motor cut/reset and auto-TSR are written to `/api/audit_logs` |
+
+**Motors stay stopped until a human resets them.** The app shows
+*"MOTORS STOPPED — TRACTION CUT"* with a **Reset motors** button
+(`POST /api/motor/reset`). The Pi refuses a reset while the crack alert is still
+active. A watchdog also cuts the motors if telemetry stalls for 30 s.
+
+Wiring (fail-safe by design):
+
+```
+Relay module IN  <- BCM 17   (ENERGISED = motors allowed, DE-ENERGISED = stop)
+Relay COM/NO     -> motor contactor coil circuit
+Power loss / Pi crash / cut wire  ->  relay drops  ->  motors stop
+```
 
 ---
 
@@ -290,6 +318,10 @@ the API key when `--local-api-key` is set.
 | GET | `/api/tsr` | Read the active TSR (`?speed=` sets it) |
 | POST | `/api/tsr` | Apply a TSR (`{"speed": 25}`) |
 | POST | `/api/buzzer` | Ring/silence the buzzer (`{"state":"RING","duration":8}`) |
+| GET | `/api/motor` | Traction relay / motor interlock state |
+| POST | `/api/motor/cut` | Stop the motors now (operator emergency stop) |
+| POST | `/api/motor/reset` | Manual reset (refused while a crack is active; `?force=1` overrides) |
+| GET | `/api/audit_logs` | Safety audit trail (motor cut/reset, auto TSR) |
 | POST | `/api/crack/clear` | Acknowledge and clear the crack latch |
 | POST | `/api/calibrate` | Reset the ultrasonic baseline |
 | POST | `/api/camera_capture` | Capture now (`?high_res=1`) |

@@ -1,6 +1,8 @@
 package com.example.railguard.ui.screens
 
+import android.graphics.BitmapFactory
 import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -352,11 +356,12 @@ fun PdfPreviewScreen(
     val liveVib = activeTelemetry?.vibrationG ?: 0.045f
     val hasFlaw = activeTelemetry?.hasCrack == true || defects.any { it.tone == Tone.CRITICAL }
     val liveFlawType = activeTelemetry?.flawType ?: defects.firstOrNull { it.tone == Tone.CRITICAL }?.title ?: "Nominal Surface"
-    val liveDeltaK = activeOracle?.parisDeltaK ?: (if (hasFlaw) 24.6f else 9.2f)
-    val liveGrowthRate = activeOracle?.parisGrowthRate ?: (if (hasFlaw) "0.082 mm/kCycle" else "0.012 mm/kCycle")
-    val liveNadal = activeOracle?.nadalRatio ?: (if (hasFlaw) 0.82f else 0.42f)
-    val liveDerailRisk = activeOracle?.derailmentRisk ?: (if (hasFlaw) "ELEVATED ⚠" else "SAFE ✓")
-    val liveCycles = activeOracle?.fatigueCyclesRemaining ?: (if (hasFlaw) 1200 else 18500)
+    // No oracle data = "not measured". Never invent fracture-mechanics numbers.
+    val liveDeltaK: Float? = activeOracle?.parisDeltaK
+    val liveGrowthRate = activeOracle?.parisGrowthRate ?: "not available"
+    val liveNadal: Float? = activeOracle?.nadalRatio
+    val liveDerailRisk = activeOracle?.derailmentRisk ?: "not available"
+    val liveCycles = activeOracle?.fatigueCyclesRemaining
     val liveThermalStress = (liveTemp - 27.0f) * 2.5f
     val activeSection = cachedInspections.firstOrNull()?.section ?: "Section 14 (North Loop Line)"
     val liveChainage = activeTelemetry?.chainage?.ifBlank { "KM 14+250" } ?: "KM 14+250"
@@ -579,6 +584,90 @@ fun PdfPreviewScreen(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+
+            // -----------------------------------------------------------------
+            // Crack evidence photograph captured automatically at detection time
+            // -----------------------------------------------------------------
+            run {
+                val evidencePath = fbService.latestCrackImagePath
+                    ?: defects.firstOrNull { it.imagePath.isNotBlank() }?.imagePath
+                val evidenceBitmap = remember(evidencePath) {
+                    evidencePath?.let { pth -> runCatching { BitmapFactory.decodeFile(pth) }.getOrNull() }
+                }
+                if (evidenceBitmap != null) {
+                    Card(
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDC2626).copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                "CRACK EVIDENCE PHOTOGRAPH",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFDC2626)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Image(
+                                bitmap = evidenceBitmap.asImageBitmap(),
+                                contentDescription = "Crack evidence photograph",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(190.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.Black),
+                                contentScale = ContentScale.Fit
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                "Captured by the Raspberry Pi camera at detection time (bounding box drawn by the vision engine). This image is embedded in the exported PDF.",
+                                fontSize = 9.sp,
+                                color = colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+            }
+
+            // -----------------------------------------------------------------
+            // Traction / motor interlock state
+            // -----------------------------------------------------------------
+            run {
+                val telem = fbService.latestSensorTelemetry
+                val motorStopped = telem?.motorStopped == true
+                Card(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (motorStopped) Color(0xFFDC2626).copy(alpha = 0.12f)
+                        else Color(0xFF16A34A).copy(alpha = 0.12f)
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (motorStopped) Color(0xFFDC2626).copy(alpha = 0.5f) else Color(0xFF16A34A).copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            if (motorStopped) "TRACTION INTERLOCK: MOTORS STOPPED" else "TRACTION INTERLOCK: MOTORS ALLOWED",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (motorStopped) Color(0xFFDC2626) else Color(0xFF16A34A)
+                        )
+                        Text(
+                            if (motorStopped)
+                                "Relay open${if (telem?.motorCutLatched == true) " and latched — manual reset required" else ""}. Reason: ${telem?.motorCutReason?.ifBlank { "crack detected" } ?: "crack detected"}. Automatic 25 km/h TSR applied."
+                            else
+                                "Relay energised (fail-safe: power loss stops the motors).",
+                            fontSize = 9.sp,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
 
             // Page Selector Tabs
             Row(
@@ -913,15 +1002,15 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFBAE6FD), RoundedCornerShape(6.dp))
                             .padding(10.dp)
                     ) {
-                        Text("• Neural Architecture: RailGuard Neural Edge Classifier (TensorFlow Lite / ONNX)", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Inference Latency: 16.4 ms per frame on edge hardware", color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Visual Tensor Confidence: ${if (hasFlaw) "98.4% [$liveFlawType]" else "99.1% [Nominal Surface]"}", color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Ultrasonic B-Scan Correlation: %.1f mm echo (Nominal 68.2 mm UIC 60)".format(liveUtDepth), color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Thermal Core Readout: %.1f °C (Ambient Neutral Delta: %+.1f °C)".format(liveTemp, liveTemp - 27.0f), color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Crack Propagation Formula: da/dN = 2.48e-11 · (%.1f)^3.14 -> %s".format(liveDeltaK, liveGrowthRate), color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Nadal Derailment Ratio: %.2f (%s · Cap 0.80 Y/Q)".format(liveNadal, liveDerailRisk), color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Flange Climb Probabilities: ${if (liveNadal > 0.8f) "ELEVATED RISK ⚠" else "SAFE ENVELOPE ✓"}", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Continuous Welded Rail Neutral Temp: 27.0 °C (CWR Axial Stress: %+.1f MPa)".format(liveThermalStress), color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Vision Engine: OpenCV classical crack analysis on the Raspberry Pi (not a neural network)", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Inference Latency: ${if (activeOracle != null) "reported by the Pi" else "not measured"}", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Visual Confidence: ${if (hasFlaw) "${activeTelemetry?.aiConfidencePercent ?: 0}% [$liveFlawType]" else "no crack reported"}", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Ultrasonic Clearance: %.1f mm (distance to railhead, not thickness)".format(liveUtDepth), color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Rail Temperature: %.1f °C".format(liveTemp), color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Crack Propagation Estimate: ${liveDeltaK?.let { "ΔK = %.1f MPa·m^0.5".format(it) } ?: "not available"} · growth $liveGrowthRate", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Nadal Derailment Ratio: ${liveNadal?.let { "%.2f (%s)".format(it, liveDerailRisk) } ?: "not available"}", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Flange Climb Risk: ${liveNadal?.let { if (it > 0.8f) "ELEVATED RISK ⚠" else "SAFE ENVELOPE ✓" } ?: "not measured"}", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("• Thermal Stress (CWR): %.1f MPa".format(liveThermalStress), color = Color(0xFF0C4A6E), fontSize = 10.sp)
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -1082,7 +1171,7 @@ fun PdfPreviewScreen(
                             ReportKpiItem("Live Ultrasonic Depth", "%.1f mm".format(liveUtDepth), "Nominal 68.2 mm", if (liveUtDepth in 55.0f..75.0f) "NOMINAL" else "ACTIONABLE"),
                             ReportKpiItem("Dynamic Axle Speed", "%.1f km/h".format(liveSpeed), "Cap 120.0 km/h", if (liveSpeed <= 30f) "TSR BOUND" else "COMPLIANT"),
                             ReportKpiItem("Inertial Impact Shock", "%.3f g".format(liveVib), "Safe < 0.150 g", if (liveVib < 0.15f) "NOMINAL" else "EXCEEDED"),
-                            ReportKpiItem("Peak Nadal Derailment Ratio", "%.2f Y/Q".format(liveNadal), "Critical Cap 0.80 Y/Q", if (liveNadal < 0.8f) "NOMINAL" else "CRITICAL")
+                            ReportKpiItem("Peak Nadal Derailment Ratio", liveNadal?.let { "%.2f Y/Q".format(it) } ?: "not measured", "Critical Cap 0.80 Y/Q", liveNadal?.let { if (it < 0.8f) "NOMINAL" else "CRITICAL" } ?: "NOT MEASURED")
                         )
 
                         kpiList.forEachIndexed { idx, (kpi, value, standard, status) ->

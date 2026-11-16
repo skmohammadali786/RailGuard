@@ -71,6 +71,101 @@ fun HomeScreen(
             )
         }
 
+        // ---------------------------------------------------------------------
+        // Fail-safe traction / motor interlock
+        // ---------------------------------------------------------------------
+        item {
+            val motorStopped = effectiveTelemetry?.motorStopped == true
+            val motorLatched = effectiveTelemetry?.motorCutLatched == true
+            val motorReason = effectiveTelemetry?.motorCutReason?.ifBlank { null }
+            var motorBusy by remember { mutableStateOf(false) }
+            var motorMessage by remember { mutableStateOf<String?>(null) }
+
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (motorStopped) Color(0xFFDC2626).copy(alpha = 0.12f)
+                    else Color(0xFF16A34A).copy(alpha = 0.10f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (motorStopped) Color(0xFFDC2626).copy(alpha = 0.55f)
+                    else Color(0xFF16A34A).copy(alpha = 0.45f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (motorStopped) Icons.Default.Warning else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (motorStopped) Color(0xFFDC2626) else Color(0xFF16A34A),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (motorStopped) "MOTORS STOPPED — TRACTION CUT" else "Motors allowed",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (motorStopped) Color(0xFFDC2626) else Color(0xFF16A34A)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (motorStopped)
+                            "Fail-safe relay open${if (motorLatched) " and latched" else ""}. " +
+                                "Reason: ${motorReason ?: "crack detected"}. " +
+                                "A 25 km/h TSR was applied automatically. Inspect the track, then reset manually."
+                        else
+                            "Fail-safe relay energised: a crack, Pi crash or power loss will stop the motors.",
+                        fontSize = 10.sp,
+                        color = colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (motorStopped) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        motorBusy = true
+                                        val (ok, msg) = fbService.resetPiMotor()
+                                        motorMessage = msg
+                                        motorBusy = false
+                                    }
+                                },
+                                enabled = !motorBusy,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Text(if (motorBusy) "Resetting..." else "Reset motors", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        motorBusy = true
+                                        val (ok, msg) = fbService.cutPiMotor()
+                                        motorMessage = msg
+                                        motorBusy = false
+                                    }
+                                },
+                                enabled = !motorBusy,
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Text(if (motorBusy) "Stopping..." else "STOP MOTORS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+                            }
+                        }
+                    }
+                    motorMessage?.let { msg ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(msg, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
 
 
         // Dedicated AI Predictive Safety Engine - Compact Summary

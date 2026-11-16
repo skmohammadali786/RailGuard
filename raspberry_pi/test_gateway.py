@@ -324,10 +324,46 @@ class TestCameraCrackDetector(unittest.TestCase):
             )
             self.assertFalse(result.get("success", False))
             self.assertEqual(result.get("reason"), "cooldown")
+
+            # FAIL-SAFE INTERLOCK: the crack must cut the motors and apply TSR 25.
+            motor = ccd.motor_status()
+            self.assertEqual(motor.get("state"), "CUT")
+            self.assertTrue(motor.get("motorStopped"))
+            self.assertTrue(motor.get("latched"))
+            self.assertEqual((ccd.LAST_TSR_COMMAND or {}).get("speed"), 25)
+            self.assertTrue((ccd.LAST_TSR_COMMAND or {}).get("automatic"))
+
+            # A reset is refused while the crack alert is still active...
+            refused = ccd.get_motor_controller().reset(reason="unit-test")
+            self.assertEqual(refused.get("status"), "REFUSED")
+            self.assertEqual(ccd.motor_status().get("state"), "CUT")
+
+            # ...and allowed once the alert is acknowledged.
+            ccd.clear_latest_crack("unit-test")
+            allowed = ccd.get_motor_controller().reset(reason="unit-test")
+            self.assertEqual(allowed.get("status"), "RESET")
+            self.assertEqual(ccd.motor_status().get("state"), "ALLOWED")
         finally:
             ccd.LATEST_CRACK = old_crack
             ccd.LATEST_TELEMETRY = old_telem
             ccd.LAST_CRACK_PIPELINE_MS = old_pipeline_ms
+            try:
+                ccd.get_motor_controller().reset(reason="unit-test-cleanup", force=True)
+            except Exception:
+                pass
+
+
+    def test_speed_resolution_never_calls_float_none(self):
+        """Regression: a null TSR speed froze the whole telemetry worker."""
+        import camera_crack_detector as ccd
+        self.assertEqual(
+            ccd.resolve_effective_speed(None, {"activeTsrSpeedKmH": None, "axleSpeedKmh": 33.0}), 33.0
+        )
+        self.assertEqual(ccd.resolve_effective_speed(None, {}), 45.0)
+        self.assertEqual(ccd.resolve_effective_speed(25, {"axleSpeedKmh": 80.0}), 25.0)
+        self.assertEqual(
+            ccd.resolve_effective_speed("bad", {"activeTsrSpeedKmH": "worse", "axleSpeedKmh": 12.5}), 12.5
+        )
 
 
 if __name__ == "__main__":

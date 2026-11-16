@@ -196,6 +196,19 @@ ULTRASONIC_ECHO_PIN: int = int(os.getenv("RAILGUARD_ECHO_PIN", "24"))
 # DATA: BCM GPIO 4 / Physical Pin 7 (with 4.7k pullup resistor to 3.3V)
 ONEWIRE_PIN: int = int(os.getenv("RAILGUARD_ONEWIRE_PIN", "4"))
 
+# =============================================================================
+# MOTOR / TRACTION CUT RELAY (fail-safe)
+# =============================================================================
+# Relay ENERGISED  -> motor ALLOWED to run
+# Relay DE-ENERGISED (Pi crashed, cable cut, power lost) -> motor CUT
+# A crack detection latches the relay in CUT; only an authenticated manual
+# reset (POST /api/motor/reset) releases it. It never auto-resets.
+MOTOR_CUT_ENABLED: bool = os.getenv("RAILGUARD_MOTOR_CUT", "1").strip().lower() not in ("0", "false", "no", "off")
+MOTOR_CUT_PIN: int = int(os.getenv("RAILGUARD_MOTOR_CUT_PIN", "17"))
+MOTOR_CUT_ACTIVE_LOW: bool = os.getenv("RAILGUARD_MOTOR_CUT_ACTIVE_LOW", "0").strip().lower() in ("1", "true", "yes", "on")
+MOTOR_CUT_WATCHDOG_SECONDS: float = float(os.getenv("RAILGUARD_MOTOR_WATCHDOG_SECONDS", "30"))
+LAST_SCAN_TICK_MS: int = 0
+
 IS_BUZZER_RINGING: bool = False
 BUZZER_TRIGGERED_AT: int = 0
 BUZZER_THREAD: Optional[threading.Thread] = None
@@ -551,6 +564,193 @@ def silence_buzzer() -> Dict[str, Any]:
 
 
 # =============================================================================
+# MOTOR CUT CONTROLLER
+# =============================================================================
+AUDIT_LOGS: List[Dict[str, Any]] = []
+
+
+def log_audit(action: str, detail: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Append a safety-relevant event to the audit trail (newest first)."""
+    entry = {
+        "id": f"AUD-{int(time.time() * 1000) % 1000000}",
+        "action": str(action),
+        "detail": detail or {},
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        AUDIT_LOGS.insert(0, entry)
+        del AUDIT_LOGS[200:]
+    except Exception:
+        pass
+    return entry
+
+
+class MotorCutController:
+    """
+    Fail-safe motor / traction cut relay driver.
+
+    Wiring assumption:
+        relay ENERGIsed  -> motor circuit closed  -> motor may run
+        relay DE-ENERGISED (crash, power loss, cut wire) -> motor stops
+
+    The relay is therefore energised at startup: any failure stops the motor.
+    A crack detection de-energises it and latches CUT. Only an explicit,
+    authenticated manual reset can release the latch.
+    """
+
+    def __init__(self, pin: Optional[int] = None, enabled: Optional[bool] = None,
+                 active_low: Optional[bool] = None):
+        self.pin = int(MOTOR_CUT_PIN if pin is None else pin)
+        self.enabled = bool(MOTOR_CUT_ENABLED if enabled is None else enabled)
+        self.active_low = bool(MOTOR_CUT_ACTIVE_LOW if active_low is None else active_low)
+        self.state = "ALLOWED"          # ALLOWED | CUT
+        self.latched = False
+        self.reason = "startup"
+        self.changed_at = int(time.time() * 1000)
+        self.backend = "disabled"
+        self._pin_driver: Optional[HardwareGpioPin] = None
+        if self.enabled:
+            try:
+                self._pin_driver = HardwareGpioPin(self.pin, is_output=True, active_low=self.active_low)
+                self.backend = self._pin_driver.backend
+                self._drive(allowed=True)
+                log.info("[✓] Motor cut relay armed on BCM GPIO %d (backend %s)", self.pin, self.backend)
+            except Exception as e:
+                self.backend = f"error: {e}"
+                log.warning("[MOTOR] Relay init failed on BCM %d: %s", self.pin, e)
+        else:
+            log.info("[i] Motor cut relay disabled (RAILGUARD_MOTOR_CUT=0)")
+
+    def _drive(self, allowed: bool):
+        """allowed=True energises the relay (motor allowed)."""
+        if self._pin_driver is None:
+            return
+        try:
+            self._pin_driver.write(bool(allowed))
+        except Exception as e:
+            log.warning("[MOTOR] Relay write failed: %s", e)
+
+    def cut(self, reason: str = "CRACK_DETECTED", source: str = "crack") -> Dict[str, Any]:
+        changed = self.state != "CUT"
+        self.state = "CUT"
+        self.latched = True
+        self.reason = reason
+        self.changed_at = int(time.time() * 1000)
+        self._drive(allowed=False)
+        if changed:
+            log.warning("⛔ [MOTOR CUT] Traction relay OPEN on BCM %d — MOTORS STOPPED (reason: %s)", self.pin, reason)
+        log_audit("MOTOR_CUT", {"reason": reason, "source": source, "pin": self.pin, "backend": self.backend})
+        return self.status()
+
+    def reset(self, reason: str = "MANUAL_RESET", force: bool = False) -> Dict[str, Any]:
+        if not force and _crack_is_active():
+            return {
+                "status": "REFUSED",
+                "error": "A crack alert is still active. Clear it first (POST /api/crack/clear) or retry with force=1.",
+                **self.status(),
+            }
+        self.state = "ALLOWED"
+        self.latched = False
+        self.reason = reason
+        self.changed_at = int(time.time() * 1000)
+        self._drive(allowed=True)
+        log.warning("✅ [MOTOR RESET] Traction relay CLOSED on BCM %d — motors may run again (reason: %s)", self.pin, reason)
+        log_audit("MOTOR_RESET", {"reason": reason, "forced": bool(force), "pin": self.pin, "backend": self.backend})
+        return {"status": "RESET", **self.status()}
+
+    def status(self) -> Dict[str, Any]:
+        backend = str(self.backend)
+        return {
+            "enabled": self.enabled,
+            "pin": self.pin,
+            "state": self.state,
+            "motorStopped": self.state == "CUT",
+            "latched": self.latched,
+            "reason": self.reason,
+            "changedAt": self.changed_at,
+            "backend": backend,
+            "hardwareEnforced": self.enabled and backend not in ("disabled", "simulation", "not-initialised") and not backend.startswith("error"),
+            "watchdogSeconds": MOTOR_CUT_WATCHDOG_SECONDS,
+        }
+
+
+MOTOR_CONTROLLER: Optional[MotorCutController] = None
+
+
+def get_motor_controller() -> MotorCutController:
+    global MOTOR_CONTROLLER
+    if MOTOR_CONTROLLER is None:
+        MOTOR_CONTROLLER = MotorCutController()
+    return MOTOR_CONTROLLER
+
+
+def motor_status() -> Dict[str, Any]:
+    if MOTOR_CONTROLLER is None:
+        return {
+            "enabled": bool(MOTOR_CUT_ENABLED),
+            "pin": int(MOTOR_CUT_PIN),
+            "state": "ALLOWED",
+            "motorStopped": False,
+            "latched": False,
+            "reason": "not-initialised",
+            "changedAt": 0,
+            "backend": "not-initialised",
+            "hardwareEnforced": False,
+            "watchdogSeconds": MOTOR_CUT_WATCHDOG_SECONDS,
+        }
+    return MOTOR_CONTROLLER.status()
+
+
+def auto_apply_emergency_tsr(chainage: str = "", reason: str = "CRACK_DETECTED",
+                             speed_kmh: int = 25) -> Dict[str, Any]:
+    """Apply and record a 25 km/h emergency restriction caused by a crack."""
+    global LAST_TSR_COMMAND, LATEST_TELEMETRY
+    LAST_TSR_COMMAND = {
+        "speed": int(speed_kmh),
+        "reason": reason,
+        "chainage": chainage,
+        "timestamp": now_ms(),
+        "source": "crack-interlock",
+        "automatic": True,
+    }
+    try:
+        LATEST_TELEMETRY = dict(LATEST_TELEMETRY or {})
+        LATEST_TELEMETRY.update({
+            "activeTsrSpeedKmH": int(speed_kmh),
+            "recommendedTsrKmh": float(speed_kmh),
+            "tsrAutoApplied": True,
+            "tsrAppliedAt": now_ms(),
+        })
+    except Exception:
+        pass
+    log.warning("[TSR AUTO] Emergency %d km/h restriction applied because of a crack at %s", speed_kmh, chainage or "unknown")
+    log_audit("TSR_AUTO_APPLIED", {"speedKmh": int(speed_kmh), "reason": reason, "chainage": chainage})
+    return {"status": "EXECUTED", "speed": int(speed_kmh), "automatic": True}
+
+
+def _motor_watchdog_worker():
+    """Cut the motors if the acquisition loop stops reporting (Pi hang/crash)."""
+    while True:
+        time.sleep(1.0)
+        try:
+            if LAST_SCAN_TICK_MS <= 0:
+                continue
+            stalled_ms = now_ms() - LAST_SCAN_TICK_MS
+            if stalled_ms > MOTOR_CUT_WATCHDOG_SECONDS * 1000:
+                mc = get_motor_controller()
+                if mc.state != "CUT":
+                    mc.cut(reason=f"WATCHDOG_NO_SCAN_{int(stalled_ms / 1000)}s", source="watchdog")
+        except Exception:
+            pass
+
+
+def start_motor_watchdog():
+    t = threading.Thread(target=_motor_watchdog_worker, name="motor-watchdog", daemon=True)
+    t.start()
+    log.info("[✓] Motor watchdog armed (%ss without telemetry -> motor cut)", MOTOR_CUT_WATCHDOG_SECONDS)
+
+
+# =============================================================================
 # HARDWARE ULTRASONIC SENSOR DRIVER (HC-SR04 / JSN-SR04T)
 # =============================================================================
 class HardwareUltrasonicSensor:
@@ -771,9 +971,29 @@ HARDWARE_ULTRASONIC_SENSOR: Optional[HardwareUltrasonicSensor] = None
 ACQUISITION_THREAD: Optional[threading.Thread] = None
 
 
+def resolve_effective_speed(tsr_speed: Any = None, telem: Optional[Dict[str, Any]] = None,
+                            default: float = 45.0) -> float:
+    """Pick a usable speed without ever calling float(None).
+
+    Regression guard: activeTsrSpeedKmH is None until a TSR is issued, and the
+    old `.get(key, 45)` returned None (the key exists) which raised
+    TypeError/ValueError and killed the whole acquisition worker every cycle.
+    """
+    telem = telem or {}
+    for candidate in (tsr_speed, telem.get("activeTsrSpeedKmH"), telem.get("axleSpeedKmh"), default):
+        if candidate is None:
+            continue
+        try:
+            return float(candidate)
+        except (TypeError, ValueError):
+            continue
+    return float(default)
+
+
 def sensor_acquisition_worker():
     """Continuously queries connected physical sensors and updates LATEST_TELEMETRY with guaranteed dynamism."""
     global LATEST_TELEMETRY, HARDWARE_ULTRASONIC_SENSOR, LAST_HARDWARE_ACQUISITION_MS, _UT_DEVIATION_COUNT
+    global LAST_SCAN_TICK_MS
     try:
         HARDWARE_ULTRASONIC_SENSOR = HardwareUltrasonicSensor(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN)
     except Exception as e:
@@ -789,10 +1009,15 @@ def sensor_acquisition_worker():
             # NOTE: never name this local variable "now_ms" - it would shadow the
             # module level now_ms() helper used further down in this function.
             cycle_ts = int(time.time() * 1000)
+            LAST_SCAN_TICK_MS = cycle_ts
 
             # 1. Active TSR Speed Enforcement
-            tsr_speed = (LAST_TSR_COMMAND or {}).get("speed", LATEST_TELEMETRY.get("activeTsrSpeedKmH", 45))
-            effective_speed = float(tsr_speed)
+            # IMPORTANT: activeTsrSpeedKmH is None until a TSR is issued, so a
+            # plain .get(key, 45) returns None (the key exists) and float(None)
+            # used to kill this whole worker every cycle, freezing telemetry.
+            effective_speed = resolve_effective_speed(
+                (LAST_TSR_COMMAND or {}).get("speed"), LATEST_TELEMETRY
+            )
 
             # 2. Query physical sensors
             phys_dist_mm = None
@@ -917,7 +1142,16 @@ def sensor_acquisition_worker():
                 "latitude": gps_lat,
                 "longitude": gps_lon,
                 "gpsLocked": gps_locked,
-                "gpsSource": "GNSS" if gps_locked else "unavailable"
+                "gpsSource": "GNSS" if gps_locked else "unavailable",
+                # Fail-safe motor / traction cut relay state
+                "motorState": motor_status().get("state"),
+                "motorStopped": motor_status().get("motorStopped"),
+                "motorCutLatched": motor_status().get("latched"),
+                "motorCutReason": motor_status().get("reason"),
+                "motorCutAt": motor_status().get("changedAt"),
+                "motorCutPin": motor_status().get("pin"),
+                "motorCutEnabled": motor_status().get("enabled"),
+                "tsrAutoApplied": bool((LAST_TSR_COMMAND or {}).get("automatic")),
             }
 
         except Exception as e:
@@ -1322,6 +1556,9 @@ def get_all_system_data() -> Dict[str, Any]:
         },
         # None means "no TSR has been issued"; never invent 25 km/h.
         "activeTsrSpeed": (LAST_TSR_COMMAND or {}).get("speed"),
+        "tsrAutoApplied": bool((LAST_TSR_COMMAND or {}).get("automatic")),
+        "motor": motor_status(),
+        "auditLogs": AUDIT_LOGS[:50],
     }
 
 
@@ -1529,7 +1766,13 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 "activeTsrSpeedKmH": (LAST_TSR_COMMAND or {}).get("speed"),
                 "crackActive": _crack_is_active(),
                 "crackExpiresInSeconds": max(0, int(((LATEST_CRACK or {}).get("timestamp", 0) + CRACK_ACTIVE_SECONDS * 1000 - now_ms()) / 1000)) if _crack_is_active() else 0,
+                "motorCut": motor_status(),
+                "tsrAutoApplied": bool((LAST_TSR_COMMAND or {}).get("automatic")),
             })
+        elif clean_path == "/api/motor":
+            self._send_json(200, motor_status())
+        elif clean_path in ("/api/audit_logs", "/api/audit"):
+            self._send_json(200, {"auditLogs": AUDIT_LOGS[:100]})
         elif clean_path == "/api/latest_crack":
             if LATEST_CRACK:
                 self._send_json(200, LATEST_CRACK)
@@ -1634,10 +1877,12 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 "cloudAuthConfigured": bool(TOKEN_MANAGER and TOKEN_MANAGER.has_token()),
                 "apiKeyRequired": bool(LOCAL_API_KEY),
                 "crackActive": _crack_is_active(),
+                "motor": motor_status(),
                 "timestamp": now_ms()
             })
         else:
-            self._send_json(404, {"error": "Endpoint not found", "available": ["/", "/api/all_data", "/api/telemetry", "/api/camera_frame", "/api/latest_crack", "/api/defects", "/api/tasks", "/api/inspections", "/api/reports", "/api/hardware", "/api/ai_oracle", "/api/buzzer", "/api/schedule", "/api/patrol/start", "/api/health", "/api/tsr"]})
+            self._send_json(404, {"error": "Endpoint not found", "available": ["/", "/api/all_data", "/api/telemetry", "/api/camera_frame", "/api/latest_crack", "/api/defects", "/api/tasks", "/api/inspections", "/api/reports", "/api/hardware", "/api/ai_oracle", "/api/buzzer", "/api/schedule", "/api/patrol/start", "/api/health", "/api/tsr",
+                                      "/api/motor", "/api/motor/reset", "/api/audit_logs"]})
 
     def do_POST(self):
         global LATEST_TELEMETRY, LAST_TSR_COMMAND, LATEST_CRACK, LAST_HARDWARE_ACQUISITION_MS, ACTIVE_PATROL_STATUS, SCHEDULES_REGISTRY
@@ -1738,6 +1983,30 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self._send_json(400, {"error": str(e)})
+        elif clean_path in ("/api/motor/cut", "/api/motor/stop"):
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+            try:
+                req = json.loads(body) if body.strip() else {}
+            except Exception:
+                req = {}
+            result = get_motor_controller().cut(
+                reason=str(req.get("reason", "OPERATOR_MOTOR_CUT")), source="operator"
+            )
+            self._send_json(200, result)
+        elif clean_path in ("/api/motor/reset", "/api/motor/run"):
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+            try:
+                req = json.loads(body) if body.strip() else {}
+            except Exception:
+                req = {}
+            force = str(query.get("force", req.get("force", "0"))).lower() in ("1", "true", "yes")
+            result = get_motor_controller().reset(
+                reason=str(req.get("reason", "MANUAL_RESET")), force=force
+            )
+            code = 409 if result.get("status") == "REFUSED" else 200
+            self._send_json(code, result)
         elif clean_path in ("/api/crack/clear", "/api/crack/ack", "/api/clear_crack"):
             content_len = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
@@ -1939,6 +2208,12 @@ def build_anomaly_telemetry(
         "detectionSource": "camera-cv" if (crack_vision and crack_vision.is_available()) else "simulated",
         "dataMode": base.get("dataMode", "LIVE" if (crack_vision and crack_vision.is_available()) else "SIMULATED"),
         "visionAvailable": bool(crack_vision and crack_vision.is_available()),
+        "motorState": motor_status().get("state"),
+        "motorStopped": motor_status().get("motorStopped"),
+        "motorCutLatched": motor_status().get("latched"),
+        "motorCutReason": motor_status().get("reason"),
+        "motorCutPin": motor_status().get("pin"),
+        "tsrAutoApplied": True,
     })
     return base
 
@@ -1976,6 +2251,13 @@ def trigger_crack_detection_pipeline(
     # Immediately activate Raspberry Pi physical buzzer and acoustic alarm
     activate_buzzer(duration_seconds=8.0, reason=f"CRACK_DETECTED_{chainage}")
 
+    # FAIL-SAFE INTERLOCK: physically stop the motors and latch a 25 km/h TSR.
+    # The relay stays cut until an authenticated manual reset is issued.
+    motor_cut_result = get_motor_controller().cut(
+        reason=f"CRACK_DETECTED {chainage}", source="camera-cv"
+    )
+    tsr_result = auto_apply_emergency_tsr(chainage=chainage, reason="CRACK_DETECTED", speed_kmh=25)
+
     defect = build_camera_defect(chainage=chainage, length_mm=length_mm, confidence=confidence, bounding_box=bounding_box)
     report = build_incident_report(defect)
     notif = build_safety_notification(defect)
@@ -1991,6 +2273,8 @@ def trigger_crack_detection_pipeline(
         "report": report,
         "notification": notif,
         "telemetry": telemetry,
+        "motorCut": motor_cut_result,
+        "tsrAutoApplied": tsr_result,
         "timestamp": now_ms(),
         "expiresAt": now_ms() + CRACK_ACTIVE_SECONDS * 1000,
         "detectionSource": "camera-cv" if (crack_vision and crack_vision.is_available()) else "simulated",
@@ -2312,6 +2596,9 @@ def main():
     parser.add_argument("--echo-pin", type=int, help="BCM GPIO pin for ultrasonic ECHO", default=None)
     parser.add_argument("--test-buzzer", action="store_true", help="Immediately test ring the buzzer for 3 seconds and exit")
     parser.add_argument("--test-sensors", action="store_true", help="Test read physical ultrasonic and temp sensors once and exit")
+    parser.add_argument("--motor-cut-pin", type=int, help="BCM GPIO pin of the fail-safe motor cut relay (default 17)", default=None)
+    parser.add_argument("--no-motor-cut", action="store_true", help="Disable the motor cut relay output")
+    parser.add_argument("--motor-watchdog-seconds", type=float, help="Cut motors if no telemetry for N seconds (default 30)", default=None)
     parser.add_argument("--test-vision", action="store_true", help="Run the computer-vision self-test and exit")
     parser.add_argument("--trigger-once", action="store_true", help="Run one detection pipeline once and exit")
     parser.add_argument("--simulate-anomaly-interval", type=int, help="DEMO ONLY: simulate an anomaly every N scans (0=disabled)", default=0)
@@ -2321,6 +2608,7 @@ def main():
 
     global BUZZER_PIN, BUZZER_ACTIVE_LOW, ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN
     global DEVICE_ID, TOKEN_MANAGER, LOCAL_API_KEY, LOCAL_BIND_HOST
+    global MOTOR_CUT_PIN, MOTOR_CUT_ENABLED, MOTOR_CUT_WATCHDOG_SECONDS
 
     DEVICE_ID = args.device
     if FirebaseTokenManager is not None:
@@ -2341,6 +2629,15 @@ def main():
         log.info("[✓] Local API key protection ENABLED")
     else:
         log.warning("[!] Local API is unauthenticated. Use --local-api-key or RAILGUARD_API_KEY on shared networks.")
+
+    if args.motor_cut_pin is not None:
+        MOTOR_CUT_PIN = args.motor_cut_pin
+        log.info("[i] Motor cut relay pin configured to BCM GPIO %d", MOTOR_CUT_PIN)
+    if args.no_motor_cut:
+        MOTOR_CUT_ENABLED = False
+        log.warning("[!] Motor cut relay DISABLED by --no-motor-cut")
+    if args.motor_watchdog_seconds is not None:
+        MOTOR_CUT_WATCHDOG_SECONDS = float(args.motor_watchdog_seconds)
 
     if args.test_vision:
         if crack_vision is None:
@@ -2399,6 +2696,7 @@ def main():
         return
 
     if args.trigger_once:
+        get_motor_controller()
         start_local_wifi_server(host=LOCAL_BIND_HOST, port=args.port)
         # Use real CV when a camera is present; otherwise run an explicit demo.
         frame = capture_real_camera_frame()
@@ -2429,6 +2727,8 @@ def main():
             )
         time.sleep(1.0)
     else:
+        get_motor_controller()
+        start_motor_watchdog()
         run_continuous_camera_scan(
             db_url=args.db,
             uid=args.uid,

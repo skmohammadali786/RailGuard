@@ -2,6 +2,7 @@ package com.example.railguard.util
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
@@ -321,6 +322,59 @@ object PdfExporter {
         c.drawText("• Ultrasonic clearance: $utText (Flaw: ${if (hasFlaw) liveFlawType else "none reported"})", 45f, y + 34f, if (hasFlaw) criticalTextPaint else healthyTextPaint)
         c.drawText("• Remedial Priority: ${if (criticalCount > 0 || hasFlaw) "LEVEL 1 EMERGENCY DISPATCH (TSR MANDATORY)" else "ROUTINE PATROL OBSERVATION"}", 45f, y + 50f, boldTextPaint)
         c.drawText("• Sensor Telemetry Gateway: %s · Latency: %s".format(if (isDirectWifi) "Pi Direct Wi-Fi" else "Cloud Realtime Uplink", if (wifiLatency >= 0) "$wifiLatency ms" else "n/a"), 45f, y + 66f, textPaint)
+        y += 96f
+
+        // ---------------------------------------------------------------------
+        // CRACK EVIDENCE PHOTOGRAPH (real frame captured at detection time)
+        // ---------------------------------------------------------------------
+        c.drawText("CRACK EVIDENCE PHOTOGRAPH", 35f, y, headerPaint)
+        y += 12f
+        val evidencePath = fbService.latestCrackImagePath
+            ?: defects.firstOrNull { it.imagePath.isNotBlank() }?.imagePath
+        val evidenceBmp = if (!evidencePath.isNullOrBlank()) {
+            try { BitmapFactory.decodeFile(evidencePath) } catch (_: Throwable) { null }
+        } else null
+
+        if (evidenceBmp != null) {
+            // Never overflow the printable area: scale to whatever space is left.
+            val maxW = 525f
+            val maxH = (800f - y - 40f).coerceIn(70f, 200f)
+            val scale = minOf(maxW / evidenceBmp.width.toFloat(), maxH / evidenceBmp.height.toFloat())
+            val drawW = evidenceBmp.width * scale
+            val drawH = evidenceBmp.height * scale
+            c.drawBitmap(evidenceBmp, null, RectF(35f, y, 35f + drawW, y + drawH), null)
+            c.drawRoundRect(RectF(34f, y - 1f, 36f + drawW, y + drawH + 1f), 2f, 2f, boxBorderPaint)
+            y += drawH + 12f
+            c.drawText(
+                "Captured automatically by the Raspberry Pi camera at detection · $liveChainage · confidence ${liveTelem?.aiConfidencePercent ?: 0}%",
+                35f, y, smallTextPaint
+            )
+            y += 16f
+        } else {
+            c.drawRoundRect(RectF(35f, y, 560f, y + 34f), 3f, 3f, boxPaint)
+            c.drawText("No crack photograph available (no camera attached, or the frame was not retrieved).", 45f, y + 20f, textPaint)
+            y += 44f
+        }
+
+        // ---------------------------------------------------------------------
+        // TRACTION / MOTOR INTERLOCK STATE
+        // ---------------------------------------------------------------------
+        val motorStopped = liveTelem?.motorStopped == true
+        val motorLatched = liveTelem?.motorCutLatched == true
+        val motorReason = liveTelem?.motorCutReason?.ifBlank { "n/a" } ?: "not reported"
+        val motorPin = liveTelem?.motorCutPin ?: -1
+        c.drawText("TRACTION INTERLOCK (MOTOR CUT RELAY)", 35f, y, headerPaint)
+        y += 12f
+        c.drawRoundRect(RectF(35f, y, 560f, y + 40f), 4f, 4f, boxPaint)
+        c.drawRoundRect(RectF(35f, y, 560f, y + 40f), 4f, 4f, boxBorderPaint)
+        if (motorStopped) {
+            c.drawText("MOTORS STOPPED — relay OPEN${if (motorLatched) " (latched, manual reset required)" else ""}", 45f, y + 16f, criticalTextPaint)
+            c.drawText("Reason: $motorReason · relay pin: BCM $motorPin · automatic 25 km/h TSR applied", 45f, y + 31f, textPaint)
+        } else {
+            c.drawText("Motors allowed — relay energised (fail-safe: power loss = motor stop)", 45f, y + 16f, healthyTextPaint)
+            c.drawText("Reason: $motorReason · relay pin: BCM $motorPin", 45f, y + 31f, textPaint)
+        }
+        y += 52f
 
         pdfDocument.finishPage(page2)
 

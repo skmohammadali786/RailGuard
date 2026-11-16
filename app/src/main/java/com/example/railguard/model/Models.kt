@@ -30,7 +30,9 @@ data class Defect(
     val vibrationG: Float = 0.0f,
     val railTempC: Float = 0.0f,
     val speedKmh: Float = 0.0f,
-    val boundingBox: String = ""
+    val boundingBox: String = "",
+    /** Absolute path of the crack evidence photograph, when one was captured. */
+    val imagePath: String = ""
 )
 
 data class CrackAlertData(
