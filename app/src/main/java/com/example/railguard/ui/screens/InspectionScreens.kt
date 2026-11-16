@@ -401,7 +401,7 @@ fun LiveInspectionScreen(
                     Column {
                         Text("ULTRASONIC", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
-                            activeTelemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: if (firebaseService.isDirectWifiConnected) "68.2 mm" else "--",
+                            activeTelemetry?.let { "${it.ultrasonicDepthMm} mm" } ?: "--",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -411,7 +411,7 @@ fun LiveInspectionScreen(
                     Column {
                         Text("VIBRATION", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
-                            activeTelemetry?.let { "${it.vibrationG} g" } ?: if (firebaseService.isDirectWifiConnected) "0.035 g" else "--",
+                            activeTelemetry?.let { "${it.vibrationG} g" } ?: "--",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -421,7 +421,7 @@ fun LiveInspectionScreen(
                     Column {
                         Text("RAIL TEMP", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
-                            activeTelemetry?.let { "${it.railTempC} °C" } ?: if (firebaseService.isDirectWifiConnected) "31.5 °C" else "--",
+                            activeTelemetry?.let { "${it.railTempC} °C" } ?: "--",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -431,7 +431,7 @@ fun LiveInspectionScreen(
                     Column {
                         Text("CHAINAGE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
-                            activeTelemetry?.chainage ?: if (firebaseService.isDirectWifiConnected) "KM 14+250" else "--",
+                            activeTelemetry?.chainage?.takeIf { it.isNotBlank() && it != "Unknown" } ?: "--",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -444,7 +444,7 @@ fun LiveInspectionScreen(
             // Center Optical Bounding Box & Reticle in Light Technical Style
             val isAnomaly = activeTelemetry?.hasCrack == true ||
                 activeTelemetry?.status?.contains("ANOMALY", ignoreCase = true) == true ||
-                ((activeTelemetry?.ultrasonicDepthMm ?: 68.2f) in 10.0f..55.0f)
+                (activeTelemetry?.ultrasonicDepthMm?.takeIf { it > 0f }?.let { it in 10.0f..55.0f } == true)
 
             Box(
                 modifier = Modifier
@@ -1205,11 +1205,9 @@ fun CameraScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "UT: %.1f mm | Vib: %.3f G | Temp: %.1f°C".format(
-                                    activeTelemetry?.ultrasonicDepthMm ?: 68.2f,
-                                    activeTelemetry?.vibrationG ?: 0.035f,
-                                    activeTelemetry?.railTempC ?: 31.5f
-                                ),
+                                "UT: ${activeTelemetry?.ultrasonicDepthMm?.let { "%.1f".format(it) } ?: "--"} mm" +
+                                    " | Vib: ${activeTelemetry?.vibrationG?.let { "%.3f".format(it) } ?: "--"} G" +
+                                    " | Temp: ${activeTelemetry?.railTempC?.let { "%.1f".format(it) } ?: "--"}°C",
                                 color = Color(0xFFE2E8F0),
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace
@@ -1362,7 +1360,7 @@ fun CameraScreen(
                         Text("Ultrasonic", fontSize = 9.sp, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
                             if (activeTelemetry != null && activeTelemetry.ultrasonicDepthMm > 0) "%.1f mm".format(activeTelemetry.ultrasonicDepthMm)
-                            else if (isWifiOnline) "68.2 mm" else "--",
+                            else "--",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (activeTelemetry?.hasCrack == true || (activeTelemetry?.ultrasonicDepthMm ?: 0f) in 10f..55f) Color(0xFFDC2626) else Color(0xFF0F172A)
@@ -1378,7 +1376,7 @@ fun CameraScreen(
                         Text("Vibration", fontSize = 9.sp, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
                             if (activeTelemetry != null && activeTelemetry.vibrationG > 0) "%.3f G".format(activeTelemetry.vibrationG)
-                            else if (isWifiOnline) "0.035 G" else "--",
+                            else "--",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if ((activeTelemetry?.vibrationG ?: 0f) > 0.35f) Color(0xFFDC2626) else Color(0xFF0F172A)
@@ -1394,7 +1392,7 @@ fun CameraScreen(
                         Text("Rail Temp", fontSize = 9.sp, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
                             if (activeTelemetry != null && activeTelemetry.railTempC > 0) "%.1f°C".format(activeTelemetry.railTempC)
-                            else if (isWifiOnline) "31.5°C" else "--",
+                            else "--",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if ((activeTelemetry?.railTempC ?: 0f) > 45f) Color(0xFFEA580C) else Color(0xFF0F172A)
@@ -1410,7 +1408,7 @@ fun CameraScreen(
                         Text("Axle Speed", fontSize = 9.sp, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                         Text(
                             if (activeTelemetry != null && activeTelemetry.axleSpeedKmh > 0) "%.0f km/h".format(activeTelemetry.axleSpeedKmh)
-                            else if (isWifiOnline) "45 km/h" else "--",
+                            else "--",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if ((activeTelemetry?.axleSpeedKmh ?: 0f) > 80f) Color(0xFFDC2626) else Color(0xFF0F172A)

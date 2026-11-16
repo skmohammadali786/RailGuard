@@ -122,6 +122,11 @@ class TestCameraCrackDetector(unittest.TestCase):
             self.assertEqual(res.status, 200)
             data = json.loads(res.read().decode())
             self.assertEqual(data["status"], "ONLINE")
+            # Process identity lets the app detect a stale instance.
+            self.assertIn("instance", data)
+            self.assertEqual(data["instance"]["version"], ccd.RAILGUARD_VERSION)
+            self.assertGreater(data["instance"]["pid"], 0)
+            self.assertGreater(data["instance"]["startedAt"], 0)
 
         # 2. Latest crack endpoint
         with urllib.request.urlopen("http://127.0.0.1:18080/api/latest_crack", timeout=2) as res:
@@ -140,6 +145,14 @@ class TestCameraCrackDetector(unittest.TestCase):
             self.assertIn("inspections", data)
             self.assertIn("hardware", data)
             self.assertIn("aiOracle", data)
+            self.assertIn("instance", data)
+            # Every packet must state whether the readings are real or simulated.
+            telem = data["telemetry"]
+            self.assertIn(telem.get("dataMode"), ("LIVE", "PARTIAL", "SIMULATED"))
+            self.assertIn("sensorMode", telem)
+            self.assertIn("ultrasonic", telem["sensorMode"])
+            self.assertIn("ultrasonicLive", telem)
+            self.assertIn("dataSource", telem)
 
         # 4. Hardware diagnostics endpoint
         with urllib.request.urlopen("http://127.0.0.1:18080/api/hardware", timeout=2) as res:
@@ -352,6 +365,22 @@ class TestCameraCrackDetector(unittest.TestCase):
             except Exception:
                 pass
 
+
+    def test_port_conflict_is_reported_not_swallowed(self):
+        """A second instance must never silently serve nothing on a busy port."""
+        import socket
+        import camera_crack_detector as ccd
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        busy_port = sock.getsockname()[1]
+        try:
+            ccd.LOCAL_SERVER_BIND_ERROR = None
+            result = ccd.start_local_wifi_server(host="127.0.0.1", port=busy_port, strict=False)
+            self.assertIsNone(result)
+            self.assertIn("in use", (ccd.LOCAL_SERVER_BIND_ERROR or "").lower())
+        finally:
+            sock.close()
 
     def test_speed_resolution_never_calls_float_none(self):
         """Regression: a null TSR speed froze the whole telemetry worker."""

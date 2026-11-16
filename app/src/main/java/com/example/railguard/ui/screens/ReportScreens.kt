@@ -350,10 +350,14 @@ fun PdfPreviewScreen(
     val activeOracle = fbService.liveAiOracle
     val cachedInspections = remember { fbService.getCachedInspections() }
 
-    val liveUtDepth = activeTelemetry?.ultrasonicDepthMm ?: 68.2f
-    val liveTemp = activeTelemetry?.railTempC ?: 28.5f
-    val liveSpeed = activeTelemetry?.axleSpeedKmh ?: 45.0f
-    val liveVib = activeTelemetry?.vibrationG ?: 0.045f
+    // Null = the Pi did not report it. Never substitute demo numbers.
+    val liveUtDepth: Float? = activeTelemetry?.ultrasonicDepthMm
+    val liveTemp: Float? = activeTelemetry?.railTempC
+    val liveSpeed: Float? = activeTelemetry?.axleSpeedKmh
+    val liveVib: Float? = activeTelemetry?.vibrationG
+    fun f1(v: Float?): String = v?.let { "%.1f".format(it) } ?: "—"
+    fun f3(v: Float?): String = v?.let { "%.3f".format(it) } ?: "—"
+    fun f0(v: Float?): String = v?.let { "%.0f".format(it) } ?: "—"
     val hasFlaw = activeTelemetry?.hasCrack == true || defects.any { it.tone == Tone.CRITICAL }
     val liveFlawType = activeTelemetry?.flawType ?: defects.firstOrNull { it.tone == Tone.CRITICAL }?.title ?: "Nominal Surface"
     // No oracle data = "not measured". Never invent fracture-mechanics numbers.
@@ -362,11 +366,11 @@ fun PdfPreviewScreen(
     val liveNadal: Float? = activeOracle?.nadalRatio
     val liveDerailRisk = activeOracle?.derailmentRisk ?: "not available"
     val liveCycles = activeOracle?.fatigueCyclesRemaining
-    val liveThermalStress = (liveTemp - 27.0f) * 2.5f
+    val liveThermalStress: Float? = liveTemp?.let { (it - 27.0f) * 2.5f }
     val activeSection = cachedInspections.firstOrNull()?.section ?: "Section 14 (North Loop Line)"
-    val liveChainage = activeTelemetry?.chainage?.ifBlank { "KM 14+250" } ?: "KM 14+250"
+    val liveChainage = activeTelemetry?.chainage?.takeIf { it.isNotBlank() && it != "Unknown" } ?: "Unknown"
     val isDirectWifi = fbService.isDirectPiConnected
-    val wifiLatency = activeTelemetry?.latencyMs ?: 28
+    val wifiLatency = activeTelemetry?.latencyMs ?: -1
     var isDownloaded by remember { mutableStateOf(false) }
     var isDownloading by remember { mutableStateOf(false) }
     var cloudStatus by remember { mutableStateOf<String?>(null) }
@@ -832,7 +836,14 @@ fun PdfPreviewScreen(
                         ) {
                             Column {
                                 Text("ACTIVE TSR LIMIT", color = Color(0xFF854D0E), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text(if (liveSpeed <= 30f) "%.0f km/h TSR".format(liveSpeed) else "LINE SPEED", color = Color(0xFF713F12), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    when {
+                                        liveSpeed == null -> "NOT REPORTED"
+                                        liveSpeed <= 30f -> "${f0(liveSpeed)} km/h TSR"
+                                        else -> "LINE SPEED"
+                                    },
+                                    color = Color(0xFF713F12), fontSize = 11.sp, fontWeight = FontWeight.Bold
+                                )
                             }
                         }
 
@@ -846,7 +857,7 @@ fun PdfPreviewScreen(
                         ) {
                             Column {
                                 Text("LIVE UT DEPTH", color = Color(0xFF059669), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text("%.1f mm".format(liveUtDepth), color = Color(0xFF065F46), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("${f1(liveUtDepth)} mm", color = Color(0xFF065F46), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1005,12 +1016,12 @@ fun PdfPreviewScreen(
                         Text("• Vision Engine: OpenCV classical crack analysis on the Raspberry Pi (not a neural network)", color = Color(0xFF0369A1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Text("• Inference Latency: ${if (activeOracle != null) "reported by the Pi" else "not measured"}", color = Color(0xFF0C4A6E), fontSize = 10.sp)
                         Text("• Visual Confidence: ${if (hasFlaw) "${activeTelemetry?.aiConfidencePercent ?: 0}% [$liveFlawType]" else "no crack reported"}", color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Ultrasonic Clearance: %.1f mm (distance to railhead, not thickness)".format(liveUtDepth), color = Color(0xFF0C4A6E), fontSize = 10.sp)
-                        Text("• Rail Temperature: %.1f °C".format(liveTemp), color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Ultrasonic Clearance: ${f1(liveUtDepth)} mm (distance to railhead, not thickness)", color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Rail Temperature: ${f1(liveTemp)} °C", color = Color(0xFF0C4A6E), fontSize = 10.sp)
                         Text("• Crack Propagation Estimate: ${liveDeltaK?.let { "ΔK = %.1f MPa·m^0.5".format(it) } ?: "not available"} · growth $liveGrowthRate", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Text("• Nadal Derailment Ratio: ${liveNadal?.let { "%.2f (%s)".format(it, liveDerailRisk) } ?: "not available"}", color = Color(0xFFB91C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Text("• Flange Climb Risk: ${liveNadal?.let { if (it > 0.8f) "ELEVATED RISK ⚠" else "SAFE ENVELOPE ✓" } ?: "not measured"}", color = Color(0xFF991B1B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("• Thermal Stress (CWR): %.1f MPa".format(liveThermalStress), color = Color(0xFF0C4A6E), fontSize = 10.sp)
+                        Text("• Thermal Stress (CWR): ${liveThermalStress?.let { "%.1f".format(it) } ?: "—"} MPa", color = Color(0xFF0C4A6E), fontSize = 10.sp)
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -1040,13 +1051,13 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                             .padding(10.dp)
                     ) {
-                        val isTsr = hasFlaw || liveSpeed <= 30f
+                        val isTsr = hasFlaw || (liveSpeed ?: Float.MAX_VALUE) <= 30f
                         Text("• Connected Locomotive: TR-104 (Autonomous Track Patrol)", color = Color(0xFF1E293B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Text("• Onboard Unit (OBU): Raspberry Pi Zero W Gateway", color = Color(0xFF334155), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                         Text("• Telemetry Uplink: ${if (isDirectWifi) "Direct Wi-Fi LAN Active" else "Cloud Telemetry Uplink"} (Latency: $wifiLatency ms)", color = Color(0xFF059669), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Live Operational Speed: %.1f km/h (%s)".format(liveSpeed, if (isTsr) "TSR Active" else "Line Speed"), color = Color(0xFF334155), fontSize = 10.sp)
-                        Text("• Axle Load & Vibration: %.3f g Impact Shock".format(liveVib), color = Color(0xFF334155), fontSize = 10.sp)
-                        Text("• Wheel Bearing Infrared Temp: %.1f °C".format(liveTemp), color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Live Operational Speed: ${f1(liveSpeed)} km/h (${if (isTsr) "TSR Active" else if (liveSpeed != null) "Line Speed" else "not reported"})", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Axle Load & Vibration: ${f3(liveVib)} g Impact Shock", color = Color(0xFF334155), fontSize = 10.sp)
+                        Text("• Wheel Bearing Infrared Temp: ${f1(liveTemp)} °C", color = Color(0xFF334155), fontSize = 10.sp)
                         Text("• Driver DMI Cab Display Alert: ${if (isTsr) "TSR ENFORCED - MAX 25 KM/H ⚠" else "ALL SIGNALS CLEAR ✓"}", color = if (isTsr) Color(0xFFB91C1C) else Color(0xFF15803D), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
 
@@ -1168,9 +1179,9 @@ fun PdfPreviewScreen(
                         val kpiList = listOf(
                             ReportKpiItem("Track Health Index (THI)", thiFormatted, "Threshold ≥ 90.0%", thiStatus),
                             ReportKpiItem("Active Critical Fractures", "${defects.size} Logged Anomalies", "Tolerance = 0", if (defects.isEmpty() && !hasFlaw) "NOMINAL" else "ACTIONABLE"),
-                            ReportKpiItem("Live Ultrasonic Depth", "%.1f mm".format(liveUtDepth), "Nominal 68.2 mm", if (liveUtDepth in 55.0f..75.0f) "NOMINAL" else "ACTIONABLE"),
-                            ReportKpiItem("Dynamic Axle Speed", "%.1f km/h".format(liveSpeed), "Cap 120.0 km/h", if (liveSpeed <= 30f) "TSR BOUND" else "COMPLIANT"),
-                            ReportKpiItem("Inertial Impact Shock", "%.3f g".format(liveVib), "Safe < 0.150 g", if (liveVib < 0.15f) "NOMINAL" else "EXCEEDED"),
+                            ReportKpiItem("Live Ultrasonic Depth", "${f1(liveUtDepth)} mm", "Nominal 68.2 mm", liveUtDepth?.let { if (it in 55.0f..75.0f) "NOMINAL" else "ACTIONABLE" } ?: "NOT MEASURED"),
+                            ReportKpiItem("Dynamic Axle Speed", "${f1(liveSpeed)} km/h", "Cap 120.0 km/h", liveSpeed?.let { if (it <= 30f) "TSR BOUND" else "COMPLIANT" } ?: "NOT MEASURED"),
+                            ReportKpiItem("Inertial Impact Shock", "${f3(liveVib)} g", "Safe < 0.150 g", liveVib?.let { if (it < 0.15f) "NOMINAL" else "EXCEEDED" } ?: "NOT MEASURED"),
                             ReportKpiItem("Peak Nadal Derailment Ratio", liveNadal?.let { "%.2f Y/Q".format(it) } ?: "not measured", "Critical Cap 0.80 Y/Q", liveNadal?.let { if (it < 0.8f) "NOMINAL" else "CRITICAL" } ?: "NOT MEASURED")
                         )
 
@@ -1244,9 +1255,9 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFBBF7D0), RoundedCornerShape(6.dp))
                             .padding(8.dp)
                     ) {
-                        Text("• CWR Axial Thermal Stress: %+.1f MPa Tension (Neutral Temp SFT: 27.0°C · Rail Head: %.1f°C)".format(liveThermalStress, liveTemp), color = Color(0xFF166534), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Dynamic Wheel Impact Peak: %.1f kN (Impact safety limit: < 220 kN · Vibration: %.3f g)".format(120.0f + liveVib * 800.0f, liveVib), color = Color(0xFF166534), fontSize = 9.sp)
-                        Text("• Live Ultrasonic Reflection Depth: %.1f mm (UIC 60 Nominal: 68.2 mm)".format(liveUtDepth), color = Color(0xFF166534), fontSize = 9.sp)
+                        Text("• CWR Axial Thermal Stress: ${liveThermalStress?.let { "%+.1f".format(it) } ?: "—"} MPa Tension (Neutral Temp SFT: 27.0°C · Rail Head: ${f1(liveTemp)}°C)", color = Color(0xFF166534), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Dynamic Wheel Impact Peak: ${liveVib?.let { "%.1f".format(120.0f + it * 800.0f) } ?: "—"} kN (Impact safety limit: < 220 kN · Vibration: ${f3(liveVib)} g)", color = Color(0xFF166534), fontSize = 9.sp)
+                        Text("• Live Ultrasonic Reflection Depth: ${f1(liveUtDepth)} mm (UIC 60 Nominal: 68.2 mm)", color = Color(0xFF166534), fontSize = 9.sp)
                         Text("• Sleeper / Tie Retention: 98.4% integrity · Fastener torque nominal (220-250 Nm)", color = Color(0xFF166534), fontSize = 9.sp)
                         Text("• Telemetry Link: %s (Latency: %d ms · Frequency: 10 Hz)".format(if (isDirectWifi) "Direct Wi-Fi LAN" else "Cloud Uplink", wifiLatency), color = Color(0xFF166534), fontSize = 9.sp)
                     }
@@ -1268,7 +1279,7 @@ fun PdfPreviewScreen(
                             .border(1.dp, Color(0xFFFECACA), RoundedCornerShape(6.dp))
                             .padding(8.dp)
                     ) {
-                        val tsrSpeed = if (liveSpeed <= 30f) liveSpeed else 25f
+                        val tsrSpeed = if ((liveSpeed ?: Float.MAX_VALUE) <= 30f) (liveSpeed ?: 25f) else 25f
                         Text("• $activeSection: ${if (hasFlaw) "Risk Elevated · TSR %.0f km/h Mandated".format(tsrSpeed) else "Nominal Line Speed Allowed"}", color = if (hasFlaw) Color(0xFF991B1B) else Color(0xFF15803D), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Text("• Active Defect Count: ${defects.size} anomalies recorded in cloud register", color = Color(0xFF854D0E), fontSize = 9.sp)
                         Text("• Work Orders Dispatched: ${tasks.size} maintenance work orders active", color = Color(0xFF334155), fontSize = 9.sp)

@@ -363,6 +363,54 @@ cd ~/RailGuard
 * **Buzzer** – the app rings the phone locally *and* commands the Pi buzzer; if the Pi is
   unreachable the app says **"Buzzer command FAILED"** instead of pretending.
 
+### The LIVE / SIMULATED / STALE badge (data provenance)
+
+The Home telemetry card always states where the numbers came from:
+
+| Badge | Meaning |
+|---|---|
+| **LIVE** | The Pi measured the rail with real hardware (`dataMode: LIVE`, `ultrasonicLive: true`). |
+| **SIMULATED** | The Pi could **not** read its ultrasonic sensor, so it generated values. They are not measurements. |
+| **STALE** | No packet for more than 30 s — the Wi-Fi link or the Pi service is down. |
+| **NO DATA** | The app has never received anything from the Pi. |
+
+Under the badge the app prints the Pi version, its uptime, the request URL and the
+**exact HTTP status** of the last attempt, for example:
+
+```
+Pi v2.2.1 · up 2h 14m · Wi-Fi 23 ms
+http://192.168.4.1:8080/api/all_data → HTTP 200
+```
+
+The Pi also reports a per-sensor map (`sensorMode`) so a real temperature probe is never
+mistaken for a real rail measurement.
+
+### "The app keeps showing the same numbers / demo data"
+
+This has three common causes, in order of likelihood. The badge above tells you which one:
+
+1. **The Pi is in SIMULATED mode** — the HC-SR04 is not answering. The Pi log now prints
+   `rail depth 68.3mm [SIMULATED]` and a loud warning at startup. Check 5 V, GND,
+   TRIG BCM 23 (pin 16), ECHO BCM 24 (pin 18) **through a 1k/2k divider**.
+2. **An old RailGuard process is still holding port 8080.** You restart the Pi service,
+   the new process prints live values in the terminal, but the phone keeps talking to the
+   old process (which may serve frozen values). New builds **refuse to start** in that case
+   and print:
+
+   ```
+   FATAL: port 8080 is ALREADY IN USE.
+   ... sudo systemctl stop railguard; sudo pkill -f camera_crack_detector.py
+   ```
+
+   Then start it again. The app shows the Pi **instance ID and uptime**, so a stale
+   instance is obvious (e.g. "up 3d" right after a restart).
+3. **The phone is not reaching the Pi** — the app fell back to Firebase or to its local
+   cache. The HTTP line under the badge shows `HTTP 401` (wrong API key) or a timeout
+   (wrong IP / different Wi-Fi).
+
+The app no longer substitutes `68.2 mm`, `0.035 g`, `31.5 °C` or `KM 14+250` when a
+reading is missing; it shows `--` instead.
+
 ---
 
 ## 6. Running the tests

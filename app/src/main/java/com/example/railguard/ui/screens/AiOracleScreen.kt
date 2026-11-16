@@ -548,7 +548,7 @@ fun AiOracleScreen(
                         val flawNormX = if (utDepthMm > 0f) {
                             (0.20f + (utDepthMm / 70.0f) * 0.55f).coerceIn(0.20f, 0.75f)
                         } else 0.50f
-                        val vibRippleScale = ((activeTelemetry?.vibrationG ?: 0.035f) * 6f).coerceIn(1.2f, 5.5f)
+                        val vibRippleScale = ((activeTelemetry?.vibrationG ?: 0f) * 6f).coerceIn(1.2f, 5.5f)
 
                         // Ultrasonic Waveform Path
                         val wavePath = Path()

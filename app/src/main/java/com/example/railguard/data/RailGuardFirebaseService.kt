@@ -866,6 +866,20 @@ class RailGuardFirebaseService private constructor() {
                 put("latitude", telem.latitude)
                 put("longitude", telem.longitude)
                 put("latencyMs", telem.latencyMs)
+                put("motorState", telem.motorState)
+                put("motorStopped", telem.motorStopped)
+                put("motorCutLatched", telem.motorCutLatched)
+                put("motorCutReason", telem.motorCutReason)
+                put("motorCutPin", telem.motorCutPin)
+                put("tsrAutoApplied", telem.tsrAutoApplied)
+                put("dataMode", telem.dataMode)
+                put("dataSource", telem.dataSource)
+                if (telem.ultrasonicLive != null) put("ultrasonicLive", telem.ultrasonicLive)
+                put("sensorMode", JSONObject().put("ultrasonic", telem.sensorModeUltrasonic))
+                put("version", telem.piVersion)
+                put("instanceId", telem.piInstanceId)
+                put("startedAt", telem.piStartedAt)
+                put("uptimeSeconds", telem.piUptimeSeconds)
             }
             sharedPreferences?.edit()?.putString(KEY_LOCAL_TELEMETRY, json.toString())?.apply()
         } catch (_: Exception) {}
@@ -2925,7 +2939,18 @@ class RailGuardFirebaseService private constructor() {
         val motorCutLatched: Boolean = false,
         val motorCutReason: String = "",
         val motorCutPin: Int = -1,
-        val tsrAutoApplied: Boolean = false
+        val tsrAutoApplied: Boolean = false,
+        /** Provenance reported by the Pi: LIVE / PARTIAL / SIMULATED (or UNKNOWN). */
+        val dataMode: String = "UNKNOWN",
+        val dataSource: String = "",
+        /** true = the ultrasonic reading is real hardware, false = the Pi simulated it. */
+        val ultrasonicLive: Boolean? = null,
+        val sensorModeUltrasonic: String = "",
+        /** Identity of the Pi process that produced this packet. */
+        val piVersion: String = "",
+        val piInstanceId: String = "",
+        val piStartedAt: Long = 0L,
+        val piUptimeSeconds: Long = 0L
     )
 
     var latestSensorTelemetry by mutableStateOf<LiveSensorTelemetry?>(null)
@@ -2934,6 +2959,12 @@ class RailGuardFirebaseService private constructor() {
     var lastBuzzerTimestamp by mutableStateOf(0L)
     var buzzerStatusMessage by mutableStateOf("Buzzer Idle")
     var localWifiIp by mutableStateOf("192.168.4.1")
+    // Result of the last direct Pi request. Displayed on Home so it is obvious
+    // whether the app is really talking to the Pi or falling back to cache/cloud.
+    var lastDirectSyncAt by mutableStateOf(0L)
+    var lastDirectSyncHttp by mutableStateOf(0)
+    var lastDirectSyncUrl by mutableStateOf("")
+    var lastDirectSyncError by mutableStateOf("")
 
     /**
      * Reads real-time hardware telemetry pushed by Raspberry Pi or ESP32 nodes via Firebase Cloud
@@ -2983,7 +3014,21 @@ class RailGuardFirebaseService private constructor() {
                     crackBoundingBox = json.optString("crackBoundingBox", ""),
                     latitude = json.optDouble("latitude", 0.0),
                     longitude = json.optDouble("longitude", 0.0),
-                    latencyMs = json.optInt("latencyMs", 0)
+                    latencyMs = json.optInt("latencyMs", 0),
+                    motorState = json.optString("motorState", "ALLOWED"),
+                    motorStopped = json.optBoolean("motorStopped", false),
+                    motorCutLatched = json.optBoolean("motorCutLatched", false),
+                    motorCutReason = json.optString("motorCutReason", ""),
+                    motorCutPin = json.optInt("motorCutPin", -1),
+                    tsrAutoApplied = json.optBoolean("tsrAutoApplied", false),
+                    dataMode = json.optString("dataMode", "CLOUD"),
+                    dataSource = json.optString("dataSource", "FIREBASE_CLOUD"),
+                    ultrasonicLive = if (json.has("ultrasonicLive") && !json.isNull("ultrasonicLive")) json.optBoolean("ultrasonicLive", false) else null,
+                    sensorModeUltrasonic = json.optJSONObject("sensorMode")?.optString("ultrasonic", "") ?: "",
+                    piVersion = json.optString("version", ""),
+                    piInstanceId = json.optString("instanceId", ""),
+                    piStartedAt = json.optLong("startedAt", 0L),
+                    piUptimeSeconds = json.optLong("uptimeSeconds", 0L)
                 )
                 withContext(Dispatchers.Main) {
                     latestSensorTelemetry = telemetry
@@ -3052,6 +3097,23 @@ class RailGuardFirebaseService private constructor() {
                 telemObj.optString("location",
                     telemObj.optString("chainageCoordinate", "Unknown"))))
 
+        // Provenance. Older Pi builds do not send these keys, so infer from
+        // whatever is available instead of pretending the data is live.
+        val sensorModeObj = telemObj.optJSONObject("sensorMode")
+        val utMode = sensorModeObj?.optString("ultrasonic", "") ?: ""
+        val utLiveFlag: Boolean? = when {
+            telemObj.has("ultrasonicLive") && !telemObj.isNull("ultrasonicLive") -> telemObj.optBoolean("ultrasonicLive", false)
+            utMode.isNotBlank() -> utMode.equals("hardware", ignoreCase = true)
+            else -> null
+        }
+        val dataModeStr = telemObj.optString("dataMode", "").ifBlank {
+            when (utLiveFlag) {
+                true -> "LIVE"
+                false -> "SIMULATED"
+                null -> if (statusStr.contains("SIMULATED", ignoreCase = true)) "SIMULATED" else "UNKNOWN"
+            }
+        }
+
         return LiveSensorTelemetry(
             nodeId = telemObj.optString("nodeId", telemObj.optString("device_id", "Unknown")),
             ultrasonicDepthMm = ut.toFloat(),
@@ -3076,7 +3138,15 @@ class RailGuardFirebaseService private constructor() {
             motorCutLatched = telemObj.optBoolean("motorCutLatched", false),
             motorCutReason = telemObj.optString("motorCutReason", ""),
             motorCutPin = telemObj.optInt("motorCutPin", -1),
-            tsrAutoApplied = telemObj.optBoolean("tsrAutoApplied", false)
+            tsrAutoApplied = telemObj.optBoolean("tsrAutoApplied", false),
+            dataMode = dataModeStr,
+            dataSource = telemObj.optString("dataSource", ""),
+            ultrasonicLive = utLiveFlag,
+            sensorModeUltrasonic = utMode,
+            piVersion = telemObj.optString("version", ""),
+            piInstanceId = telemObj.optString("instanceId", ""),
+            piStartedAt = telemObj.optLong("startedAt", 0L),
+            piUptimeSeconds = telemObj.optLong("uptimeSeconds", 0L)
         )
     }
 
@@ -3799,6 +3869,9 @@ class RailGuardFirebaseService private constructor() {
         onSuccess: (List<Defect>, List<MaintenanceTask>, List<InspectionRecord>) -> Unit = { _, _, _ -> }
     ): Boolean {
         return withContext(Dispatchers.IO) {
+            var attemptUrl = ""
+            var attemptHttp = 0
+            var attemptError = ""
             val cleanHost = localWifiIp.trim()
                 .removePrefix("http://")
                 .removePrefix("https://")
@@ -3822,6 +3895,8 @@ class RailGuardFirebaseService private constructor() {
                 for (path in endpoints) {
                     if (!hostReachable) break
                     val startMs = System.currentTimeMillis()
+                    attemptUrl = "http://$candidate:8080$path"
+                    attemptHttp = 0
                     try {
                         val conn = (URL("http://$candidate:8080$path").openConnection() as HttpURLConnection).apply {
                             requestMethod = "GET"
@@ -3831,7 +3906,9 @@ class RailGuardFirebaseService private constructor() {
                             applyPiAuth()
                             setRequestProperty("Accept", "application/json, text/html, */*")
                         }
-                        if (conn.responseCode in 200..299) {
+                        val httpCode = conn.responseCode
+                        attemptHttp = httpCode
+                        if (httpCode in 200..299) {
                             val roundTripMs = System.currentTimeMillis() - startMs
                             val body = conn.inputStream.bufferedReader().use { it.readText() }
                             if (body.isNotBlank() && body != "null") {
@@ -3851,6 +3928,10 @@ class RailGuardFirebaseService private constructor() {
                                             isConnectedToFirebase = true
                                             isDirectWifiConnected = true
                                             directWifiLatencyMs = roundTripMs
+                                            lastDirectSyncAt = System.currentTimeMillis()
+                                            lastDirectSyncHttp = httpCode
+                                            lastDirectSyncUrl = attemptUrl
+                                            lastDirectSyncError = ""
                                         }
                                         autoProcessDetectedCrack(telem)
 
@@ -4032,38 +4113,60 @@ class RailGuardFirebaseService private constructor() {
                                     val tempMatch = Regex("""(?:temp|temperature)[:\s]+([0-9.]+)\s*(?:°?C)?""", RegexOption.IGNORE_CASE).find(trimmed)
                                     val speedMatch = Regex("""(?:speed|axle)[:\s]+([0-9.]+)\s*(?:km/?h)?""", RegexOption.IGNORE_CASE).find(trimmed)
 
-                                    if (utMatch != null || vibMatch != null || tempMatch != null) {
+                                    // Only accept a scraped page when the primary reading is really present.
+                                    // Never fill missing sensors with demo constants.
+                                    if (utMatch != null) {
                                         val telem = LiveSensorTelemetry(
                                             nodeId = "RPI-TRACK-01",
-                                            ultrasonicDepthMm = (utMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 68.2f),
-                                            vibrationG = (vibMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 0.035f),
-                                            railTempC = (tempMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 31.5f),
-                                            axleSpeedKmh = (speedMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 45.0f),
-                                            chainage = "KM 14+320",
-                                            hardware = "Raspberry Pi 4 / Camera Module 3 / Piezo UT",
-                                            status = "ACTIVE_SYNC",
-                                            timestamp = System.currentTimeMillis()
+                                            ultrasonicDepthMm = utMatch.groupValues[1].toFloatOrNull() ?: 0f,
+                                            vibrationG = vibMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 0f,
+                                            railTempC = tempMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 0f,
+                                            axleSpeedKmh = speedMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 0f,
+                                            chainage = "Unknown",
+                                            hardware = "Values scraped from the Pi HTML dashboard",
+                                            status = "HTML_DASHBOARD",
+                                            timestamp = System.currentTimeMillis(),
+                                            dataMode = "UNKNOWN",
+                                            dataSource = "HTML_SCRAPE",
+                                            ultrasonicLive = null
                                         )
                                         withContext(Dispatchers.Main) {
                                             latestSensorTelemetry = telem
                                             isConnectedToFirebase = true
                                             isDirectWifiConnected = true
                                             directWifiLatencyMs = roundTripMs
+                                            lastDirectSyncAt = System.currentTimeMillis()
+                                            lastDirectSyncHttp = httpCode
+                                            lastDirectSyncUrl = attemptUrl
+                                            lastDirectSyncError = ""
                                         }
                                         return@withContext true
                                     }
                                 }
                             }
                         }
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
                         // Host did not answer: stop trying the remaining endpoints
                         // on this address and fail honestly.
+                        attemptError = e.message ?: e.javaClass.simpleName
                         hostReachable = false
                     }
                 }
             }
             withContext(Dispatchers.Main) {
                 isDirectWifiConnected = false
+                lastDirectSyncAt = System.currentTimeMillis()
+                lastDirectSyncHttp = attemptHttp
+                lastDirectSyncUrl = attemptUrl
+                if (attemptError.isBlank()) {
+                    attemptError = when (attemptHttp) {
+                        401, 403 -> "HTTP $attemptHttp — API key rejected by the Pi"
+                        0 -> "no response from $cleanHost:8080 (wrong IP / different Wi-Fi / Pi down)"
+                        404 -> "HTTP 404 — not a RailGuard API on this address"
+                        else -> "HTTP $attemptHttp — no RailGuard JSON payload"
+                    }
+                }
+                lastDirectSyncError = attemptError
             }
             false
         }

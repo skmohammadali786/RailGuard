@@ -88,8 +88,19 @@ curl -H "X-API-Key: my-secret" http://127.0.0.1:8080/api/capabilities
   crash therefore also stops the motors. Reset is manual only
   (`POST /api/motor/reset`) and is refused while a crack is still active.
 * **A crack also applies a 25 km/h TSR automatically** (`source: crack-interlock`).
+* **Synthetic values are labelled.** Each telemetry packet carries
+  `dataMode` (`LIVE` / `PARTIAL` / `SIMULATED`), `sensorMode` per sensor,
+  `ultrasonicLive` and `dataSource`. The app shows a SIMULATED badge instead of
+  pretending the numbers are measured. The scan log prints `[SIMULATED]` too.
 * **Synthetic frames are labelled.** Any generated image is returned with
   `X-RailGuard-Simulated: 1`.
+* **One instance per port.** If port 8080 is already in use (an old process is
+  still running), the new process now exits with `FATAL: port 8080 is ALREADY IN
+  USE` and prints how to stop the stale one. It never silently lets the phone
+  keep reading old telemetry. Set `RAILGUARD_ALLOW_PORT_CONFLICT=1` only when
+  you really want to start a second copy.
+* **Process identity.** Every packet includes `version`, `instanceId`, `pid`,
+  `startedAt`, `uptimeSeconds`, so the app can prove which process it talks to.
 * **Diagnostics are honest.** Missing sensors are reported as `NOT_INSTALLED`; the battery is
   reported as not monitored; GNSS is only "locked" with a real fix.
 

@@ -175,7 +175,13 @@ INSPECTIONS_REGISTRY: List[Dict[str, Any]] = []
 REPORTS_REGISTRY: List[Dict[str, Any]] = []
 SCHEDULES_REGISTRY: List[Dict[str, Any]] = []
 ACTIVE_PATROL_STATUS: Dict[str, Any] = {"status": "STANDBY", "sensors": ["camera", "ultrasonic", "vibration", "temperature", "gps"]}
+# Version + process identity. The app shows these so a stale instance that is
+# still holding port 8080 is immediately visible instead of silently serving
+# old/frozen telemetry.
+RAILGUARD_VERSION: str = "2.2.1"
 START_TIME_MS: int = int(time.time() * 1000)
+PROCESS_PID: int = os.getpid()
+INSTANCE_ID: str = f"{PROCESS_PID}-{START_TIME_MS}"
 LATEST_CAMERA_FRAME_BYTES: Optional[bytes] = None
 LATEST_FRAME_CAPTURED_AT: int = int(time.time() * 1000)
 
@@ -969,6 +975,8 @@ def probe_serial_sensors() -> Optional[Dict[str, Any]]:
 
 HARDWARE_ULTRASONIC_SENSOR: Optional[HardwareUltrasonicSensor] = None
 ACQUISITION_THREAD: Optional[threading.Thread] = None
+LOCAL_SERVER_BIND_ERROR: Optional[str] = None
+LOCAL_SERVER_PORT: int = 8080
 
 
 def resolve_effective_speed(tsr_speed: Any = None, telem: Optional[Dict[str, Any]] = None,
@@ -1034,34 +1042,46 @@ def sensor_acquisition_worker():
             # 3. Ultrasonic Depth: Physical hardware reading if present, else continuous dynamic track profile
             if phys_dist_mm is not None:
                 ut_depth = phys_dist_mm
+                ut_live = True
+                ut_source = "hc-sr04"
                 hw_source = f"PHYSICAL_ULTRASONIC_HC_SR04 (TRIG: BCM {ULTRASONIC_TRIG_PIN}/Pin 16, ECHO: BCM {ULTRASONIC_ECHO_PIN}/Pin 18)"
             else:
-                # Dynamic undulating baseline around nominal 68.2mm UIC 60 rail flange
+                # Dynamic undulating baseline around nominal 68.2mm UIC 60 rail flange.
+                # This is a SIMULATION and is flagged as such in every payload.
                 ut_depth = round(68.2 + 0.35 * math.sin(step * 0.15) + random.uniform(-0.1, 0.1), 1)
-                hw_source = "DYNAMIC_TRACK_STREAM (Nominal UIC 60 Baseline)"
+                ut_live = False
+                ut_source = "simulated"
+                hw_source = "DYNAMIC_TRACK_STREAM (SIMULATED — no ultrasonic sensor detected)"
 
             # 4. Railhead Temperature
             if phys_temp_c is not None:
                 rail_temp = phys_temp_c
+                temp_live = True
             else:
                 rail_temp = round(31.5 + 0.4 * math.sin(step * 0.05) + random.uniform(-0.1, 0.1), 1)
+                temp_live = False
 
             # 5. Vibration & Axle Speed & Chainage
             if serial_data and isinstance(serial_data, dict):
                 vib_g = float(serial_data.get("vibrationG", 0.035))
+                vib_live = "vibrationG" in serial_data
                 if "axleSpeedKmh" in serial_data:
                     effective_speed = float(serial_data["axleSpeedKmh"])
                 if "chainage" in serial_data:
                     chainage_str = str(serial_data["chainage"])
+                    chainage_live = True
                 else:
                     chainage_str = f"KM 14+{int((current_km % 1) * 1000):03d}"
+                    chainage_live = False
             else:
                 vib_g = round(0.035 + 0.008 * math.sin(step * 0.25) + random.uniform(-0.002, 0.002), 3)
+                vib_live = False
                 # Advance chainage smoothly based on speed (km/h)
                 current_km += (effective_speed / 3600.0) * 0.5
                 km_int = int(current_km)
                 m_int = int((current_km - km_int) * 1000)
                 chainage_str = f"KM {km_int}+{m_int:03d}"
+                chainage_live = False
 
             # 6. Flaw / anomaly logic
             # IMPORTANT: the HC-SR04 measures the distance from the sensor to the
@@ -1106,7 +1126,9 @@ def sensor_acquisition_worker():
                 crack_len = 0.0
 
             vision_ok = bool(crack_vision and crack_vision.is_available())
-            data_mode = "LIVE" if has_physical_hardware else "SIMULATED"
+            # LIVE only when the primary rail sensor (ultrasonic) is real. A real
+            # temperature probe alone must not label simulated rail depth as LIVE.
+            data_mode = "LIVE" if ut_live else ("PARTIAL" if has_physical_hardware else "SIMULATED")
 
             # GPS is only reported when a real fix is available from the serial
             # node. Without a GNSS receiver we must not claim a lock.
@@ -1119,6 +1141,13 @@ def sensor_acquisition_worker():
             # Update global LATEST_TELEMETRY with guaranteed dynamic updates
             LATEST_TELEMETRY = {
                 "nodeId": DEVICE_ID,
+                # Process identity: lets the app prove it is talking to the
+                # instance you just restarted, not a stale one on the same port.
+                "version": RAILGUARD_VERSION,
+                "instanceId": INSTANCE_ID,
+                "pid": PROCESS_PID,
+                "startedAt": START_TIME_MS,
+                "uptimeSeconds": int(time.time() - (START_TIME_MS / 1000)),
                 "ultrasonicDepthMm": ut_depth,
                 "ultrasonicBaselineMm": ut_baseline_mm,
                 "clearanceWarning": ut_clearance_warning,
@@ -1129,8 +1158,22 @@ def sensor_acquisition_worker():
                 "recommendedTsrKmh": 25.0 if crack_active else None,
                 "chainage": chainage_str,
                 "hardware": hw_source,
-                "status": "ANOMALY_FLAGGED" if crack_active else ("ALL_SENSORS_ONLINE" if has_physical_hardware else "SIMULATED_DEMO"),
+                "status": ("ANOMALY_FLAGGED" if crack_active else
+                           ("ALL_SENSORS_ONLINE" if ut_live else
+                            ("PARTIAL_HARDWARE" if has_physical_hardware else "SIMULATED_DEMO"))),
                 "dataMode": data_mode,
+                # Per-sensor provenance: the app uses this to show exactly which
+                # numbers are real hardware and which are simulated.
+                "sensorMode": {
+                    "ultrasonic": "hardware" if ut_live else "simulated",
+                    "temperature": "hardware" if temp_live else "simulated",
+                    "vibration": "hardware" if vib_live else "simulated",
+                    "speed": "hardware" if serial_data else "simulated",
+                    "chainage": "hardware" if chainage_live else "simulated",
+                },
+                "ultrasonicLive": ut_live,
+                "ultrasonicSource": ut_source,
+                "dataSource": ("RASPBERRY_PI_HARDWARE" if has_physical_hardware else "RASPBERRY_PI_SIMULATION"),
                 "visionAvailable": vision_ok,
                 "visionMode": (LATEST_VISION_RESULT or {}).get("mode", "not-run"),
                 "hasCrack": crack_active,
@@ -1520,6 +1563,21 @@ def get_ai_oracle_metrics(telemetry: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def instance_info() -> Dict[str, Any]:
+    """Identity of the running process, so the app can spot a stale server."""
+    telem = LATEST_TELEMETRY or {}
+    return {
+        "version": RAILGUARD_VERSION,
+        "instanceId": INSTANCE_ID,
+        "pid": PROCESS_PID,
+        "startedAt": START_TIME_MS,
+        "uptimeSeconds": int(time.time() - (START_TIME_MS / 1000)),
+        "dataMode": telem.get("dataMode", "SIMULATED"),
+        "ultrasonicLive": bool(telem.get("ultrasonicLive", False)),
+        "port": LOCAL_SERVER_PORT,
+    }
+
+
 def get_all_system_data() -> Dict[str, Any]:
     telem = LATEST_TELEMETRY or {
         "nodeId": "RPI-TRACK-01",
@@ -1537,6 +1595,7 @@ def get_all_system_data() -> Dict[str, Any]:
         "status": "ONLINE",
         "timestamp": int(time.time() * 1000),
         "deviceId": DEVICE_ID,
+        "instance": instance_info(),
         "telemetry": telem,
         "latestCrack": LATEST_CRACK,
         "defects": DEFECTS_REGISTRY,
@@ -1867,6 +1926,7 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
                 "status": "ONLINE",
                 "service": "RailGuard Camera Crack Detector",
                 "deviceId": DEVICE_ID,
+                "instance": instance_info(),
                 "buzzerPin": BUZZER_PIN,
                 "buzzerActive": IS_BUZZER_RINGING,
                 "patrolActive": ACTIVE_PATROL_STATUS.get("status") == "PATROL_ACTIVE",
@@ -2034,22 +2094,61 @@ class LocalWifiApiHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(404, {"error": "Endpoint not found"})
 
 
-def start_local_wifi_server(host: str = "0.0.0.0", port: int = 8080) -> Optional[http.server.HTTPServer]:
-    """Launches local Wi-Fi direct API server in a background thread."""
-    try:
-        load_pi_state()
-        ensure_sensor_acquisition_started()
-        class ReusableServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-            allow_reuse_address = True
+def start_local_wifi_server(host: str = "0.0.0.0", port: int = 8080,
+                            strict: bool = True) -> Optional[http.server.HTTPServer]:
+    """Launch the local Wi-Fi API server in a background thread.
 
+    CRITICAL: if the port is already taken, an OLD RailGuard process is still
+    serving the app. Continuing silently means the phone keeps receiving the old
+    (possibly frozen) telemetry while a freshly started process prints live
+    sensor values in the terminal — which is extremely confusing. We therefore
+    fail fast with exact remediation instructions.
+    """
+    global LOCAL_SERVER_BIND_ERROR, LOCAL_SERVER_PORT
+    load_pi_state()
+    ensure_sensor_acquisition_started()
+    class ReusableServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+        allow_reuse_address = True
+
+    try:
         server = ReusableServer((host, port), LocalWifiApiHandler)
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-        server_thread.start()
-        log.info("[✓] Direct Local Wi-Fi API server active on http://%s:%d (< 50ms latency)", host, port)
-        return server
-    except Exception as e:
-        log.warning("Could not start local Wi-Fi API server on port %d: %s", port, e)
+    except OSError as e:
+        LOCAL_SERVER_BIND_ERROR = str(e)
+        is_in_use = getattr(e, "errno", None) in (48, 98, 10048) or "in use" in str(e).lower()
+        if is_in_use:
+            log.critical("=" * 72)
+            log.critical("FATAL: port %d is ALREADY IN USE.", port)
+            log.critical("Another RailGuard process is still running and the phone")
+            log.critical("is talking to THAT process, not to this one. Its telemetry")
+            log.critical("may be old or frozen, so the app appears to show demo data.")
+            log.critical("")
+            log.critical("Fix it with:")
+            log.critical("    sudo systemctl stop railguard 2>/dev/null; sudo pkill -f camera_crack_detector.py")
+            log.critical("    # wait 2 seconds, then start the service again:")
+            log.critical("    sudo systemctl start railguard")
+            log.critical("")
+            log.critical("To see what the existing instance is serving:")
+            log.critical("    curl -s http://127.0.0.1:%d/api/health", port)
+            log.critical("=" * 72)
+            allow = os.getenv("RAILGUARD_ALLOW_PORT_CONFLICT", "0").strip().lower() in ("1", "true", "yes")
+            if strict and not allow:
+                raise SystemExit(2)
+        else:
+            log.error("Could not bind the Wi-Fi API on %s:%d: %s", host, port, e)
+            if strict:
+                raise SystemExit(2)
         return None
+    except Exception as e:
+        LOCAL_SERVER_BIND_ERROR = str(e)
+        log.error("Could not start local Wi-Fi API server on port %d: %s", port, e)
+        return None
+
+    LOCAL_SERVER_PORT = port
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    log.info("[✓] Direct Local Wi-Fi API server active on http://%s:%d (instance %s, v%s, pid %d)",
+             host, port, INSTANCE_ID, RAILGUARD_VERSION, PROCESS_PID)
+    return server
 
 
 def post_to_firebase(db_url: str, path: str, data: Dict[str, Any], id_token: Optional[str] = None) -> bool:
@@ -2478,8 +2577,26 @@ def run_continuous_camera_scan(
     log.info("Target Firebase: %s/railguard/users/%s", db_url, uid)
     log.info("Camera: %s | Vision: %s", "detected" if _camera_available() else "NOT DETECTED",
              "opencv" if (crack_vision and crack_vision.is_available()) else "UNAVAILABLE")
-
+    log.info("RailGuard version %s | instance %s | pid %d", RAILGUARD_VERSION, INSTANCE_ID, PROCESS_PID)
+    if not _camera_available():
+        log.warning("[!] NO CAMERA DETECTED — camera frames will be SIMULATED.")
     start_local_wifi_server(host=LOCAL_BIND_HOST, port=wifi_port)
+
+    # Wait for the sensor thread's first sample before deciding whether the
+    # ultrasonic sensor is real, so the warning is accurate.
+    time.sleep(1.2)
+    _ut = HARDWARE_ULTRASONIC_SENSOR
+    if not (_ut and _ut.is_hardware_present):
+        log.warning("=" * 72)
+        log.warning("[!] NO ULTRASONIC SENSOR RESPONDING — rail depth values are SIMULATED.")
+        log.warning("    Backend: %s", getattr(_ut, "backend", "not-initialised"))
+        log.warning("    Wiring: VCC 5V | TRIG BCM 23 (pin 16) | ECHO BCM 24 (pin 18)")
+        log.warning("    ECHO MUST go through a 1k/2k divider — 5V on a 3.3V pin damages the Pi.")
+        log.warning("    The app will show a SIMULATED badge until a real echo is measured.")
+        log.warning("=" * 72)
+    else:
+        log.info("[✓] Ultrasonic sensor LIVE via %s (TRIG BCM %d / ECHO BCM %d) — last %.1f mm",
+                 _ut.backend, _ut.trig_pin, _ut.echo_pin, _ut.last_valid_distance_mm or 0.0)
 
     stop_event = threading.Event()
     threading.Thread(target=heartbeat_worker, args=(db_url, uid, device_id, stop_event), daemon=True).start()
@@ -2494,8 +2611,10 @@ def run_continuous_camera_scan(
     try:
         while True:
             step += 1
-            km = 14.0 + (step * 0.02)
-            chainage = f"KM {int(km)}+{int((km % 1) * 1000):03d}"
+            # Chainage comes from the sensor worker (or serial GNSS/OPS). The old
+            # code invented a fake "14 km + 20 m per scan" position which made the
+            # app look like it was showing canned demo data.
+            chainage = str((LATEST_TELEMETRY or {}).get("chainage") or "Unknown")
 
             # 1. Real camera capture + real computer vision.
             frame = capture_real_camera_frame()
@@ -2541,7 +2660,6 @@ def run_continuous_camera_scan(
             crack_active = _crack_is_active()
             current.update({
                 "nodeId": device_id,
-                "chainage": chainage,
                 "hasCrack": crack_active,
                 "visionAvailable": bool(crack_vision and crack_vision.is_available()),
                 "visionMode": (vision or {}).get("mode", LATEST_VISION_RESULT.get("mode", "not-run")),
@@ -2558,14 +2676,17 @@ def run_continuous_camera_scan(
                     daemon=True,
                 ).start()
 
+            _sensor_mode = (current.get("sensorMode") or {}).get("ultrasonic", "simulated")
             log.info(
-                "[%d] Scan -> %s | depth %.1fmm | vision %s (%d%%) | crack %s",
+                "[%d] Scan -> %s | rail depth %.1fmm [%s] | vision %s (%d%%) | crack %s | data %s",
                 step,
-                chainage,
+                current.get("chainage", chainage),
                 float(current.get("ultrasonicDepthMm", 0.0) or 0.0),
+                "LIVE" if _sensor_mode == "hardware" else "SIMULATED",
                 "REAL" if frame else "NO-CAMERA",
                 int((vision or {}).get("confidencePercent", 0)),
                 "ACTIVE" if crack_active else "none",
+                current.get("dataMode", "?"),
             )
 
             if stop_event.wait(scan_interval):

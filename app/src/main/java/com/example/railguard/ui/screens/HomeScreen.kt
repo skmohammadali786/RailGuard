@@ -394,9 +394,13 @@ fun HomeScreen(
             val scope = rememberCoroutineScope()
             var tsrFeedback by remember { mutableStateOf<String?>(null) }
             var tsrFeedbackOk by remember { mutableStateOf(true) }
-            val isStale = effectiveTelemetry != null && effectiveTelemetry.timestamp > 0L && (System.currentTimeMillis() - effectiveTelemetry.timestamp > 30_000L)
-            val isAnySensorActive = fbService.isDirectWifiConnected || gatewayOnline || effectiveTelemetry != null ||
-                (fbService.hardwareHealth?.let { it.cameraOnline || it.ultrasonicOnline || it.vibrationOnline || it.temperatureOnline || it.gpsOnline } == true)
+            val ageSeconds = effectiveTelemetry?.timestamp?.takeIf { it > 0L }
+                ?.let { ((System.currentTimeMillis() - it) / 1000L).coerceAtLeast(0L) }
+            val isStale = effectiveTelemetry != null && (ageSeconds == null || ageSeconds > 30L)
+            val telemetryMode = effectiveTelemetry?.dataMode?.uppercase() ?: "NO_DATA"
+            val isSimulated = telemetryMode.contains("SIMUL") || effectiveTelemetry?.ultrasonicLive == false
+            val isLiveHardware = telemetryMode == "LIVE" && effectiveTelemetry?.ultrasonicLive != false && !isStale
+            val isAnySensorActive = effectiveTelemetry != null && !isStale
 
             RailCard(modifier = Modifier.padding(vertical = 4.dp)) {
                 Column(modifier = Modifier.padding(14.dp)) {
@@ -417,13 +421,98 @@ fun HomeScreen(
                             )
                         }
                         StatusPill(
-                            label = if (isAnySensorActive) {
-                                if (isStale) "STALE" else settings.translate("online")
-                            } else settings.translate("offline"),
-                            tone = if (isAnySensorActive) {
-                                if (isStale) Tone.WARNING else Tone.HEALTHY
-                            } else Tone.NEUTRAL
+                            label = when {
+                                effectiveTelemetry == null -> "NO DATA"
+                                isStale -> "STALE"
+                                isSimulated -> "SIMULATED"
+                                isLiveHardware -> "LIVE"
+                                else -> "UNVERIFIED"
+                            },
+                            tone = when {
+                                effectiveTelemetry == null -> Tone.NEUTRAL
+                                isStale || isSimulated -> Tone.WARNING
+                                isLiveHardware -> Tone.HEALTHY
+                                else -> Tone.NEUTRAL
+                            }
                         )
+                    }
+
+                    // ---------------------------------------------------------
+                    // Data provenance banner. This is the single most important
+                    // line on the screen: it tells the operator whether the
+                    // numbers below are measured, simulated, stale or absent.
+                    // ---------------------------------------------------------
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val provBg = when {
+                        effectiveTelemetry == null -> Color(0xFF64748B).copy(alpha = 0.12f)
+                        isStale -> Color(0xFFD97706).copy(alpha = 0.14f)
+                        isSimulated -> Color(0xFFD97706).copy(alpha = 0.14f)
+                        else -> Color(0xFF16A34A).copy(alpha = 0.12f)
+                    }
+                    val provFg = when {
+                        effectiveTelemetry == null -> Color(0xFF475569)
+                        isStale || isSimulated -> Color(0xFFB45309)
+                        else -> Color(0xFF15803D)
+                    }
+                    val provTitle = when {
+                        effectiveTelemetry == null -> "NO LIVE DATA — the app is not receiving telemetry"
+                        isStale -> "STALE DATA — last packet ${ageSeconds ?: "?"}s ago"
+                        isSimulated -> "SIMULATED — the Pi is NOT reading its sensors"
+                        isLiveHardware -> "LIVE HARDWARE DATA — measured on the Raspberry Pi"
+                        else -> "DATA RECEIVED — this Pi build does not report its provenance"
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = provBg,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, provFg.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
+                            Text(
+                                provTitle,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = provFg
+                            )
+                            val piInfo = buildString {
+                                val v = effectiveTelemetry?.piVersion?.takeIf { it.isNotBlank() }
+                                if (v != null) append("Pi v$v")
+                                val up = effectiveTelemetry?.piUptimeSeconds ?: 0L
+                                if (up > 0) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append("up ")
+                                    append(when {
+                                        up >= 86400 -> "${up / 86400}d ${(up % 86400) / 3600}h"
+                                        up >= 3600 -> "${up / 3600}h ${(up % 3600) / 60}m"
+                                        else -> "${up}s"
+                                    })
+                                }
+                                if (fbService.isDirectWifiConnected) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append("Wi-Fi ${fbService.directWifiLatencyMs} ms")
+                                }
+                            }
+                            val syncInfo = if (fbService.lastDirectSyncAt > 0L) {
+                                "${fbService.lastDirectSyncUrl} → HTTP ${fbService.lastDirectSyncHttp}" +
+                                    (if (fbService.lastDirectSyncError.isNotBlank()) " (${fbService.lastDirectSyncError})" else "")
+                            } else {
+                                "No request to ${fbService.localWifiIp}:8080 yet"
+                            }
+                            Text(
+                                listOf(piInfo, syncInfo).filter { it.isNotBlank() }.joinToString("\n"),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = provFg.copy(alpha = 0.85f)
+                            )
+                            if (isSimulated) {
+                                Text(
+                                    "The Pi reported ultrasonicLive=false. Check the HC-SR04 wiring (VCC 5V, TRIG BCM 23, ECHO BCM 24 via divider) and that no old RailGuard process is holding port 8080.",
+                                    fontSize = 9.sp,
+                                    color = provFg
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
